@@ -1,0 +1,28 @@
+{
+  "collectionName": "components_items_soc_items",
+  "info": {
+    "displayName": "SocItem",
+    "icon": "bulletList"
+  },
+  "options": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "link": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "type": {
+      "type": "enumeration",
+      "enum": [
+        "tiktok",
+        "instagram",
+        "facebook"
+      ]
+    }
+  }
+}

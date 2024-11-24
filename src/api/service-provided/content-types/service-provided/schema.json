@@ -1,0 +1,50 @@
+{
+  "kind": "collectionType",
+  "collectionName": "services_provided",
+  "info": {
+    "singularName": "service-provided",
+    "pluralName": "services-provided",
+    "displayName": "Оказанные услуги",
+    "description": ""
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true,
+      "unique": false
+    },
+    "staffSalaries": {
+      "type": "string",
+      "required": true
+    },
+    "clientName": {
+      "type": "string",
+      "required": true
+    },
+    "personal": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::personal.personal",
+      "inversedBy": "offersDone"
+    },
+    "offer": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::offer.offer",
+      "inversedBy": "offerRendered"
+    },
+    "time": {
+      "type": "string"
+    },
+    "salonSalaries": {
+      "type": "string"
+    },
+    "tip": {
+      "type": "string"
+    }
+  }
+}

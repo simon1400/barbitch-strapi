@@ -1,0 +1,19 @@
+{
+  "collectionName": "components_items_nav_items",
+  "info": {
+    "displayName": "NavItem",
+    "icon": "apps"
+  },
+  "options": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "link": {
+      "type": "string",
+      "required": true
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "kind": "collectionType",
+  "collectionName": "offerings",
+  "info": {
+    "singularName": "offer",
+    "pluralName": "offerings",
+    "displayName": "Услуги"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
+  "attributes": {
+    "personals": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::personal.personal",
+      "inversedBy": "offers"
+    },
+    "service": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::service.service",
+      "inversedBy": "offers"
+    },
+    "price": {
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "type": "float"
+    },
+    "title": {
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "offerRendered": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::service-provided.service-provided",
+      "mappedBy": "offer"
+    }
+  }
+}
