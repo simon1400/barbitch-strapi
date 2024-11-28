@@ -369,6 +369,43 @@ export interface AdminUser extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiAdditionalBookAdditionalBook
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'additional_books';
+  info: {
+    description: '';
+    displayName: '\u0414\u043E\u043F. \u0417\u0430\u043F\u0438\u0441\u0438';
+    pluralName: 'additional-books';
+    singularName: 'additional-book';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    calendarColor: Schema.Attribute.String &
+      Schema.Attribute.CustomField<'plugin::color-picker.color'>;
+    clientName: Schema.Attribute.String & Schema.Attribute.Required;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    from: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::additional-book.additional-book'
+    > &
+      Schema.Attribute.Private;
+    offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'>;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    publishedAt: Schema.Attribute.DateTime;
+    sumTime: Schema.Attribute.String;
+    to: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiContactContact extends Struct.SingleTypeSchema {
   collectionName: 'contacts';
   info: {
@@ -517,6 +554,55 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
   };
 }
 
+export interface ApiLoyaltyLoyalty extends Struct.CollectionTypeSchema {
+  collectionName: 'loyalties';
+  info: {
+    displayName: '\u0421\u043A\u0438\u0434\u043A\u0438';
+    pluralName: 'loyalties';
+    singularName: 'loyalty';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    comment: Schema.Attribute.RichText &
+      Schema.Attribute.CustomField<
+        'plugin::ckeditor5.CKEditor',
+        {
+          preset: 'default';
+        }
+      >;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    fix: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::loyalty.loyalty'
+    > &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String;
+    procent: Schema.Attribute.Enumeration<
+      [
+        'C\u043A\u0438\u0434\u043A\u0430: 5%',
+        'C\u043A\u0438\u0434\u043A\u0430: 10%',
+        'C\u043A\u0438\u0434\u043A\u0430: 15%',
+        'C\u043A\u0438\u0434\u043A\u0430: 20%',
+        'C\u043A\u0438\u0434\u043A\u0430: 25%',
+        'C\u043A\u0438\u0434\u043A\u0430: 30%',
+        'C\u043A\u0438\u0434\u043A\u0430: 40%',
+        'C\u043A\u0438\u0434\u043A\u0430: 50%',
+        'C\u043A\u0438\u0434\u043A\u0430: 100%',
+      ]
+    >;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiNavigationNavigation extends Struct.SingleTypeSchema {
   collectionName: 'navigations';
   info: {
@@ -561,6 +647,39 @@ export interface ApiNavigationNavigation extends Struct.SingleTypeSchema {
   };
 }
 
+export interface ApiNoteNote extends Struct.CollectionTypeSchema {
+  collectionName: 'notes';
+  info: {
+    displayName: '\u0417\u0430\u043C\u0435\u0442\u043A\u0438';
+    pluralName: 'notes';
+    singularName: 'note';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::note.note'> &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    text: Schema.Attribute.RichText &
+      Schema.Attribute.Required &
+      Schema.Attribute.CustomField<
+        'plugin::ckeditor5.CKEditor',
+        {
+          preset: 'default';
+        }
+      >;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
   collectionName: 'offerings';
   info: {
@@ -577,6 +696,10 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
     };
   };
   attributes: {
+    books: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::additional-book.additional-book'
+    >;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -629,6 +752,10 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
     };
   };
   attributes: {
+    books: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::additional-book.additional-book'
+    >;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1346,9 +1473,12 @@ declare module '@strapi/strapi' {
       'admin::transfer-token': AdminTransferToken;
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
+      'api::additional-book.additional-book': ApiAdditionalBookAdditionalBook;
       'api::contact.contact': ApiContactContact;
       'api::homepage.homepage': ApiHomepageHomepage;
+      'api::loyalty.loyalty': ApiLoyaltyLoyalty;
       'api::navigation.navigation': ApiNavigationNavigation;
+      'api::note.note': ApiNoteNote;
       'api::offer.offer': ApiOfferOffer;
       'api::personal.personal': ApiPersonalPersonal;
       'api::service-provided.service-provided': ApiServiceProvidedServiceProvided;

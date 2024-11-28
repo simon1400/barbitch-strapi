@@ -103,6 +103,12 @@
       "relation": "oneToMany",
       "target": "api::service-provided.service-provided",
       "mappedBy": "personal"
+    },
+    "books": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::additional-book.additional-book",
+      "mappedBy": "personal"
     }
   }
 }

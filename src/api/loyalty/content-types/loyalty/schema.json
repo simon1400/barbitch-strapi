@@ -1,0 +1,43 @@
+{
+  "kind": "collectionType",
+  "collectionName": "loyalties",
+  "info": {
+    "singularName": "loyalty",
+    "pluralName": "loyalties",
+    "displayName": "Скидки"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string"
+    },
+    "procent": {
+      "type": "enumeration",
+      "enum": [
+        "Cкидка: 5%",
+        "Cкидка: 10%",
+        "Cкидка: 15%",
+        "Cкидка: 20%",
+        "Cкидка: 25%",
+        "Cкидка: 30%",
+        "Cкидка: 40%",
+        "Cкидка: 50%",
+        "Cкидка: 100%"
+      ],
+      "required": false
+    },
+    "fix": {
+      "type": "string"
+    },
+    "comment": {
+      "type": "customField",
+      "options": {
+        "preset": "default"
+      },
+      "customField": "plugin::ckeditor5.CKEditor"
+    }
+  }
+}

@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@_sh/strapi-plugin-ckeditor": "^4.0.11",
+    "@offset-dev/strapi-calendar": "^1.0.0",
     "@strapi/plugin-cloud": "5.4.0",
+    "@strapi/plugin-color-picker": "^5.4.2",
     "@strapi/plugin-users-permissions": "5.4.0",
     "@strapi/strapi": "5.4.0",
     "better-sqlite3": "11.3.0",
