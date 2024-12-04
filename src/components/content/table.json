@@ -1,0 +1,23 @@
+{
+  "collectionName": "components_content_tables",
+  "info": {
+    "displayName": "table",
+    "icon": "bulletList",
+    "description": ""
+  },
+  "options": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "item": {
+      "displayName": "tableItem",
+      "type": "component",
+      "repeatable": true,
+      "component": "content.table-item",
+      "required": true
+    }
+  }
+}

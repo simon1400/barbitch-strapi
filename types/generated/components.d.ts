@@ -1,5 +1,47 @@
 import type { Schema, Struct } from '@strapi/strapi';
 
+export interface ContentLink extends Struct.ComponentSchema {
+  collectionName: 'components_content_links';
+  info: {
+    displayName: 'link';
+    icon: 'cursor';
+  };
+  attributes: {
+    link: Schema.Attribute.String & Schema.Attribute.Required;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
+export interface ContentTable extends Struct.ComponentSchema {
+  collectionName: 'components_content_tables';
+  info: {
+    description: '';
+    displayName: 'table';
+    icon: 'bulletList';
+  };
+  attributes: {
+    item: Schema.Attribute.Component<'content.table-item', true> &
+      Schema.Attribute.Required;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+  };
+}
+
+export interface ContentTableItem extends Struct.ComponentSchema {
+  collectionName: 'components_content_table_items';
+  info: {
+    displayName: 'tableItem';
+    icon: 'database';
+  };
+  attributes: {
+    juniorPrice: Schema.Attribute.String & Schema.Attribute.Required;
+    masterPrice: Schema.Attribute.String;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    topMasterPrice: Schema.Attribute.String;
+  };
+}
+
 export interface ItemsNavItem extends Struct.ComponentSchema {
   collectionName: 'components_items_nav_items';
   info: {
@@ -48,6 +90,9 @@ export interface SeoMeta extends Struct.ComponentSchema {
 declare module '@strapi/strapi' {
   export module Public {
     export interface ComponentSchemas {
+      'content.link': ContentLink;
+      'content.table': ContentTable;
+      'content.table-item': ContentTableItem;
       'items.nav-item': ItemsNavItem;
       'items.soc-item': ItemsSocItem;
       'seo.meta': SeoMeta;

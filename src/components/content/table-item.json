@@ -1,0 +1,24 @@
+{
+  "collectionName": "components_content_table_items",
+  "info": {
+    "displayName": "tableItem",
+    "icon": "database"
+  },
+  "options": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "juniorPrice": {
+      "type": "string",
+      "required": true
+    },
+    "masterPrice": {
+      "type": "string"
+    },
+    "topMasterPrice": {
+      "type": "string"
+    }
+  }
+}
