@@ -45,6 +45,9 @@
     },
     "tip": {
       "type": "string"
+    },
+    "date": {
+      "type": "date"
     }
   }
 }
