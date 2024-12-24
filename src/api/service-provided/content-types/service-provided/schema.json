@@ -12,11 +12,6 @@
   },
   "pluginOptions": {},
   "attributes": {
-    "name": {
-      "type": "string",
-      "required": true,
-      "unique": false
-    },
     "staffSalaries": {
       "type": "string",
       "required": true
@@ -47,7 +42,8 @@
       "type": "string"
     },
     "date": {
-      "type": "date"
+      "type": "date",
+      "required": true
     }
   }
 }
