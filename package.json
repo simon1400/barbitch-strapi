@@ -34,7 +34,7 @@
   },
   "engines": {
     "node": ">=20.17.0 <=22.x.x",
-    "npm": ">=9.0.0"
+    "npm": ">=9.x.x"
   },
   "strapi": {
     "uuid": "1ee57c5e-b2fb-4d9d-9f0a-3dd625795f54"
