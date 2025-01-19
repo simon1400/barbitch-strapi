@@ -522,6 +522,13 @@ export interface ApiContactContact extends Struct.SingleTypeSchema {
       'oneToMany',
       'api::contact.contact'
     >;
+    metaData: Schema.Attribute.Component<'seo.meta', false> &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     openHours: Schema.Attribute.RichText &
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
@@ -869,6 +876,64 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
     publishedAt: Schema.Attribute.DateTime;
     service: Schema.Attribute.Relation<'manyToOne', 'api::service.service'>;
     slug: Schema.Attribute.UID<'name'> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiPricelistPagePricelistPage extends Struct.SingleTypeSchema {
+  collectionName: 'pricelist_pages';
+  info: {
+    description: '';
+    displayName: '\u0426\u0435\u043D\u043D\u0438\u043A \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430';
+    pluralName: 'pricelist-pages';
+    singularName: 'pricelist-page';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  pluginOptions: {
+    i18n: {
+      localized: true;
+    };
+  };
+  attributes: {
+    contentText: Schema.Attribute.RichText &
+      Schema.Attribute.CustomField<
+        'plugin::ckeditor5.CKEditor',
+        {
+          preset: 'default';
+        }
+      > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::pricelist-page.pricelist-page'
+    >;
+    metaData: Schema.Attribute.Component<'seo.meta', false> &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    publishedAt: Schema.Attribute.DateTime;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
           localized: true;
@@ -1599,6 +1664,7 @@ declare module '@strapi/strapi' {
       'api::note.note': ApiNoteNote;
       'api::offer.offer': ApiOfferOffer;
       'api::personal.personal': ApiPersonalPersonal;
+      'api::pricelist-page.pricelist-page': ApiPricelistPagePricelistPage;
       'api::pricelist.pricelist': ApiPricelistPricelist;
       'api::service-provided.service-provided': ApiServiceProvidedServiceProvided;
       'api::service.service': ApiServiceService;
