@@ -36,7 +36,8 @@
       "type": "string"
     },
     "salonSalaries": {
-      "type": "string"
+      "type": "string",
+      "required": true
     },
     "tip": {
       "type": "string"
@@ -44,6 +45,20 @@
     "date": {
       "type": "date",
       "required": true
+    },
+    "cash": {
+      "type": "boolean",
+      "required": true
+    },
+    "sale": {
+      "type": "string"
+    },
+    "comment": {
+      "type": "customField",
+      "options": {
+        "preset": "default"
+      },
+      "customField": "plugin::ckeditor5.CKEditor"
     }
   }
 }

@@ -1005,7 +1005,15 @@ export interface ApiServiceProvidedServiceProvided
     draftAndPublish: true;
   };
   attributes: {
+    cash: Schema.Attribute.Boolean & Schema.Attribute.Required;
     clientName: Schema.Attribute.String & Schema.Attribute.Required;
+    comment: Schema.Attribute.RichText &
+      Schema.Attribute.CustomField<
+        'plugin::ckeditor5.CKEditor',
+        {
+          preset: 'default';
+        }
+      >;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1019,7 +1027,8 @@ export interface ApiServiceProvidedServiceProvided
     offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'>;
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
-    salonSalaries: Schema.Attribute.String;
+    sale: Schema.Attribute.String;
+    salonSalaries: Schema.Attribute.String & Schema.Attribute.Required;
     staffSalaries: Schema.Attribute.String & Schema.Attribute.Required;
     time: Schema.Attribute.String;
     tip: Schema.Attribute.String;
