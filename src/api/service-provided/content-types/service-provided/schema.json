@@ -48,7 +48,8 @@
     },
     "cash": {
       "type": "boolean",
-      "required": true
+      "required": true,
+      "default": true
     },
     "sale": {
       "type": "string"

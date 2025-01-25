@@ -1140,7 +1140,9 @@ export interface ApiServiceProvidedServiceProvided
     draftAndPublish: true;
   };
   attributes: {
-    cash: Schema.Attribute.Boolean & Schema.Attribute.Required;
+    cash: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
     clientName: Schema.Attribute.String & Schema.Attribute.Required;
     comment: Schema.Attribute.RichText &
       Schema.Attribute.CustomField<
