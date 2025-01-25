@@ -4,7 +4,8 @@
   "info": {
     "singularName": "note",
     "pluralName": "notes",
-    "displayName": "Заметки"
+    "displayName": "Заметки",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
@@ -22,6 +23,10 @@
       },
       "required": true,
       "customField": "plugin::ckeditor5.CKEditor"
+    },
+    "date": {
+      "type": "date",
+      "required": true
     }
   }
 }

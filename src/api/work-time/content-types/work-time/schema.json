@@ -4,7 +4,8 @@
   "info": {
     "singularName": "work-time",
     "pluralName": "work-times",
-    "displayName": "Рабочие часы"
+    "displayName": "Рабочие часы",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
@@ -26,6 +27,14 @@
     "sum": {
       "type": "decimal",
       "required": true
+    },
+    "comment": {
+      "type": "customField",
+      "options": {
+        "preset": "default"
+      },
+      "required": true,
+      "customField": "plugin::ckeditor5.CKEditor"
     }
   }
 }

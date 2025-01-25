@@ -1,0 +1,30 @@
+{
+  "kind": "collectionType",
+  "collectionName": "cashs",
+  "info": {
+    "singularName": "cash",
+    "pluralName": "cashs",
+    "displayName": "Деньги"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "date": {
+      "type": "date",
+      "required": true
+    },
+    "comment": {
+      "type": "text"
+    },
+    "sum": {
+      "type": "string",
+      "required": true
+    }
+  }
+}

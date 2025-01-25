@@ -525,6 +525,78 @@ export interface ApiBlogBlog extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiCashCash extends Struct.CollectionTypeSchema {
+  collectionName: 'cashs';
+  info: {
+    displayName: '\u0414\u0435\u043D\u044C\u0433\u0438';
+    pluralName: 'cashs';
+    singularName: 'cash';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::cash.cash'> &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    sum: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiClientClient extends Struct.CollectionTypeSchema {
+  collectionName: 'clients';
+  info: {
+    displayName: '\u041A\u043B\u0438\u0435\u043D\u0442\u044B';
+    pluralName: 'clients';
+    singularName: 'client';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    comment: Schema.Attribute.RichText &
+      Schema.Attribute.CustomField<
+        'plugin::ckeditor5.CKEditor',
+        {
+          preset: 'default';
+        }
+      >;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    email: Schema.Attribute.Email & Schema.Attribute.Required;
+    hasCard: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::client.client'
+    > &
+      Schema.Attribute.Private;
+    offersDone: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::service-provided.service-provided'
+    >;
+    phone: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiContactContact extends Struct.SingleTypeSchema {
   collectionName: 'contacts';
   info: {
@@ -776,6 +848,7 @@ export interface ApiNavigationNavigation extends Struct.SingleTypeSchema {
 export interface ApiNoteNote extends Struct.CollectionTypeSchema {
   collectionName: 'notes';
   info: {
+    description: '';
     displayName: '\u0417\u0430\u043C\u0435\u0442\u043A\u0438';
     pluralName: 'notes';
     singularName: 'note';
@@ -787,6 +860,7 @@ export interface ApiNoteNote extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::note.note'> &
       Schema.Attribute.Private;
@@ -1188,6 +1262,7 @@ export interface ApiServiceService extends Struct.CollectionTypeSchema {
 export interface ApiWorkTimeWorkTime extends Struct.CollectionTypeSchema {
   collectionName: 'work_times';
   info: {
+    description: '';
     displayName: '\u0420\u0430\u0431\u043E\u0447\u0438\u0435 \u0447\u0430\u0441\u044B';
     pluralName: 'work-times';
     singularName: 'work-time';
@@ -1196,6 +1271,14 @@ export interface ApiWorkTimeWorkTime extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    comment: Schema.Attribute.RichText &
+      Schema.Attribute.Required &
+      Schema.Attribute.CustomField<
+        'plugin::ckeditor5.CKEditor',
+        {
+          preset: 'default';
+        }
+      >;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1728,6 +1811,8 @@ declare module '@strapi/strapi' {
       'api::additional-book.additional-book': ApiAdditionalBookAdditionalBook;
       'api::banner.banner': ApiBannerBanner;
       'api::blog.blog': ApiBlogBlog;
+      'api::cash.cash': ApiCashCash;
+      'api::client.client': ApiClientClient;
       'api::contact.contact': ApiContactContact;
       'api::homepage.homepage': ApiHomepageHomepage;
       'api::loyalty.loyalty': ApiLoyaltyLoyalty;
