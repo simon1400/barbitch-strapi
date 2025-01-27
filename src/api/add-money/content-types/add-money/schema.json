@@ -1,0 +1,32 @@
+{
+  "kind": "collectionType",
+  "collectionName": "add_moneys",
+  "info": {
+    "singularName": "add-money",
+    "pluralName": "add-moneys",
+    "displayName": "Доп. заработок"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "personal": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::personal.personal"
+    },
+    "date": {
+      "type": "date",
+      "required": true
+    },
+    "sum": {
+      "type": "string",
+      "required": true
+    }
+  }
+}

@@ -369,6 +369,37 @@ export interface AdminUser extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiAddMoneyAddMoney extends Struct.CollectionTypeSchema {
+  collectionName: 'add_moneys';
+  info: {
+    displayName: '\u0414\u043E\u043F. \u0437\u0430\u0440\u0430\u0431\u043E\u0442\u043E\u043A';
+    pluralName: 'add-moneys';
+    singularName: 'add-money';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::add-money.add-money'
+    > &
+      Schema.Attribute.Private;
+    personal: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'>;
+    publishedAt: Schema.Attribute.DateTime;
+    sum: Schema.Attribute.String & Schema.Attribute.Required;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiAdditionalBookAdditionalBook
   extends Struct.CollectionTypeSchema {
   collectionName: 'additional_books';
@@ -1261,6 +1292,35 @@ export interface ApiServiceService extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiShiftShift extends Struct.CollectionTypeSchema {
+  collectionName: 'shifts';
+  info: {
+    displayName: '\u0420\u0430\u0431\u043E\u0447\u0438\u0435 \u0441\u043C\u0435\u043D\u044B';
+    pluralName: 'shifts';
+    singularName: 'shift';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    days: Schema.Attribute.Component<'content.week', false> &
+      Schema.Attribute.Required;
+    from: Schema.Attribute.Date & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::shift.shift'> &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    to: Schema.Attribute.Date & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    week: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
 export interface ApiWorkTimeWorkTime extends Struct.CollectionTypeSchema {
   collectionName: 'work_times';
   info: {
@@ -1810,6 +1870,7 @@ declare module '@strapi/strapi' {
       'admin::transfer-token': AdminTransferToken;
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
+      'api::add-money.add-money': ApiAddMoneyAddMoney;
       'api::additional-book.additional-book': ApiAdditionalBookAdditionalBook;
       'api::banner.banner': ApiBannerBanner;
       'api::blog.blog': ApiBlogBlog;
@@ -1826,6 +1887,7 @@ declare module '@strapi/strapi' {
       'api::pricelist.pricelist': ApiPricelistPricelist;
       'api::service-provided.service-provided': ApiServiceProvidedServiceProvided;
       'api::service.service': ApiServiceService;
+      'api::shift.shift': ApiShiftShift;
       'api::work-time.work-time': ApiWorkTimeWorkTime;
       'plugin::content-releases.release': PluginContentReleasesRelease;
       'plugin::content-releases.release-action': PluginContentReleasesReleaseAction;

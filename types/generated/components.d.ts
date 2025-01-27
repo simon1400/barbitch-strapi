@@ -40,6 +40,23 @@ export interface ContentTableItem extends Struct.ComponentSchema {
   };
 }
 
+export interface ContentWeek extends Struct.ComponentSchema {
+  collectionName: 'components_content_weeks';
+  info: {
+    displayName: 'week';
+    icon: 'database';
+  };
+  attributes: {
+    friday: Schema.Attribute.String & Schema.Attribute.Required;
+    monday: Schema.Attribute.String & Schema.Attribute.Required;
+    saturday: Schema.Attribute.String & Schema.Attribute.Required;
+    sunday: Schema.Attribute.String & Schema.Attribute.Required;
+    thursday: Schema.Attribute.String & Schema.Attribute.Required;
+    tuesday: Schema.Attribute.String & Schema.Attribute.Required;
+    wednesday: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
 export interface ItemsNavItem extends Struct.ComponentSchema {
   collectionName: 'components_items_nav_items';
   info: {
@@ -91,6 +108,7 @@ declare module '@strapi/strapi' {
       'content.link': ContentLink;
       'content.table': ContentTable;
       'content.table-item': ContentTableItem;
+      'content.week': ContentWeek;
       'items.nav-item': ItemsNavItem;
       'items.soc-item': ItemsSocItem;
       'seo.meta': SeoMeta;
