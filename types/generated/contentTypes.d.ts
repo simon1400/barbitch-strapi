@@ -1271,6 +1271,13 @@ export interface ApiServiceService extends Struct.CollectionTypeSchema {
     offers: Schema.Attribute.Relation<'oneToMany', 'api::offer.offer'>;
     personals: Schema.Attribute.Relation<'oneToMany', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
+    shortTitle: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     slug: Schema.Attribute.UID<'title'> &
       Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{

@@ -97,6 +97,15 @@
         "preset": "default"
       },
       "customField": "plugin::ckeditor5.CKEditor"
+    },
+    "shortTitle": {
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "type": "string",
+      "required": true
     }
   }
 }
