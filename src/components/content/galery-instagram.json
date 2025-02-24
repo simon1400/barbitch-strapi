@@ -1,0 +1,27 @@
+{
+  "collectionName": "components_content_galery_instagrams",
+  "info": {
+    "displayName": "galeryInstagram",
+    "icon": "chartCircle"
+  },
+  "options": {},
+  "attributes": {
+    "type": {
+      "type": "enumeration",
+      "enum": [
+        "video",
+        "image"
+      ],
+      "default": "image",
+      "required": true
+    },
+    "media": {
+      "allowedTypes": [
+        "images",
+        "videos"
+      ],
+      "type": "media",
+      "multiple": false
+    }
+  }
+}

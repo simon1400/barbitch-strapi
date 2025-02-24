@@ -1,5 +1,19 @@
 import type { Schema, Struct } from '@strapi/strapi';
 
+export interface ContentGaleryInstagram extends Struct.ComponentSchema {
+  collectionName: 'components_content_galery_instagrams';
+  info: {
+    displayName: 'galeryInstagram';
+    icon: 'chartCircle';
+  };
+  attributes: {
+    media: Schema.Attribute.Media<'images' | 'videos'>;
+    type: Schema.Attribute.Enumeration<['video', 'image']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'image'>;
+  };
+}
+
 export interface ContentLink extends Struct.ComponentSchema {
   collectionName: 'components_content_links';
   info: {
@@ -105,6 +119,7 @@ export interface SeoMeta extends Struct.ComponentSchema {
 declare module '@strapi/strapi' {
   export module Public {
     export interface ComponentSchemas {
+      'content.galery-instagram': ContentGaleryInstagram;
       'content.link': ContentLink;
       'content.table': ContentTable;
       'content.table-item': ContentTableItem;
