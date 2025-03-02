@@ -4,7 +4,8 @@
   "info": {
     "singularName": "cash",
     "pluralName": "cashs",
-    "displayName": "Деньги"
+    "displayName": "Деньги",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
@@ -23,6 +24,10 @@
       "type": "text"
     },
     "sum": {
+      "type": "string",
+      "required": true
+    },
+    "profit": {
       "type": "string",
       "required": true
     }
