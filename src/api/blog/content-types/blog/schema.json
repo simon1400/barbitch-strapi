@@ -4,7 +4,8 @@
   "info": {
     "singularName": "blog",
     "pluralName": "blogs",
-    "displayName": "Блог"
+    "displayName": "Блог",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
@@ -57,6 +58,18 @@
       },
       "component": "seo.meta",
       "required": false
+    },
+    "addText": {
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "type": "customField",
+      "options": {
+        "preset": "default"
+      },
+      "customField": "plugin::ckeditor5.CKEditor"
     }
   }
 }
