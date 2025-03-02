@@ -563,6 +563,7 @@ export interface ApiBannerBanner extends Struct.SingleTypeSchema {
 export interface ApiBlogPageBlogPage extends Struct.SingleTypeSchema {
   collectionName: 'blog_pages';
   info: {
+    description: '';
     displayName: '\u0411\u043B\u043E\u0433 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430';
     pluralName: 'blog-pages';
     singularName: 'blog-page';
@@ -584,7 +585,7 @@ export interface ApiBlogPageBlogPage extends Struct.SingleTypeSchema {
       'oneToMany',
       'api::blog-page.blog-page'
     >;
-    metaGata: Schema.Attribute.Component<'seo.meta', false> &
+    metaData: Schema.Attribute.Component<'seo.meta', false> &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
           localized: true;

@@ -4,7 +4,8 @@
   "info": {
     "singularName": "blog-page",
     "pluralName": "blog-pages",
-    "displayName": "Блог страница"
+    "displayName": "Блог страница",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
@@ -24,7 +25,7 @@
       "type": "string",
       "required": true
     },
-    "metaGata": {
+    "metaData": {
       "type": "component",
       "repeatable": false,
       "pluginOptions": {
