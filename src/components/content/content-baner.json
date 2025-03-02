@@ -1,0 +1,26 @@
+{
+  "collectionName": "components_content_content_baners",
+  "info": {
+    "displayName": "contentBaner",
+    "icon": "cloud"
+  },
+  "options": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": false
+    },
+    "cta": {
+      "type": "component",
+      "repeatable": false,
+      "component": "content.link"
+    },
+    "image": {
+      "allowedTypes": [
+        "images"
+      ],
+      "type": "media",
+      "multiple": false
+    }
+  }
+}

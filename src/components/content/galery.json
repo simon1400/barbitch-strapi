@@ -1,0 +1,18 @@
+{
+  "collectionName": "components_content_galeries",
+  "info": {
+    "displayName": "galery",
+    "icon": "chartBubble"
+  },
+  "options": {},
+  "attributes": {
+    "image": {
+      "allowedTypes": [
+        "images"
+      ],
+      "type": "media",
+      "multiple": true,
+      "required": true
+    }
+  }
+}

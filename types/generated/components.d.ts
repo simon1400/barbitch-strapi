@@ -1,5 +1,29 @@
 import type { Schema, Struct } from '@strapi/strapi';
 
+export interface ContentContentBaner extends Struct.ComponentSchema {
+  collectionName: 'components_content_content_baners';
+  info: {
+    displayName: 'contentBaner';
+    icon: 'cloud';
+  };
+  attributes: {
+    cta: Schema.Attribute.Component<'content.link', false>;
+    image: Schema.Attribute.Media<'images'>;
+    title: Schema.Attribute.String;
+  };
+}
+
+export interface ContentGalery extends Struct.ComponentSchema {
+  collectionName: 'components_content_galeries';
+  info: {
+    displayName: 'galery';
+    icon: 'chartBubble';
+  };
+  attributes: {
+    image: Schema.Attribute.Media<'images', true> & Schema.Attribute.Required;
+  };
+}
+
 export interface ContentGaleryInstagram extends Struct.ComponentSchema {
   collectionName: 'components_content_galery_instagrams';
   info: {
@@ -51,6 +75,25 @@ export interface ContentTableItem extends Struct.ComponentSchema {
     masterPrice: Schema.Attribute.String;
     title: Schema.Attribute.String & Schema.Attribute.Required;
     topMasterPrice: Schema.Attribute.String;
+  };
+}
+
+export interface ContentText extends Struct.ComponentSchema {
+  collectionName: 'components_content_texts';
+  info: {
+    displayName: 'text';
+    icon: 'apps';
+  };
+  attributes: {
+    contentText: Schema.Attribute.RichText &
+      Schema.Attribute.Required &
+      Schema.Attribute.CustomField<
+        'plugin::ckeditor5.CKEditor',
+        {
+          preset: 'default';
+        }
+      >;
+    title: Schema.Attribute.String;
   };
 }
 
@@ -119,10 +162,13 @@ export interface SeoMeta extends Struct.ComponentSchema {
 declare module '@strapi/strapi' {
   export module Public {
     export interface ComponentSchemas {
+      'content.content-baner': ContentContentBaner;
+      'content.galery': ContentGalery;
       'content.galery-instagram': ContentGaleryInstagram;
       'content.link': ContentLink;
       'content.table': ContentTable;
       'content.table-item': ContentTableItem;
+      'content.text': ContentText;
       'content.week': ContentWeek;
       'items.nav-item': ItemsNavItem;
       'items.soc-item': ItemsSocItem;
