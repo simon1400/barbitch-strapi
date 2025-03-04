@@ -67,11 +67,13 @@ export interface ContentTable extends Struct.ComponentSchema {
 export interface ContentTableItem extends Struct.ComponentSchema {
   collectionName: 'components_content_table_items';
   info: {
+    description: '';
     displayName: 'tableItem';
     icon: 'database';
   };
   attributes: {
     juniorPrice: Schema.Attribute.String & Schema.Attribute.Required;
+    linkRezervation: Schema.Attribute.String;
     masterPrice: Schema.Attribute.String;
     title: Schema.Attribute.String & Schema.Attribute.Required;
     topMasterPrice: Schema.Attribute.String;

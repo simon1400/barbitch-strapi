@@ -2,7 +2,8 @@
   "collectionName": "components_content_table_items",
   "info": {
     "displayName": "tableItem",
-    "icon": "database"
+    "icon": "database",
+    "description": ""
   },
   "options": {},
   "attributes": {
@@ -18,6 +19,9 @@
       "type": "string"
     },
     "topMasterPrice": {
+      "type": "string"
+    },
+    "linkRezervation": {
       "type": "string"
     }
   }
