@@ -81,6 +81,7 @@ export interface ContentTableItem extends Struct.ComponentSchema {
 export interface ContentText extends Struct.ComponentSchema {
   collectionName: 'components_content_texts';
   info: {
+    description: '';
     displayName: 'text';
     icon: 'apps';
   };
@@ -93,6 +94,7 @@ export interface ContentText extends Struct.ComponentSchema {
           preset: 'default';
         }
       >;
+    cta: Schema.Attribute.Component<'content.link', false>;
     title: Schema.Attribute.String;
   };
 }
