@@ -1,0 +1,29 @@
+{
+  "kind": "collectionType",
+  "collectionName": "costs",
+  "info": {
+    "singularName": "cost",
+    "pluralName": "costs",
+    "displayName": "Затраты"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "sum": {
+      "type": "biginteger",
+      "required": true
+    },
+    "date": {
+      "type": "date"
+    },
+    "comment": {
+      "type": "text"
+    }
+  }
+}

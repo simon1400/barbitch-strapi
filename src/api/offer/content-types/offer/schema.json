@@ -50,12 +50,6 @@
       "relation": "oneToMany",
       "target": "api::service-provided.service-provided",
       "mappedBy": "offer"
-    },
-    "books": {
-      "type": "relation",
-      "relation": "oneToMany",
-      "target": "api::additional-book.additional-book",
-      "mappedBy": "offer"
     }
   }
 }

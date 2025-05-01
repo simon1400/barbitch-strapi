@@ -400,43 +400,6 @@ export interface ApiAddMoneyAddMoney extends Struct.CollectionTypeSchema {
   };
 }
 
-export interface ApiAdditionalBookAdditionalBook
-  extends Struct.CollectionTypeSchema {
-  collectionName: 'additional_books';
-  info: {
-    description: '';
-    displayName: '\u0414\u043E\u043F. \u0417\u0430\u043F\u0438\u0441\u0438';
-    pluralName: 'additional-books';
-    singularName: 'additional-book';
-  };
-  options: {
-    draftAndPublish: true;
-  };
-  attributes: {
-    calendarColor: Schema.Attribute.String &
-      Schema.Attribute.CustomField<'plugin::color-picker.color'>;
-    clientName: Schema.Attribute.String & Schema.Attribute.Required;
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    from: Schema.Attribute.DateTime & Schema.Attribute.Required;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::additional-book.additional-book'
-    > &
-      Schema.Attribute.Private;
-    offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'>;
-    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
-    publishedAt: Schema.Attribute.DateTime;
-    sumTime: Schema.Attribute.String;
-    to: Schema.Attribute.DateTime & Schema.Attribute.Required;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-  };
-}
-
 export interface ApiArticleArticle extends Struct.CollectionTypeSchema {
   collectionName: 'articles';
   info: {
@@ -855,6 +818,64 @@ export interface ApiContactContact extends Struct.SingleTypeSchema {
   };
 }
 
+export interface ApiCostCost extends Struct.CollectionTypeSchema {
+  collectionName: 'costs';
+  info: {
+    displayName: '\u0417\u0430\u0442\u0440\u0430\u0442\u044B';
+    pluralName: 'costs';
+    singularName: 'cost';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::cost.cost'> &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiExtraProfitExtraProfit extends Struct.CollectionTypeSchema {
+  collectionName: 'extra_profits';
+  info: {
+    displayName: '\u0414\u043E\u043F. \u043F\u0440\u0438\u0431\u044B\u043B\u044C';
+    pluralName: 'extra-profits';
+    singularName: 'extra-profit';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    comment: Schema.Attribute.Text & Schema.Attribute.Required;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::extra-profit.extra-profit'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
   collectionName: 'homepages';
   info: {
@@ -1062,10 +1083,6 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
     };
   };
   attributes: {
-    books: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::additional-book.additional-book'
-    >;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1101,6 +1118,40 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiPenaltyPenalty extends Struct.CollectionTypeSchema {
+  collectionName: 'penalties';
+  info: {
+    displayName: '\u0428\u0442\u0440\u0430\u0444\u044B';
+    pluralName: 'penalties';
+    singularName: 'penalty';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::penalty.penalty'
+    > &
+      Schema.Attribute.Private;
+    personals: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::personal.personal'
+    >;
+    publishedAt: Schema.Attribute.DateTime;
+    sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
   collectionName: 'personals';
   info: {
@@ -1118,10 +1169,6 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
     };
   };
   attributes: {
-    books: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::additional-book.additional-book'
-    >;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1174,6 +1221,7 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       'oneToMany',
       'api::service-provided.service-provided'
     >;
+    penalties: Schema.Attribute.Relation<'manyToMany', 'api::penalty.penalty'>;
     publishedAt: Schema.Attribute.DateTime;
     service: Schema.Attribute.Relation<'manyToOne', 'api::service.service'>;
     slug: Schema.Attribute.UID<'name'> &
@@ -1185,6 +1233,10 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    work_time: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::work-time.work-time'
+    >;
   };
 }
 
@@ -1494,6 +1546,7 @@ export interface ApiWorkTimeWorkTime extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
     start: Schema.Attribute.DateTime & Schema.Attribute.Required;
     sum: Schema.Attribute.Decimal & Schema.Attribute.Required;
@@ -2013,7 +2066,6 @@ declare module '@strapi/strapi' {
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
       'api::add-money.add-money': ApiAddMoneyAddMoney;
-      'api::additional-book.additional-book': ApiAdditionalBookAdditionalBook;
       'api::article.article': ApiArticleArticle;
       'api::banner.banner': ApiBannerBanner;
       'api::blog-page.blog-page': ApiBlogPageBlogPage;
@@ -2021,11 +2073,14 @@ declare module '@strapi/strapi' {
       'api::cash.cash': ApiCashCash;
       'api::client.client': ApiClientClient;
       'api::contact.contact': ApiContactContact;
+      'api::cost.cost': ApiCostCost;
+      'api::extra-profit.extra-profit': ApiExtraProfitExtraProfit;
       'api::homepage.homepage': ApiHomepageHomepage;
       'api::loyalty.loyalty': ApiLoyaltyLoyalty;
       'api::navigation.navigation': ApiNavigationNavigation;
       'api::note.note': ApiNoteNote;
       'api::offer.offer': ApiOfferOffer;
+      'api::penalty.penalty': ApiPenaltyPenalty;
       'api::personal.personal': ApiPersonalPersonal;
       'api::pricelist-page.pricelist-page': ApiPricelistPagePricelistPage;
       'api::pricelist.pricelist': ApiPricelistPricelist;

@@ -104,10 +104,16 @@
       "target": "api::service-provided.service-provided",
       "mappedBy": "personal"
     },
-    "books": {
+    "penalties": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::penalty.penalty",
+      "mappedBy": "personals"
+    },
+    "work_time": {
       "type": "relation",
       "relation": "oneToMany",
-      "target": "api::additional-book.additional-book",
+      "target": "api::work-time.work-time",
       "mappedBy": "personal"
     }
   }

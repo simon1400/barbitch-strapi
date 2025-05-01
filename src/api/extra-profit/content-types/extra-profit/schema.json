@@ -1,0 +1,27 @@
+{
+  "kind": "collectionType",
+  "collectionName": "extra_profits",
+  "info": {
+    "singularName": "extra-profit",
+    "pluralName": "extra-profits",
+    "displayName": "Доп. прибыль"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "sum": {
+      "type": "biginteger",
+      "required": true
+    },
+    "date": {
+      "type": "date",
+      "required": true
+    },
+    "comment": {
+      "type": "text",
+      "required": true
+    }
+  }
+}

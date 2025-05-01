@@ -1,0 +1,31 @@
+{
+  "kind": "collectionType",
+  "collectionName": "penalties",
+  "info": {
+    "singularName": "penalty",
+    "pluralName": "penalties",
+    "displayName": "Штрафы"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "personals": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::personal.personal",
+      "inversedBy": "penalties"
+    },
+    "sum": {
+      "type": "biginteger",
+      "required": true
+    },
+    "date": {
+      "type": "date"
+    },
+    "comment": {
+      "type": "text"
+    }
+  }
+}
