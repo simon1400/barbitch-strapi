@@ -104,16 +104,16 @@
       "target": "api::service-provided.service-provided",
       "mappedBy": "personal"
     },
-    "penalties": {
-      "type": "relation",
-      "relation": "manyToMany",
-      "target": "api::penalty.penalty",
-      "mappedBy": "personals"
-    },
     "work_time": {
       "type": "relation",
       "relation": "oneToMany",
       "target": "api::work-time.work-time",
+      "mappedBy": "personal"
+    },
+    "penalties": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::penalty.penalty",
       "mappedBy": "personal"
     }
   }

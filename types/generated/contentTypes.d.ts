@@ -1121,6 +1121,7 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
 export interface ApiPenaltyPenalty extends Struct.CollectionTypeSchema {
   collectionName: 'penalties';
   info: {
+    description: '';
     displayName: '\u0428\u0442\u0440\u0430\u0444\u044B';
     pluralName: 'penalties';
     singularName: 'penalty';
@@ -1140,10 +1141,7 @@ export interface ApiPenaltyPenalty extends Struct.CollectionTypeSchema {
       'api::penalty.penalty'
     > &
       Schema.Attribute.Private;
-    personals: Schema.Attribute.Relation<
-      'manyToMany',
-      'api::personal.personal'
-    >;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
@@ -1221,7 +1219,7 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       'oneToMany',
       'api::service-provided.service-provided'
     >;
-    penalties: Schema.Attribute.Relation<'manyToMany', 'api::penalty.penalty'>;
+    penalties: Schema.Attribute.Relation<'oneToMany', 'api::penalty.penalty'>;
     publishedAt: Schema.Attribute.DateTime;
     service: Schema.Attribute.Relation<'manyToOne', 'api::service.service'>;
     slug: Schema.Attribute.UID<'name'> &

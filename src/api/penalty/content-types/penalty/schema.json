@@ -4,16 +4,17 @@
   "info": {
     "singularName": "penalty",
     "pluralName": "penalties",
-    "displayName": "Штрафы"
+    "displayName": "Штрафы",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
   },
   "pluginOptions": {},
   "attributes": {
-    "personals": {
+    "personal": {
       "type": "relation",
-      "relation": "manyToMany",
+      "relation": "manyToOne",
       "target": "api::personal.personal",
       "inversedBy": "penalties"
     },
