@@ -646,6 +646,35 @@ export interface ApiBlogBlog extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiCardProfitCardProfit extends Struct.CollectionTypeSchema {
+  collectionName: 'card_profits';
+  info: {
+    displayName: '\u0414\u043E\u0445\u043E\u0434\u044B \u043D\u0430 \u043A\u0430\u0440\u0442\u0443';
+    pluralName: 'card-profits';
+    singularName: 'card-profit';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::card-profit.card-profit'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiCashCash extends Struct.CollectionTypeSchema {
   collectionName: 'cashs';
   info: {
@@ -2068,6 +2097,7 @@ declare module '@strapi/strapi' {
       'api::banner.banner': ApiBannerBanner;
       'api::blog-page.blog-page': ApiBlogPageBlogPage;
       'api::blog.blog': ApiBlogBlog;
+      'api::card-profit.card-profit': ApiCardProfitCardProfit;
       'api::cash.cash': ApiCashCash;
       'api::client.client': ApiClientClient;
       'api::contact.contact': ApiContactContact;

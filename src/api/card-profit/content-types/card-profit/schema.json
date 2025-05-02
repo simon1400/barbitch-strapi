@@ -1,0 +1,23 @@
+{
+  "kind": "collectionType",
+  "collectionName": "card_profits",
+  "info": {
+    "singularName": "card-profit",
+    "pluralName": "card-profits",
+    "displayName": "Доходы на карту"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "date": {
+      "type": "date",
+      "required": true
+    },
+    "sum": {
+      "type": "biginteger",
+      "required": true
+    }
+  }
+}
