@@ -4,7 +4,8 @@
   "info": {
     "singularName": "payroll",
     "pluralName": "payrolls",
-    "displayName": "Списывание с зарплаты"
+    "displayName": "Списывание с зарплаты",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
@@ -23,6 +24,9 @@
       "relation": "manyToOne",
       "target": "api::personal.personal",
       "inversedBy": "payroll"
+    },
+    "sum": {
+      "type": "biginteger"
     }
   }
 }

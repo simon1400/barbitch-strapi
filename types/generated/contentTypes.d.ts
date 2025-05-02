@@ -1150,6 +1150,7 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
 export interface ApiPayrollPayroll extends Struct.CollectionTypeSchema {
   collectionName: 'payrolls';
   info: {
+    description: '';
     displayName: '\u0421\u043F\u0438\u0441\u044B\u0432\u0430\u043D\u0438\u0435 \u0441 \u0437\u0430\u0440\u043F\u043B\u0430\u0442\u044B';
     pluralName: 'payrolls';
     singularName: 'payroll';
@@ -1171,6 +1172,7 @@ export interface ApiPayrollPayroll extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
+    sum: Schema.Attribute.BigInteger;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
