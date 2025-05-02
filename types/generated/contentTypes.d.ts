@@ -1147,6 +1147,36 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiPayrollPayroll extends Struct.CollectionTypeSchema {
+  collectionName: 'payrolls';
+  info: {
+    displayName: '\u0421\u043F\u0438\u0441\u044B\u0432\u0430\u043D\u0438\u0435 \u0441 \u0437\u0430\u0440\u043F\u043B\u0430\u0442\u044B';
+    pluralName: 'payrolls';
+    singularName: 'payroll';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::payroll.payroll'
+    > &
+      Schema.Attribute.Private;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiPenaltyPenalty extends Struct.CollectionTypeSchema {
   collectionName: 'penalties';
   info: {
@@ -1248,6 +1278,7 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       'oneToMany',
       'api::service-provided.service-provided'
     >;
+    payroll: Schema.Attribute.Relation<'oneToMany', 'api::payroll.payroll'>;
     penalties: Schema.Attribute.Relation<'oneToMany', 'api::penalty.penalty'>;
     publishedAt: Schema.Attribute.DateTime;
     service: Schema.Attribute.Relation<'manyToOne', 'api::service.service'>;
@@ -2108,6 +2139,7 @@ declare module '@strapi/strapi' {
       'api::navigation.navigation': ApiNavigationNavigation;
       'api::note.note': ApiNoteNote;
       'api::offer.offer': ApiOfferOffer;
+      'api::payroll.payroll': ApiPayrollPayroll;
       'api::penalty.penalty': ApiPenaltyPenalty;
       'api::personal.personal': ApiPersonalPersonal;
       'api::pricelist-page.pricelist-page': ApiPricelistPagePricelistPage;
