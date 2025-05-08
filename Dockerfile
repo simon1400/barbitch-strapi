@@ -17,7 +17,7 @@ COPY . .
 RUN yarn build
 
 # Указываем порт
-EXPOSE 1337
+EXPOSE 1350
 
 # Запускаем Strapi
 CMD ["yarn", "start"]
