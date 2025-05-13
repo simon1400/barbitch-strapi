@@ -850,6 +850,7 @@ export interface ApiContactContact extends Struct.SingleTypeSchema {
 export interface ApiCostCost extends Struct.CollectionTypeSchema {
   collectionName: 'costs';
   info: {
+    description: '';
     displayName: '\u0417\u0430\u0442\u0440\u0430\u0442\u044B';
     pluralName: 'costs';
     singularName: 'cost';
@@ -867,6 +868,7 @@ export interface ApiCostCost extends Struct.CollectionTypeSchema {
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::cost.cost'> &
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
+    noDph: Schema.Attribute.Decimal;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
@@ -1605,7 +1607,7 @@ export interface ApiWorkTimeWorkTime extends Struct.CollectionTypeSchema {
       'api::work-time.work-time'
     > &
       Schema.Attribute.Private;
-    name: Schema.Attribute.String & Schema.Attribute.Required;
+    name: Schema.Attribute.String;
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
     start: Schema.Attribute.DateTime & Schema.Attribute.Required;

@@ -4,7 +4,8 @@
   "info": {
     "singularName": "cost",
     "pluralName": "costs",
-    "displayName": "Затраты"
+    "displayName": "Затраты",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
@@ -24,6 +25,9 @@
     },
     "comment": {
       "type": "text"
+    },
+    "noDph": {
+      "type": "decimal"
     }
   }
 }
