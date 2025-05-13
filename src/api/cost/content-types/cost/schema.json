@@ -27,7 +27,7 @@
       "type": "text"
     },
     "noDph": {
-      "type": "decimal"
+      "type": "biginteger"
     }
   }
 }
