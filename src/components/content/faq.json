@@ -1,0 +1,17 @@
+{
+  "collectionName": "components_content_faqs",
+  "info": {
+    "displayName": "faq",
+    "icon": "chartCircle"
+  },
+  "options": {},
+  "attributes": {
+    "item": {
+      "displayName": "faqItem",
+      "type": "component",
+      "repeatable": true,
+      "component": "content.faq-item",
+      "required": true
+    }
+  }
+}

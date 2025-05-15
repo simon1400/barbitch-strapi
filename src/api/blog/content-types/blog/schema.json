@@ -82,7 +82,8 @@
       "components": [
         "content.text",
         "content.galery",
-        "content.content-baner"
+        "content.content-baner",
+        "content.faq"
       ],
       "required": true
     }

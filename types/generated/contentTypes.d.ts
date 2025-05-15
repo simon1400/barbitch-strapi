@@ -601,7 +601,7 @@ export interface ApiBlogBlog extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     dynamicContent: Schema.Attribute.DynamicZone<
-      ['content.text', 'content.galery', 'content.content-baner']
+      ['content.text', 'content.galery', 'content.content-baner', 'content.faq']
     > &
       Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{

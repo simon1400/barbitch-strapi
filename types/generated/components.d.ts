@@ -13,6 +13,39 @@ export interface ContentContentBaner extends Struct.ComponentSchema {
   };
 }
 
+export interface ContentFaq extends Struct.ComponentSchema {
+  collectionName: 'components_content_faqs';
+  info: {
+    displayName: 'faq';
+    icon: 'chartCircle';
+  };
+  attributes: {
+    item: Schema.Attribute.Component<'content.faq-item', true> &
+      Schema.Attribute.Required;
+  };
+}
+
+export interface ContentFaqItem extends Struct.ComponentSchema {
+  collectionName: 'components_content_faq_items';
+  info: {
+    displayName: 'faqItem';
+    icon: 'apps';
+  };
+  attributes: {
+    content: Schema.Attribute.RichText &
+      Schema.Attribute.Required &
+      Schema.Attribute.CustomField<
+        'plugin::ckeditor5.CKEditor',
+        {
+          preset: 'default';
+        }
+      >;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+  };
+}
+
 export interface ContentGalery extends Struct.ComponentSchema {
   collectionName: 'components_content_galeries';
   info: {
@@ -167,6 +200,8 @@ declare module '@strapi/strapi' {
   export module Public {
     export interface ComponentSchemas {
       'content.content-baner': ContentContentBaner;
+      'content.faq': ContentFaq;
+      'content.faq-item': ContentFaqItem;
       'content.galery': ContentGalery;
       'content.galery-instagram': ContentGaleryInstagram;
       'content.link': ContentLink;
