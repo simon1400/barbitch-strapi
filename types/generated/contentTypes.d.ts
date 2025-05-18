@@ -1346,6 +1346,14 @@ export interface ApiPricelistPagePricelistPage extends Struct.SingleTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    dynamicContent: Schema.Attribute.DynamicZone<
+      ['content.galery', 'content.faq', 'content.content-baner', 'content.text']
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     locale: Schema.Attribute.String;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
