@@ -14,7 +14,7 @@
   "attributes": {
     "name": {
       "type": "string",
-      "required": true
+      "required": false
     },
     "date": {
       "type": "date",
@@ -30,6 +30,12 @@
     "profit": {
       "type": "string",
       "required": true
+    },
+    "personal": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::personal.personal",
+      "inversedBy": "money"
     }
   }
 }

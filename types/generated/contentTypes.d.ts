@@ -403,6 +403,7 @@ export interface ApiAddMoneyAddMoney extends Struct.CollectionTypeSchema {
 export interface ApiArticleArticle extends Struct.CollectionTypeSchema {
   collectionName: 'articles';
   info: {
+    description: '';
     displayName: '\u0422\u0435\u0445 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u044B';
     pluralName: 'articles';
     singularName: 'article';
@@ -432,6 +433,14 @@ export interface ApiArticleArticle extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    dynamicContent: Schema.Attribute.DynamicZone<
+      ['content.galery', 'content.faq', 'content.content-baner', 'content.text']
+    > &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     locale: Schema.Attribute.String;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -695,54 +704,11 @@ export interface ApiCashCash extends Struct.CollectionTypeSchema {
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::cash.cash'> &
       Schema.Attribute.Private;
-    name: Schema.Attribute.String & Schema.Attribute.Required;
+    name: Schema.Attribute.String;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     profit: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.String & Schema.Attribute.Required;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-  };
-}
-
-export interface ApiClientClient extends Struct.CollectionTypeSchema {
-  collectionName: 'clients';
-  info: {
-    displayName: '\u041A\u043B\u0438\u0435\u043D\u0442\u044B';
-    pluralName: 'clients';
-    singularName: 'client';
-  };
-  options: {
-    draftAndPublish: true;
-  };
-  attributes: {
-    comment: Schema.Attribute.RichText &
-      Schema.Attribute.CustomField<
-        'plugin::ckeditor5.CKEditor',
-        {
-          preset: 'default';
-        }
-      >;
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    email: Schema.Attribute.Email & Schema.Attribute.Required;
-    hasCard: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::client.client'
-    > &
-      Schema.Attribute.Private;
-    offersDone: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::service-provided.service-provided'
-    >;
-    phone: Schema.Attribute.String;
-    publishedAt: Schema.Attribute.DateTime;
-    title: Schema.Attribute.String &
-      Schema.Attribute.Required &
-      Schema.Attribute.Unique;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -892,6 +858,7 @@ export interface ApiCostCost extends Struct.CollectionTypeSchema {
 export interface ApiExtraProfitExtraProfit extends Struct.CollectionTypeSchema {
   collectionName: 'extra_profits';
   info: {
+    description: '';
     displayName: '\u0414\u043E\u043F. \u043F\u0440\u0438\u0431\u044B\u043B\u044C';
     pluralName: 'extra-profits';
     singularName: 'extra-profit';
@@ -912,6 +879,7 @@ export interface ApiExtraProfitExtraProfit extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
+    realized: Schema.Attribute.Date;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -976,55 +944,6 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
           localized: true;
         };
       }>;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-  };
-}
-
-export interface ApiLoyaltyLoyalty extends Struct.CollectionTypeSchema {
-  collectionName: 'loyalties';
-  info: {
-    displayName: '\u0421\u043A\u0438\u0434\u043A\u0438';
-    pluralName: 'loyalties';
-    singularName: 'loyalty';
-  };
-  options: {
-    draftAndPublish: true;
-  };
-  attributes: {
-    comment: Schema.Attribute.RichText &
-      Schema.Attribute.CustomField<
-        'plugin::ckeditor5.CKEditor',
-        {
-          preset: 'default';
-        }
-      >;
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    fix: Schema.Attribute.String;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::loyalty.loyalty'
-    > &
-      Schema.Attribute.Private;
-    name: Schema.Attribute.String;
-    procent: Schema.Attribute.Enumeration<
-      [
-        'C\u043A\u0438\u0434\u043A\u0430: 5%',
-        'C\u043A\u0438\u0434\u043A\u0430: 10%',
-        'C\u043A\u0438\u0434\u043A\u0430: 15%',
-        'C\u043A\u0438\u0434\u043A\u0430: 20%',
-        'C\u043A\u0438\u0434\u043A\u0430: 25%',
-        'C\u043A\u0438\u0434\u043A\u0430: 30%',
-        'C\u043A\u0438\u0434\u043A\u0430: 40%',
-        'C\u043A\u0438\u0434\u043A\u0430: 50%',
-        'C\u043A\u0438\u0434\u043A\u0430: 100%',
-      ]
-    >;
-    publishedAt: Schema.Attribute.DateTime;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1281,6 +1200,7 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
           localized: true;
         };
       }>;
+    money: Schema.Attribute.Relation<'oneToMany', 'api::cash.cash'>;
     name: Schema.Attribute.String &
       Schema.Attribute.Required &
       Schema.Attribute.Unique &
@@ -1620,17 +1540,15 @@ export interface ApiWorkTimeWorkTime extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    end: Schema.Attribute.DateTime & Schema.Attribute.Required;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
       'api::work-time.work-time'
     > &
       Schema.Attribute.Private;
-    name: Schema.Attribute.String;
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
-    start: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    start: Schema.Attribute.Date & Schema.Attribute.Required;
     sum: Schema.Attribute.Decimal & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -2154,12 +2072,10 @@ declare module '@strapi/strapi' {
       'api::blog.blog': ApiBlogBlog;
       'api::card-profit.card-profit': ApiCardProfitCardProfit;
       'api::cash.cash': ApiCashCash;
-      'api::client.client': ApiClientClient;
       'api::contact.contact': ApiContactContact;
       'api::cost.cost': ApiCostCost;
       'api::extra-profit.extra-profit': ApiExtraProfitExtraProfit;
       'api::homepage.homepage': ApiHomepageHomepage;
-      'api::loyalty.loyalty': ApiLoyaltyLoyalty;
       'api::navigation.navigation': ApiNavigationNavigation;
       'api::note.note': ApiNoteNote;
       'api::offer.offer': ApiOfferOffer;

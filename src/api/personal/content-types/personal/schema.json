@@ -121,6 +121,12 @@
       "relation": "oneToMany",
       "target": "api::payroll.payroll",
       "mappedBy": "personal"
+    },
+    "money": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::cash.cash",
+      "mappedBy": "personal"
     }
   }
 }

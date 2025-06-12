@@ -4,7 +4,8 @@
   "info": {
     "singularName": "extra-profit",
     "pluralName": "extra-profits",
-    "displayName": "Доп. прибыль"
+    "displayName": "Доп. прибыль",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
@@ -22,6 +23,9 @@
     "comment": {
       "type": "text",
       "required": true
+    },
+    "realized": {
+      "type": "date"
     }
   }
 }

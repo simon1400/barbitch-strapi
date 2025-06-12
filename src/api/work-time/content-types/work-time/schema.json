@@ -12,16 +12,8 @@
   },
   "pluginOptions": {},
   "attributes": {
-    "name": {
-      "type": "string",
-      "required": false
-    },
     "start": {
-      "type": "datetime",
-      "required": true
-    },
-    "end": {
-      "type": "datetime",
+      "type": "date",
       "required": true
     },
     "sum": {

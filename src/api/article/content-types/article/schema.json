@@ -4,7 +4,8 @@
   "info": {
     "singularName": "article",
     "pluralName": "articles",
-    "displayName": "Тех страницы"
+    "displayName": "Тех страницы",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
@@ -57,6 +58,20 @@
       "type": "uid",
       "targetField": "title",
       "required": true
+    },
+    "dynamicContent": {
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "type": "dynamiczone",
+      "components": [
+        "content.galery",
+        "content.faq",
+        "content.content-baner",
+        "content.text"
+      ]
     }
   }
 }
