@@ -879,7 +879,6 @@ export interface ApiExtraProfitExtraProfit extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
-    realized: Schema.Attribute.Date;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -1517,6 +1516,75 @@ export interface ApiShiftShift extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiVaucherPageVaucherPage extends Struct.SingleTypeSchema {
+  collectionName: 'vaucher_pages';
+  info: {
+    displayName: '\u0412\u0430\u0443\u0447\u0435\u0440\u044B \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430';
+    pluralName: 'vaucher-pages';
+    singularName: 'vaucher-page';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    dynamicContent: Schema.Attribute.DynamicZone<
+      ['content.text', 'content.galery', 'content.faq', 'content.content-baner']
+    >;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::vaucher-page.vaucher-page'
+    > &
+      Schema.Attribute.Private;
+    metaData: Schema.Attribute.Component<'seo.meta', false>;
+    publishedAt: Schema.Attribute.DateTime;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
+  collectionName: 'vouchers';
+  info: {
+    displayName: '\u0412\u0430\u0443\u0447\u0435\u0440\u044B';
+    pluralName: 'vouchers';
+    singularName: 'voucher';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    comentUser: Schema.Attribute.Text;
+    commentAdmin: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    dateOrder: Schema.Attribute.Date & Schema.Attribute.Required;
+    datePay: Schema.Attribute.Date;
+    dateRealized: Schema.Attribute.Date;
+    email: Schema.Attribute.Email;
+    for: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::voucher.voucher'
+    > &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    phone: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiWorkTimeWorkTime extends Struct.CollectionTypeSchema {
   collectionName: 'work_times';
   info: {
@@ -2087,6 +2155,8 @@ declare module '@strapi/strapi' {
       'api::service-provided.service-provided': ApiServiceProvidedServiceProvided;
       'api::service.service': ApiServiceService;
       'api::shift.shift': ApiShiftShift;
+      'api::vaucher-page.vaucher-page': ApiVaucherPageVaucherPage;
+      'api::voucher.voucher': ApiVoucherVoucher;
       'api::work-time.work-time': ApiWorkTimeWorkTime;
       'plugin::content-releases.release': PluginContentReleasesRelease;
       'plugin::content-releases.release-action': PluginContentReleasesReleaseAction;

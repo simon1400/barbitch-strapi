@@ -1,0 +1,48 @@
+{
+  "kind": "collectionType",
+  "collectionName": "vouchers",
+  "info": {
+    "singularName": "voucher",
+    "pluralName": "vouchers",
+    "displayName": "Ваучеры"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "for": {
+      "type": "string"
+    },
+    "sum": {
+      "type": "biginteger",
+      "required": true
+    },
+    "dateOrder": {
+      "type": "date",
+      "required": true
+    },
+    "datePay": {
+      "type": "date"
+    },
+    "dateRealized": {
+      "type": "date"
+    },
+    "commentAdmin": {
+      "type": "text"
+    },
+    "email": {
+      "type": "email"
+    },
+    "phone": {
+      "type": "string"
+    },
+    "comentUser": {
+      "type": "text"
+    }
+  }
+}

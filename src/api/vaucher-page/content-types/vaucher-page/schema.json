@@ -1,0 +1,33 @@
+{
+  "kind": "singleType",
+  "collectionName": "vaucher_pages",
+  "info": {
+    "singularName": "vaucher-page",
+    "pluralName": "vaucher-pages",
+    "displayName": "Ваучеры страница"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "dynamicContent": {
+      "type": "dynamiczone",
+      "components": [
+        "content.text",
+        "content.galery",
+        "content.faq",
+        "content.content-baner"
+      ]
+    },
+    "metaData": {
+      "type": "component",
+      "repeatable": false,
+      "component": "seo.meta"
+    }
+  }
+}
