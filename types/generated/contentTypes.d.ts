@@ -1551,6 +1551,7 @@ export interface ApiVaucherPageVaucherPage extends Struct.SingleTypeSchema {
 export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
   collectionName: 'vouchers';
   info: {
+    description: '';
     displayName: '\u0412\u0430\u0443\u0447\u0435\u0440\u044B';
     pluralName: 'vouchers';
     singularName: 'voucher';
@@ -1569,6 +1570,7 @@ export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
     dateRealized: Schema.Attribute.Date;
     email: Schema.Attribute.Email;
     for: Schema.Attribute.String;
+    idVoucher: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',

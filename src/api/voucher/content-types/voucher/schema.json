@@ -4,7 +4,8 @@
   "info": {
     "singularName": "voucher",
     "pluralName": "vouchers",
-    "displayName": "Ваучеры"
+    "displayName": "Ваучеры",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
@@ -43,6 +44,10 @@
     },
     "comentUser": {
       "type": "text"
+    },
+    "idVoucher": {
+      "type": "biginteger",
+      "required": true
     }
   }
 }
