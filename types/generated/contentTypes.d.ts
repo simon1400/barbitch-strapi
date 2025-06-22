@@ -1570,7 +1570,9 @@ export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
     dateRealized: Schema.Attribute.Date;
     email: Schema.Attribute.Email;
     for: Schema.Attribute.String;
-    idVoucher: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    idVoucher: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',

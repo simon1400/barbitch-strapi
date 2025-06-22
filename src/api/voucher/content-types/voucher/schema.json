@@ -46,8 +46,9 @@
       "type": "text"
     },
     "idVoucher": {
-      "type": "biginteger",
-      "required": true
+      "type": "string",
+      "required": true,
+      "unique": true
     }
   }
 }
