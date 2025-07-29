@@ -1,0 +1,32 @@
+{
+  "kind": "collectionType",
+  "collectionName": "avanses",
+  "info": {
+    "singularName": "avans",
+    "pluralName": "avanses",
+    "displayName": "Аванс"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "personal": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::personal.personal",
+      "inversedBy": "advance"
+    },
+    "sum": {
+      "type": "biginteger",
+      "required": true
+    },
+    "date": {
+      "type": "date",
+      "required": true
+    },
+    "comment": {
+      "type": "text"
+    }
+  }
+}

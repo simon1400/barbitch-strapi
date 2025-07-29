@@ -1,0 +1,23 @@
+{
+  "kind": "collectionType",
+  "collectionName": "qr_pays",
+  "info": {
+    "singularName": "qr-pay",
+    "pluralName": "qr-pays",
+    "displayName": "QR платежи"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "date": {
+      "type": "date",
+      "required": true
+    },
+    "sum": {
+      "type": "biginteger",
+      "required": true
+    }
+  }
+}

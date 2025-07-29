@@ -12,17 +12,17 @@
   },
   "dependencies": {
     "@_sh/strapi-plugin-ckeditor": "^4.0.11",
-    "@offset-dev/strapi-calendar": "^1.0.0",
-    "@strapi/plugin-cloud": "5.4.0",
+    "@strapi/plugin-cloud": "5.19.0",
     "@strapi/plugin-color-picker": "^5.4.2",
-    "@strapi/plugin-users-permissions": "5.4.0",
+    "@strapi/plugin-users-permissions": "5.19.0",
     "@strapi/provider-upload-cloudinary": "^5.8.0",
-    "@strapi/strapi": "5.4.0",
+    "@strapi/strapi": "5.19.0",
     "better-sqlite3": "11.3.0",
     "pg": "^8.13.1",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
     "react-router-dom": "^6.0.0",
+    "strapi-5-plugin-responsive-backend": "^0.0.4",
     "styled-components": "^6.0.0"
   },
   "devDependencies": {
@@ -37,5 +37,6 @@
   },
   "strapi": {
     "uuid": "1ee57c5e-b2fb-4d9d-9f0a-3dd625795f54"
-  }
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

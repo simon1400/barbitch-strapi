@@ -34,6 +34,10 @@ export interface AdminApiToken extends Struct.CollectionTypeSchema {
         minLength: 1;
       }> &
       Schema.Attribute.DefaultTo<''>;
+    encryptedKey: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        minLength: 1;
+      }>;
     expiresAt: Schema.Attribute.DateTime;
     lastUsedAt: Schema.Attribute.DateTime;
     lifespan: Schema.Attribute.BigInteger;
@@ -468,6 +472,34 @@ export interface ApiArticleArticle extends Struct.CollectionTypeSchema {
           localized: true;
         };
       }>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiAvansAvans extends Struct.CollectionTypeSchema {
+  collectionName: 'avanses';
+  info: {
+    displayName: '\u0410\u0432\u0430\u043D\u0441';
+    pluralName: 'avanses';
+    singularName: 'avans';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::avans.avans'> &
+      Schema.Attribute.Private;
+    personal: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'>;
+    publishedAt: Schema.Attribute.DateTime;
+    sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1160,6 +1192,7 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
     };
   };
   attributes: {
+    advance: Schema.Attribute.Relation<'oneToOne', 'api::avans.avans'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1346,6 +1379,35 @@ export interface ApiPricelistPricelist extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiQrPayQrPay extends Struct.CollectionTypeSchema {
+  collectionName: 'qr_pays';
+  info: {
+    displayName: 'QR \u043F\u043B\u0430\u0442\u0435\u0436\u0438';
+    pluralName: 'qr-pays';
+    singularName: 'qr-pay';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::qr-pay.qr-pay'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiServiceProvidedServiceProvided
   extends Struct.CollectionTypeSchema {
   collectionName: 'services_provided';
@@ -1481,6 +1543,38 @@ export interface ApiServiceService extends Struct.CollectionTypeSchema {
           localized: true;
         };
       }>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiShiftHandoverShiftHandover
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'shift_handovers';
+  info: {
+    displayName: '\u041F\u0435\u0440\u0435\u0434\u0430\u0447\u0430 \u0441\u043C\u0435\u043D\u044B';
+    pluralName: 'shift-handovers';
+    singularName: 'shift-handover';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    description: Schema.Attribute.RichText & Schema.Attribute.Required;
+    from: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::shift-handover.shift-handover'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    to: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -2139,6 +2233,7 @@ declare module '@strapi/strapi' {
       'admin::user': AdminUser;
       'api::add-money.add-money': ApiAddMoneyAddMoney;
       'api::article.article': ApiArticleArticle;
+      'api::avans.avans': ApiAvansAvans;
       'api::banner.banner': ApiBannerBanner;
       'api::blog-page.blog-page': ApiBlogPageBlogPage;
       'api::blog.blog': ApiBlogBlog;
@@ -2156,8 +2251,10 @@ declare module '@strapi/strapi' {
       'api::personal.personal': ApiPersonalPersonal;
       'api::pricelist-page.pricelist-page': ApiPricelistPagePricelistPage;
       'api::pricelist.pricelist': ApiPricelistPricelist;
+      'api::qr-pay.qr-pay': ApiQrPayQrPay;
       'api::service-provided.service-provided': ApiServiceProvidedServiceProvided;
       'api::service.service': ApiServiceService;
+      'api::shift-handover.shift-handover': ApiShiftHandoverShiftHandover;
       'api::shift.shift': ApiShiftShift;
       'api::vaucher-page.vaucher-page': ApiVaucherPageVaucherPage;
       'api::voucher.voucher': ApiVoucherVoucher;

@@ -17,64 +17,64 @@
   },
   "attributes": {
     "name": {
+      "type": "string",
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "type": "string",
       "required": true,
       "unique": true
     },
     "slug": {
+      "type": "uid",
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "type": "uid",
       "targetField": "name"
     },
     "image": {
       "type": "media",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
       "multiple": false,
       "required": true,
       "allowedTypes": [
         "images",
         "files"
-      ],
+      ]
+    },
+    "galery": {
+      "type": "media",
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
-      }
-    },
-    "galery": {
-      "type": "media",
+      },
       "multiple": true,
       "required": false,
       "allowedTypes": [
         "images",
         "files",
         "videos"
-      ],
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      }
+      ]
     },
     "description": {
+      "type": "customField",
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "type": "customField",
+      "customField": "plugin::ckeditor5.CKEditor",
       "options": {
         "preset": "default"
-      },
-      "customField": "plugin::ckeditor5.CKEditor"
+      }
     },
     "service": {
       "type": "relation",
@@ -84,13 +84,13 @@
     },
     "metaData": {
       "type": "component",
-      "repeatable": false,
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "component": "seo.meta"
+      "component": "seo.meta",
+      "repeatable": false
     },
     "offers": {
       "type": "relation",
@@ -126,6 +126,12 @@
       "type": "relation",
       "relation": "oneToMany",
       "target": "api::cash.cash",
+      "mappedBy": "personal"
+    },
+    "advance": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::avans.avans",
       "mappedBy": "personal"
     }
   }
