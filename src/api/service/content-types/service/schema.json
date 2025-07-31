@@ -17,51 +17,51 @@
   },
   "attributes": {
     "title": {
+      "type": "string",
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "type": "string",
       "required": true,
       "unique": true
     },
     "slug": {
+      "type": "uid",
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "type": "uid",
       "targetField": "title",
       "required": true
     },
     "galery": {
       "type": "media",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
       "multiple": true,
       "required": true,
       "allowedTypes": [
         "images",
         "files",
         "videos"
-      ],
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      }
+      ]
     },
     "description": {
+      "type": "customField",
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "type": "customField",
+      "customField": "plugin::ckeditor5.CKEditor",
       "options": {
-        "preset": "default"
-      },
-      "customField": "plugin::ckeditor5.CKEditor"
+        "preset": "defaultHtml"
+      }
     },
     "personals": {
       "type": "relation",
@@ -70,15 +70,14 @@
       "mappedBy": "service"
     },
     "metaData": {
-      "displayName": "meta",
       "type": "component",
-      "repeatable": false,
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "component": "seo.meta"
+      "component": "seo.meta",
+      "repeatable": false
     },
     "offers": {
       "type": "relation",
@@ -87,24 +86,24 @@
       "mappedBy": "service"
     },
     "additionalDescription": {
+      "type": "customField",
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "type": "customField",
+      "customField": "plugin::ckeditor5.CKEditor",
       "options": {
-        "preset": "default"
-      },
-      "customField": "plugin::ckeditor5.CKEditor"
+        "preset": "defaultHtml"
+      }
     },
     "shortTitle": {
+      "type": "string",
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "type": "string",
       "required": true
     }
   }

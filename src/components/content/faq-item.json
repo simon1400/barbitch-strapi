@@ -13,11 +13,11 @@
     },
     "content": {
       "type": "customField",
+      "customField": "plugin::ckeditor5.CKEditor",
       "options": {
-        "preset": "default"
+        "preset": "defaultHtml"
       },
-      "required": true,
-      "customField": "plugin::ckeditor5.CKEditor"
+      "required": true
     }
   }
 }

@@ -12,16 +12,16 @@
     },
     "contentText": {
       "type": "customField",
+      "customField": "plugin::ckeditor5.CKEditor",
       "options": {
-        "preset": "default"
+        "preset": "defaultHtml"
       },
-      "required": true,
-      "customField": "plugin::ckeditor5.CKEditor"
+      "required": true
     },
     "cta": {
       "type": "component",
-      "repeatable": false,
-      "component": "content.link"
+      "component": "content.link",
+      "repeatable": false
     }
   }
 }

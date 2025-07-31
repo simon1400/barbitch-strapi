@@ -426,7 +426,7 @@ export interface ApiArticleArticle extends Struct.CollectionTypeSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       > &
       Schema.Attribute.SetPluginOptions<{
@@ -630,7 +630,7 @@ export interface ApiBlogBlog extends Struct.CollectionTypeSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       > &
       Schema.Attribute.SetPluginOptions<{
@@ -768,7 +768,7 @@ export interface ApiContactContact extends Struct.SingleTypeSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       > &
       Schema.Attribute.SetPluginOptions<{
@@ -780,7 +780,7 @@ export interface ApiContactContact extends Struct.SingleTypeSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       > &
       Schema.Attribute.SetPluginOptions<{
@@ -828,7 +828,7 @@ export interface ApiContactContact extends Struct.SingleTypeSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       > &
       Schema.Attribute.SetPluginOptions<{
@@ -939,7 +939,7 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       > &
       Schema.Attribute.SetPluginOptions<{
@@ -1050,7 +1050,7 @@ export interface ApiNoteNote extends Struct.CollectionTypeSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       >;
     title: Schema.Attribute.String & Schema.Attribute.Required;
@@ -1200,7 +1200,7 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       > &
       Schema.Attribute.SetPluginOptions<{
@@ -1287,7 +1287,7 @@ export interface ApiPricelistPagePricelistPage extends Struct.SingleTypeSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       > &
       Schema.Attribute.SetPluginOptions<{
@@ -1429,7 +1429,7 @@ export interface ApiServiceProvidedServiceProvided
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       >;
     createdAt: Schema.Attribute.DateTime;
@@ -1477,7 +1477,7 @@ export interface ApiServiceService extends Struct.CollectionTypeSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       > &
       Schema.Attribute.SetPluginOptions<{
@@ -1492,7 +1492,7 @@ export interface ApiServiceService extends Struct.CollectionTypeSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       > &
       Schema.Attribute.SetPluginOptions<{
@@ -1700,7 +1700,7 @@ export interface ApiWorkTimeWorkTime extends Struct.CollectionTypeSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       >;
     createdAt: Schema.Attribute.DateTime;

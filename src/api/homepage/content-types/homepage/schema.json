@@ -17,48 +17,48 @@
   },
   "attributes": {
     "title": {
+      "type": "string",
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "type": "string",
       "required": true
     },
     "aboutUs": {
+      "type": "customField",
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "type": "customField",
+      "customField": "plugin::ckeditor5.CKEditor",
       "options": {
-        "preset": "default"
-      },
-      "customField": "plugin::ckeditor5.CKEditor"
+        "preset": "defaultHtml"
+      }
     },
     "metaData": {
       "type": "component",
-      "repeatable": false,
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
       },
-      "component": "seo.meta"
+      "component": "seo.meta",
+      "repeatable": false
     },
     "galery": {
-      "allowedTypes": [
-        "images",
-        "videos"
-      ],
       "type": "media",
-      "multiple": true,
       "pluginOptions": {
         "i18n": {
           "localized": true
         }
-      }
+      },
+      "multiple": true,
+      "allowedTypes": [
+        "images",
+        "videos"
+      ]
     }
   }
 }

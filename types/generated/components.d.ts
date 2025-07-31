@@ -37,7 +37,7 @@ export interface ContentFaqItem extends Struct.ComponentSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       >;
     title: Schema.Attribute.String &
@@ -126,7 +126,7 @@ export interface ContentText extends Struct.ComponentSchema {
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
         {
-          preset: 'default';
+          preset: 'defaultHtml';
         }
       >;
     cta: Schema.Attribute.Component<'content.link', false>;
