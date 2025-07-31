@@ -1,0 +1,31 @@
+{
+  "kind": "collectionType",
+  "collectionName": "salaries",
+  "info": {
+    "singularName": "salary",
+    "pluralName": "salaries",
+    "displayName": "Зарплаты"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "personal": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::personal.personal"
+    },
+    "date": {
+      "type": "date",
+      "required": true
+    },
+    "sum": {
+      "type": "biginteger",
+      "required": true
+    },
+    "comment": {
+      "type": "richtext"
+    }
+  }
+}

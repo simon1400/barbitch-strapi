@@ -1408,6 +1408,37 @@ export interface ApiQrPayQrPay extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiSalarySalary extends Struct.CollectionTypeSchema {
+  collectionName: 'salaries';
+  info: {
+    displayName: '\u0417\u0430\u0440\u043F\u043B\u0430\u0442\u044B';
+    pluralName: 'salaries';
+    singularName: 'salary';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    comment: Schema.Attribute.RichText;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::salary.salary'
+    > &
+      Schema.Attribute.Private;
+    personal: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'>;
+    publishedAt: Schema.Attribute.DateTime;
+    sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiServiceProvidedServiceProvided
   extends Struct.CollectionTypeSchema {
   collectionName: 'services_provided';
@@ -2252,6 +2283,7 @@ declare module '@strapi/strapi' {
       'api::pricelist-page.pricelist-page': ApiPricelistPagePricelistPage;
       'api::pricelist.pricelist': ApiPricelistPricelist;
       'api::qr-pay.qr-pay': ApiQrPayQrPay;
+      'api::salary.salary': ApiSalarySalary;
       'api::service-provided.service-provided': ApiServiceProvidedServiceProvided;
       'api::service.service': ApiServiceService;
       'api::shift-handover.shift-handover': ApiShiftHandoverShiftHandover;
