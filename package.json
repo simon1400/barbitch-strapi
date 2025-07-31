@@ -11,7 +11,7 @@
     "strapi": "strapi"
   },
   "dependencies": {
-    "@_sh/strapi-plugin-ckeditor": "^4.0.11",
+    "@_sh/strapi-plugin-ckeditor": "6.0.2",
     "@strapi/plugin-cloud": "5.19.0",
     "@strapi/plugin-color-picker": "^5.4.2",
     "@strapi/plugin-users-permissions": "5.19.0",
@@ -37,6 +37,5 @@
   },
   "strapi": {
     "uuid": "1ee57c5e-b2fb-4d9d-9f0a-3dd625795f54"
-  },
-  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
+  }
 }
