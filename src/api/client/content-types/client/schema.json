@@ -1,0 +1,42 @@
+{
+  "kind": "collectionType",
+  "collectionName": "clients",
+  "info": {
+    "singularName": "client",
+    "pluralName": "clients",
+    "displayName": "Client"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "email": {
+      "type": "email",
+      "unique": true
+    },
+    "phone": {
+      "type": "string",
+      "required": false,
+      "unique": true
+    },
+    "sum": {
+      "type": "biginteger",
+      "required": true,
+      "default": "0"
+    },
+    "offers": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::service-provided.service-provided",
+      "mappedBy": "client"
+    },
+    "comment": {
+      "type": "blocks"
+    }
+  }
+}

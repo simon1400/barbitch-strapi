@@ -60,6 +60,12 @@
       "options": {
         "preset": "defaultHtml"
       }
+    },
+    "client": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::client.client",
+      "inversedBy": "offers"
     }
   }
 }
