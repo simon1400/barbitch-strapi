@@ -750,7 +750,7 @@ export interface ApiCashCash extends Struct.CollectionTypeSchema {
 export interface ApiClientClient extends Struct.CollectionTypeSchema {
   collectionName: 'clients';
   info: {
-    displayName: 'Client';
+    displayName: '\u041A\u043B\u0438\u0435\u043D\u0442\u044B';
     pluralName: 'clients';
     singularName: 'client';
   };
