@@ -1,0 +1,31 @@
+{
+  "collectionName": "components_items_rates",
+  "info": {
+    "displayName": "rates",
+    "icon": "chartCircle"
+  },
+  "options": {},
+  "attributes": {
+    "typeWork": {
+      "type": "enumeration",
+      "required": true,
+      "default": "dpp",
+      "enum": [
+        "hpp",
+        "dpp"
+      ]
+    },
+    "rate": {
+      "type": "biginteger",
+      "required": true
+    },
+    "from": {
+      "type": "date",
+      "required": true
+    },
+    "to": {
+      "type": "date"
+    }
+  },
+  "config": {}
+}

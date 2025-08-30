@@ -165,6 +165,22 @@ export interface ItemsNavItem extends Struct.ComponentSchema {
   };
 }
 
+export interface ItemsRates extends Struct.ComponentSchema {
+  collectionName: 'components_items_rates';
+  info: {
+    displayName: 'rates';
+    icon: 'chartCircle';
+  };
+  attributes: {
+    from: Schema.Attribute.Date & Schema.Attribute.Required;
+    rate: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    to: Schema.Attribute.Date;
+    typeWork: Schema.Attribute.Enumeration<['hpp', 'dpp']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'dpp'>;
+  };
+}
+
 export interface ItemsSocItem extends Struct.ComponentSchema {
   collectionName: 'components_items_soc_items';
   info: {
@@ -210,6 +226,7 @@ declare module '@strapi/strapi' {
       'content.text': ContentText;
       'content.week': ContentWeek;
       'items.nav-item': ItemsNavItem;
+      'items.rates': ItemsRates;
       'items.soc-item': ItemsSocItem;
       'seo.meta': SeoMeta;
     }

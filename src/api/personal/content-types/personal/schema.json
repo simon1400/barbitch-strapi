@@ -43,7 +43,7 @@
         }
       },
       "multiple": false,
-      "required": true,
+      "required": false,
       "allowedTypes": [
         "images",
         "files"
@@ -133,6 +133,30 @@
       "relation": "oneToOne",
       "target": "api::avans.avans",
       "mappedBy": "personal"
+    },
+    "position": {
+      "type": "enumeration",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "required": true,
+      "default": "master",
+      "enum": [
+        "administrator",
+        "master"
+      ]
+    },
+    "rates": {
+      "type": "component",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "component": "items.rates",
+      "repeatable": true
     }
   }
 }

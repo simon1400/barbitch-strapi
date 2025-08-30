@@ -1253,7 +1253,6 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
         };
       }>;
     image: Schema.Attribute.Media<'images' | 'files'> &
-      Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
           localized: true;
@@ -1286,7 +1285,21 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
     >;
     payroll: Schema.Attribute.Relation<'oneToMany', 'api::payroll.payroll'>;
     penalties: Schema.Attribute.Relation<'oneToMany', 'api::penalty.penalty'>;
+    position: Schema.Attribute.Enumeration<['administrator', 'master']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<'master'>;
     publishedAt: Schema.Attribute.DateTime;
+    rates: Schema.Attribute.Component<'items.rates', true> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     service: Schema.Attribute.Relation<'manyToOne', 'api::service.service'>;
     slug: Schema.Attribute.UID<'name'> &
       Schema.Attribute.SetPluginOptions<{
