@@ -13,9 +13,9 @@
   "attributes": {
     "personal": {
       "type": "relation",
-      "relation": "oneToOne",
+      "relation": "manyToOne",
       "target": "api::personal.personal",
-      "inversedBy": "advance"
+      "inversedBy": "advances"
     },
     "sum": {
       "type": "biginteger",

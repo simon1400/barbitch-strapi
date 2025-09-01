@@ -128,9 +128,9 @@
       "target": "api::cash.cash",
       "mappedBy": "personal"
     },
-    "advance": {
+    "advances": {
       "type": "relation",
-      "relation": "oneToOne",
+      "relation": "oneToMany",
       "target": "api::avans.avans",
       "mappedBy": "personal"
     },

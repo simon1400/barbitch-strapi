@@ -1,0 +1,18 @@
+{
+  "collectionName": "components_items_money_flows",
+  "info": {
+    "displayName": "moneyFlow",
+    "icon": "bulletList"
+  },
+  "options": {},
+  "attributes": {
+    "sum": {
+      "type": "biginteger",
+      "required": true
+    },
+    "coment": {
+      "type": "text"
+    }
+  },
+  "config": {}
+}

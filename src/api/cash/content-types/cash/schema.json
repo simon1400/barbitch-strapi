@@ -36,6 +36,11 @@
       "relation": "manyToOne",
       "target": "api::personal.personal",
       "inversedBy": "money"
+    },
+    "flow": {
+      "type": "component",
+      "component": "items.money-flow",
+      "repeatable": true
     }
   }
 }

@@ -151,6 +151,18 @@ export interface ContentWeek extends Struct.ComponentSchema {
   };
 }
 
+export interface ItemsMoneyFlow extends Struct.ComponentSchema {
+  collectionName: 'components_items_money_flows';
+  info: {
+    displayName: 'moneyFlow';
+    icon: 'bulletList';
+  };
+  attributes: {
+    coment: Schema.Attribute.Text;
+    sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+  };
+}
+
 export interface ItemsNavItem extends Struct.ComponentSchema {
   collectionName: 'components_items_nav_items';
   info: {
@@ -225,6 +237,7 @@ declare module '@strapi/strapi' {
       'content.table-item': ContentTableItem;
       'content.text': ContentText;
       'content.week': ContentWeek;
+      'items.money-flow': ItemsMoneyFlow;
       'items.nav-item': ItemsNavItem;
       'items.rates': ItemsRates;
       'items.soc-item': ItemsSocItem;
