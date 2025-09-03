@@ -40,7 +40,8 @@
     "flow": {
       "type": "component",
       "component": "items.money-flow",
-      "repeatable": true
+      "repeatable": true,
+      "required": true
     }
   }
 }

@@ -733,7 +733,8 @@ export interface ApiCashCash extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     date: Schema.Attribute.Date & Schema.Attribute.Required;
-    flow: Schema.Attribute.Component<'items.money-flow', true>;
+    flow: Schema.Attribute.Component<'items.money-flow', true> &
+      Schema.Attribute.Required;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::cash.cash'> &
       Schema.Attribute.Private;
