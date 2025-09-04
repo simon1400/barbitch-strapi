@@ -1,7 +1,5 @@
 const UID = 'api::cash.cash';
-const RELATION = 'flow';
 const FLOW_UID = 'items.money-flow';
-const SKIP_PROFIT = '__skipProfitRecalc';
 
 import { errors } from '@strapi/utils';
 const { ValidationError } = errors;
@@ -15,46 +13,7 @@ function isPreviousMonth(date1: string | Date, date2: string | Date) {
   return d2.getMonth() === pm && d2.getFullYear() === py;
 }
 
-async function recalcProfit(event: any) {
-  const id = event.result?.documentId;
-  if (!id) return;
-
-  const currentDoc = await strapi.documents(UID).findOne({
-    documentId: id,
-    populate: { [RELATION]: { fields: ['sum'] } },
-    fields: ['date','profit'],
-  });
-
-  const lastDoc = await strapi.documents(UID).findFirst({
-    sort: { date: 'desc' },
-    fields: ['date','sum','profit'],
-    filters: { documentId: { $ne: id }, date: { $lt: event.params.data.date } },
-  });
-
-  const lastProfit = lastDoc && !isPreviousMonth(currentDoc.date, lastDoc.date)
-    ? Number(lastDoc.profit ?? 0)
-    : 0;
-
-    console.log(lastProfit)
-
-  const totalCurrent = (currentDoc?.[RELATION] ?? [])
-    .filter((o: any) => Number(o?.sum) >= 0)
-    .reduce((acc: number, o: any) => acc + Number(o.sum), 0);
-
-  const totalUpdatedCurrent = lastProfit + totalCurrent;
-
-  const ctx = strapi.requestContext.get?.();
-  if (ctx) ctx.state[SKIP_PROFIT] = true;
-
-  await strapi.documents(UID).update({
-    documentId: id,
-    data: { profit: `${totalUpdatedCurrent}` },
-  });
-
-  if (ctx) delete ctx.state[SKIP_PROFIT];
-}
-
-async function getFlowItemsSum(data: any) {
+async function getFlowItemsSum(data: any, validateSum: boolean = false) {
   const ids = data.flow?.map((x: any) => x.id).filter(Boolean) ?? [];
   if (!ids.length) return 0;
 
@@ -63,13 +22,36 @@ async function getFlowItemsSum(data: any) {
     select: ['sum'],
   });
 
-  return (rows ?? []).reduce((acc: number, o: any) => acc + Number(o?.sum ?? 0), 0);
+  if(validateSum) {
+    return (rows ?? []).reduce((acc: number, o: any) => acc + Number(o?.sum ?? 0), 0);
+  }
+
+  return (rows ?? []).filter((o: any) => Number(o?.sum) >= 0).reduce((acc: number, o: any) => acc + Number(o?.sum ?? 0), 0);
+  
+}
+
+async function computeProfit(data: any) {
+
+  const lastDoc = await strapi.documents(UID).findFirst({
+    sort: { date: 'desc' },
+    fields: ['date', 'sum', 'profit'],
+    filters: { documentId: { $ne: data.documentId ?? null }, date: { $lt: data.date } },
+  });
+
+  const lastProfit =
+    lastDoc && !isPreviousMonth(data.date, lastDoc.date)
+      ? Number(lastDoc.profit ?? 0)
+      : 0;
+
+  const totalCurrent = await getFlowItemsSum(data)
+
+  return lastProfit + totalCurrent;
 }
 
 async function validateSum(event: any) {
   const issues: { path: string[]; message: string }[] = [];
 
-  const flowMoneySum = await getFlowItemsSum(event.params.data);
+  const flowMoneySum = await getFlowItemsSum(event.params.data, true);
   const currentId = event.params.data.documentId ?? null;
 
   const lastDoc = await strapi.documents(UID).findFirst({
@@ -92,20 +74,10 @@ async function validateSum(event: any) {
 export default {
   async beforeCreate(event: any) {
     await validateSum(event);
+    event.params.data.profit = String(await computeProfit(event.params.data));
   },
   async beforeUpdate(event: any) {
-    const ctx = strapi.requestContext.get?.();
-    if (ctx?.state?.[SKIP_PROFIT]) return;
     await validateSum(event);
-  },
-  async afterCreate(event: any) {
-    const ctx = strapi.requestContext.get?.();
-    if (ctx?.state?.[SKIP_PROFIT]) return;
-    await recalcProfit(event);
-  },
-  async afterUpdate(event: any) {
-    const ctx = strapi.requestContext.get?.();
-    if (ctx?.state?.[SKIP_PROFIT]) return;
-    await recalcProfit(event);
+    event.params.data.profit = String(await computeProfit(event.params.data));
   },
 };
