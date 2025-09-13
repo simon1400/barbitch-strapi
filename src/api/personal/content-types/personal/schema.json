@@ -157,6 +157,14 @@
       },
       "component": "items.rates",
       "repeatable": true
+    },
+    "ratePercent": {
+      "type": "integer",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     }
   }
 }

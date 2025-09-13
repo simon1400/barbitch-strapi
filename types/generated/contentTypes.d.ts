@@ -394,7 +394,8 @@ export interface ApiAddMoneyAddMoney extends Struct.CollectionTypeSchema {
       'api::add-money.add-money'
     > &
       Schema.Attribute.Private;
-    personal: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'>;
+    personal: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'> &
+      Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.String & Schema.Attribute.Required;
     title: Schema.Attribute.String & Schema.Attribute.Required;
@@ -1296,6 +1297,12 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       }> &
       Schema.Attribute.DefaultTo<'master'>;
     publishedAt: Schema.Attribute.DateTime;
+    ratePercent: Schema.Attribute.Integer &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     rates: Schema.Attribute.Component<'items.rates', true> &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
@@ -1483,7 +1490,8 @@ export interface ApiSalarySalary extends Struct.CollectionTypeSchema {
       'api::salary.salary'
     > &
       Schema.Attribute.Private;
-    personal: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'>;
+    personal: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'> &
+      Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
@@ -1527,8 +1535,10 @@ export interface ApiServiceProvidedServiceProvided
       'api::service-provided.service-provided'
     > &
       Schema.Attribute.Private;
-    offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'>;
-    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'> &
+      Schema.Attribute.Required;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'> &
+      Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     sale: Schema.Attribute.String;
     salonSalaries: Schema.Attribute.String & Schema.Attribute.Required;
@@ -1538,6 +1548,7 @@ export interface ApiServiceProvidedServiceProvided
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    verify: Schema.Attribute.String;
   };
 }
 
@@ -1651,7 +1662,8 @@ export interface ApiShiftHandoverShiftHandover
       Schema.Attribute.Private;
     date: Schema.Attribute.Date & Schema.Attribute.Required;
     description: Schema.Attribute.RichText & Schema.Attribute.Required;
-    from: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'>;
+    from: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'> &
+      Schema.Attribute.Required;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1659,7 +1671,8 @@ export interface ApiShiftHandoverShiftHandover
     > &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
-    to: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'>;
+    to: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'> &
+      Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
