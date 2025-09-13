@@ -14,16 +14,15 @@ async function validateOfferMoney(event: any) {
         populate: {
           personal: { fields: ['ratePercent'] },
           offer: { fields: ['price'] },
-        },
-        fields: ['staffSalaries','salonSalaries', 'sale']
+        }
       })
     : null;
 
     const offer = dataCurrent?.offer?.connect.length ? dataCurrent?.offer?.connect : current.offer
     const personal = dataCurrent?.personal?.connect.length ? dataCurrent?.personal?.connect : current.personal
 
-    const staffSalaries = Number(dataCurrent.staffSalaries ?? current.staffSalaries)
-    const salonSalaries = Number(dataCurrent.salonSalaries ?? current.salonSalaries)
+    const staffSalaries = Number(dataCurrent.staffSalaries)
+    const salonSalaries = Number(dataCurrent.salonSalaries)
 
     const mustStaffSallary = offer.price * (personal.ratePercent / 100)
     const mustSalonSallary = offer.price * ((100 - personal.ratePercent) / 100)
