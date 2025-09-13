@@ -18,8 +18,8 @@ async function validateOfferMoney(event: any) {
       })
     : null;
 
-    const offer = dataCurrent?.offer?.connect.length ? dataCurrent?.offer?.connect : current.offer
-    const personal = dataCurrent?.personal?.connect.length ? dataCurrent?.personal?.connect : current.personal
+    const offer = dataCurrent?.offer?.connect?.length ? dataCurrent?.offer?.connect : current.offer
+    const personal = dataCurrent?.personal?.connect?.length ? dataCurrent?.personal?.connect : current.personal
 
     const staffSalaries = Number(dataCurrent.staffSalaries)
     const salonSalaries = Number(dataCurrent.salonSalaries)
