@@ -1,6 +1,8 @@
 const UID = 'api::service-provided.service-provided';
+const OfferUID = 'api::offer.offer';
+const PersonalUID = 'api::personal.personal';
 
-const red = '🟥', green = '🟩', yellow = '🟨';
+const red = '🟥', blue = '🟦', green = '🟩', yellow = '🟨';
 
 async function validateOfferMoney(event: any) {
 
@@ -18,8 +20,15 @@ async function validateOfferMoney(event: any) {
       })
     : null;
 
-    const offer = dataCurrent?.offer?.connect?.length ? dataCurrent?.offer?.connect : current.offer
-    const personal = dataCurrent?.personal?.connect?.length ? dataCurrent?.personal?.connect : current.personal
+    const offer = dataCurrent?.offer?.connect?.length ? await (strapi.db as any).query(OfferUID).findOne({
+      where: { id: { $in: dataCurrent.offer.connect[0].id } },
+      select: ['price'],
+    }) : current.offer
+    const personal = dataCurrent?.personal?.connect?.length ? await (strapi.db as any).query(PersonalUID).findOne({
+      where: { id: { $in: dataCurrent.personal.connect[0].id } },
+      select: ['ratePercent'],
+    }) : current.personal
+
 
     const staffSalaries = Number(dataCurrent.staffSalaries)
     const salonSalaries = Number(dataCurrent.salonSalaries)
@@ -34,8 +43,12 @@ async function validateOfferMoney(event: any) {
     
     let result = green
 
-    if(salonSalleryLess && dataCurrent.sale || notEqualStaffSallery || salonSalleryGreater){
+    if(notEqualStaffSallery || salonSalleryGreater){
       result = yellow
+    }
+
+    if(salonSalleryLess && dataCurrent.sale){
+      result = blue
     }
 
     if(salonSalleryLess && !dataCurrent.sale){
