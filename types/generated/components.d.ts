@@ -83,6 +83,24 @@ export interface ContentLink extends Struct.ComponentSchema {
   };
 }
 
+export interface ContentOficialData extends Struct.ComponentSchema {
+  collectionName: 'components_content_oficial_data';
+  info: {
+    displayName: 'oficialData';
+    icon: 'alien';
+  };
+  attributes: {
+    addressInCz: Schema.Attribute.String & Schema.Attribute.Required;
+    addressInHome: Schema.Attribute.String & Schema.Attribute.Required;
+    dateBirth: Schema.Attribute.String & Schema.Attribute.Required;
+    documentNumber: Schema.Attribute.String & Schema.Attribute.Required;
+    documents: Schema.Attribute.Media<'images' | 'files', true>;
+    email: Schema.Attribute.String & Schema.Attribute.Required;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    phone: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
 export interface ContentTable extends Struct.ComponentSchema {
   collectionName: 'components_content_tables';
   info: {
@@ -233,6 +251,7 @@ declare module '@strapi/strapi' {
       'content.galery': ContentGalery;
       'content.galery-instagram': ContentGaleryInstagram;
       'content.link': ContentLink;
+      'content.oficial-data': ContentOficialData;
       'content.table': ContentTable;
       'content.table-item': ContentTableItem;
       'content.text': ContentText;

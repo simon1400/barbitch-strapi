@@ -105,6 +105,12 @@
         }
       },
       "required": true
+    },
+    "stocks": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::stock.stock",
+      "mappedBy": "service"
     }
   }
 }

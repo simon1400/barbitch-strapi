@@ -24,8 +24,7 @@
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::personal.personal",
-      "inversedBy": "offersDone",
-      "required": true
+      "inversedBy": "offersDone"
     },
     "offer": {
       "type": "relation",

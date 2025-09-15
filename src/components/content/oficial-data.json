@@ -1,0 +1,48 @@
+{
+  "collectionName": "components_content_oficial_data",
+  "info": {
+    "displayName": "oficialData",
+    "icon": "alien"
+  },
+  "options": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "dateBirth": {
+      "type": "string",
+      "required": true
+    },
+    "addressInCz": {
+      "type": "string",
+      "required": true
+    },
+    "addressInHome": {
+      "type": "string",
+      "required": true
+    },
+    "documentNumber": {
+      "type": "string",
+      "required": true
+    },
+    "phone": {
+      "type": "string",
+      "required": true
+    },
+    "email": {
+      "type": "string",
+      "required": true
+    },
+    "documents": {
+      "type": "media",
+      "multiple": true,
+      "required": false,
+      "allowedTypes": [
+        "images",
+        "files"
+      ]
+    }
+  },
+  "config": {}
+}

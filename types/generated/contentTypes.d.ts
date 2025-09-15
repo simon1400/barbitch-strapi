@@ -1286,6 +1286,13 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       'oneToMany',
       'api::service-provided.service-provided'
     >;
+    oficial: Schema.Attribute.Component<'content.oficial-data', false> &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     payroll: Schema.Attribute.Relation<'oneToMany', 'api::payroll.payroll'>;
     penalties: Schema.Attribute.Relation<'oneToMany', 'api::penalty.penalty'>;
     position: Schema.Attribute.Enumeration<['administrator', 'master']> &
@@ -1537,8 +1544,7 @@ export interface ApiServiceProvidedServiceProvided
       Schema.Attribute.Private;
     offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'> &
       Schema.Attribute.Required;
-    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'> &
-      Schema.Attribute.Required;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
     sale: Schema.Attribute.String;
     salonSalaries: Schema.Attribute.String & Schema.Attribute.Required;
@@ -1631,6 +1637,7 @@ export interface ApiServiceService extends Struct.CollectionTypeSchema {
           localized: true;
         };
       }>;
+    stocks: Schema.Attribute.Relation<'oneToMany', 'api::stock.stock'>;
     title: Schema.Attribute.String &
       Schema.Attribute.Required &
       Schema.Attribute.Unique &
@@ -1705,6 +1712,39 @@ export interface ApiShiftShift extends Struct.CollectionTypeSchema {
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     week: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
+export interface ApiStockStock extends Struct.CollectionTypeSchema {
+  collectionName: 'stocks';
+  info: {
+    displayName: '\u0421\u043A\u043B\u0430\u0434';
+    pluralName: 'stocks';
+    singularName: 'stock';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    amount: Schema.Attribute.String & Schema.Attribute.Required;
+    brand: Schema.Attribute.String;
+    color: Schema.Attribute.String;
+    count: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::stock.stock'> &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    personal: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'>;
+    productId: Schema.Attribute.String & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    service: Schema.Attribute.Relation<'manyToOne', 'api::service.service'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
   };
 }
 
@@ -2356,6 +2396,7 @@ declare module '@strapi/strapi' {
       'api::service.service': ApiServiceService;
       'api::shift-handover.shift-handover': ApiShiftHandoverShiftHandover;
       'api::shift.shift': ApiShiftShift;
+      'api::stock.stock': ApiStockStock;
       'api::vaucher-page.vaucher-page': ApiVaucherPageVaucherPage;
       'api::voucher.voucher': ApiVoucherVoucher;
       'api::work-time.work-time': ApiWorkTimeWorkTime;

@@ -165,6 +165,17 @@
           "localized": true
         }
       }
+    },
+    "oficial": {
+      "type": "component",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "component": "content.oficial-data",
+      "repeatable": false,
+      "required": true
     }
   }
 }
