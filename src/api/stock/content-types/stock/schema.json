@@ -40,12 +40,28 @@
       "type": "string"
     },
     "date": {
-      "type": "date"
+      "type": "date",
+      "required": true
     },
     "personal": {
       "type": "relation",
       "relation": "oneToOne",
       "target": "api::personal.personal"
+    },
+    "stockStatus": {
+      "type": "enumeration",
+      "required": true,
+      "default": "🟩Достаточно",
+      "enum": [
+        "🟩Достаточно",
+        "🟨Заканчивается",
+        "🟥Закончилось",
+        "🟦Закончилось - не надо"
+      ]
+    },
+    "dateInvertization": {
+      "type": "date",
+      "required": true
     }
   }
 }

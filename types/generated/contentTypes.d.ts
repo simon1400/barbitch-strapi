@@ -1733,7 +1733,8 @@ export interface ApiStockStock extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    date: Schema.Attribute.Date;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    dateInvertization: Schema.Attribute.Date & Schema.Attribute.Required;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::stock.stock'> &
       Schema.Attribute.Private;
@@ -1742,6 +1743,16 @@ export interface ApiStockStock extends Struct.CollectionTypeSchema {
     productId: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     service: Schema.Attribute.Relation<'manyToOne', 'api::service.service'>;
+    stockStatus: Schema.Attribute.Enumeration<
+      [
+        '\uD83D\uDFE9\u0414\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E',
+        '\uD83D\uDFE8\u0417\u0430\u043A\u0430\u043D\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044F',
+        '\uD83D\uDFE5\u0417\u0430\u043A\u043E\u043D\u0447\u0438\u043B\u043E\u0441\u044C',
+        '\uD83D\uDFE6\u0417\u0430\u043A\u043E\u043D\u0447\u0438\u043B\u043E\u0441\u044C - \u043D\u0435 \u043D\u0430\u0434\u043E',
+      ]
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'\uD83D\uDFE9\u0414\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
