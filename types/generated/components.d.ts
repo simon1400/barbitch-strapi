@@ -1,5 +1,19 @@
 import type { Schema, Struct } from '@strapi/strapi';
 
+export interface ContentAskAnswer extends Struct.ComponentSchema {
+  collectionName: 'components_content_ask_answers';
+  info: {
+    displayName: 'askAnswer';
+    icon: 'bulletList';
+  };
+  attributes: {
+    content: Schema.Attribute.Text;
+    who: Schema.Attribute.Enumeration<['gpt', 'user']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'gpt'>;
+  };
+}
+
 export interface ContentContentBaner extends Struct.ComponentSchema {
   collectionName: 'components_content_content_baners';
   info: {
@@ -245,6 +259,7 @@ export interface SeoMeta extends Struct.ComponentSchema {
 declare module '@strapi/strapi' {
   export module Public {
     export interface ComponentSchemas {
+      'content.ask-answer': ContentAskAnswer;
       'content.content-baner': ContentContentBaner;
       'content.faq': ContentFaq;
       'content.faq-item': ContentFaqItem;

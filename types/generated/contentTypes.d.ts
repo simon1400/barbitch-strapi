@@ -959,6 +959,37 @@ export interface ApiExtraProfitExtraProfit extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiGptMessageGptMessage extends Struct.CollectionTypeSchema {
+  collectionName: 'gpt_messages';
+  info: {
+    displayName: 'gpt-message';
+    pluralName: 'gpt-messages';
+    singularName: 'gpt-message';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    askAnswer: Schema.Attribute.Component<'content.ask-answer', true>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    dateTime: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::gpt-message.gpt-message'
+    > &
+      Schema.Attribute.Private;
+    model: Schema.Attribute.String;
+    personalName: Schema.Attribute.String & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
   collectionName: 'homepages';
   info: {
@@ -2392,6 +2423,7 @@ declare module '@strapi/strapi' {
       'api::contact.contact': ApiContactContact;
       'api::cost.cost': ApiCostCost;
       'api::extra-profit.extra-profit': ApiExtraProfitExtraProfit;
+      'api::gpt-message.gpt-message': ApiGptMessageGptMessage;
       'api::homepage.homepage': ApiHomepageHomepage;
       'api::navigation.navigation': ApiNavigationNavigation;
       'api::note.note': ApiNoteNote;

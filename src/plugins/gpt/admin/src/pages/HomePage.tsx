@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Button, Textarea, Typography, SingleSelect, SingleSelectOption } from "@strapi/design-system";
+import { useAuth } from "@strapi/strapi/admin";
 
 type Message = {
   role: "user" | "assistant";
@@ -10,38 +11,52 @@ const HomePage = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-
+  const [chatId, setChatId] = useState<string | null>(null); // 👈 ID чата из Strapi
   const [model, setModel] = useState("gpt-5-mini");
+  const { user } = useAuth('gpt-plugin', (v) => v);
 
   const sendMessage = async () => {
-  if (!input.trim()) return;
+    if (!input.trim()) return;
 
-  const newMessages: Message[] = [...messages, { role: "user", content: input }];
-  setMessages(newMessages);
-  setInput("");
-  setLoading(true);
+    const newMessages: Message[] = [
+      ...messages,
+      { role: "user", content: input },
+    ];
+    setMessages(newMessages);
+    setInput("");
+    setLoading(true);
 
-  try {
-    const res = await fetch("/api/gpt/ask", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: newMessages, model }),
-    });
-    const data = await res.json();
+    try {
+      const res = await fetch("/api/gpt/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: input,
+          model,
+          chatId,
+          personalName: `${user?.firstname} ${user?.lastname}`
+        }),
+      });
 
-    setMessages([
-      ...newMessages,
-      { role: "assistant", content: data.reply || "Нет ответа" },
-    ]);
-  } catch (err) {
-    setMessages([
-      ...newMessages,
-      { role: "assistant", content: "Ошибка при запросе" },
-    ]);
-  } finally {
-    setLoading(false);
-  }
-};
+      const data = await res.json();
+
+      if (!chatId && data.chatId) {
+        setChatId(data.chatId);
+      }
+
+      setMessages([
+        ...newMessages,
+        { role: "assistant", content: data.reply || "Нет ответа" },
+      ]);
+    } catch (err) {
+      setMessages([
+        ...newMessages,
+        { role: "assistant", content: "Ошибка при запросе" },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div style={{ padding: 32, maxWidth: 960 }}>

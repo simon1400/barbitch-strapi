@@ -1,0 +1,31 @@
+{
+  "kind": "collectionType",
+  "collectionName": "gpt_messages",
+  "info": {
+    "singularName": "gpt-message",
+    "pluralName": "gpt-messages",
+    "displayName": "gpt-message"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "model": {
+      "type": "string"
+    },
+    "dateTime": {
+      "type": "datetime",
+      "required": true
+    },
+    "askAnswer": {
+      "type": "component",
+      "component": "content.ask-answer",
+      "repeatable": true
+    },
+    "personalName": {
+      "type": "string",
+      "required": true
+    }
+  }
+}
