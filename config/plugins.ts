@@ -13,4 +13,8 @@ export default ({env}) => ({
       },
     },
   },
+  "gpt": {
+    enabled: true,
+    resolve: "./src/plugins/gpt",
+  },
 });
