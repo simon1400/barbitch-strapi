@@ -1,0 +1,23 @@
+{
+  "collectionName": "components_content_ask_answers",
+  "info": {
+    "displayName": "askAnswer",
+    "icon": "bulletList"
+  },
+  "options": {},
+  "attributes": {
+    "who": {
+      "type": "enumeration",
+      "required": true,
+      "default": "gpt",
+      "enum": [
+        "gpt",
+        "user"
+      ]
+    },
+    "content": {
+      "type": "text"
+    }
+  },
+  "config": {}
+}
