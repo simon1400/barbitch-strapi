@@ -62,6 +62,15 @@
     "dateInvertization": {
       "type": "date",
       "required": true
+    },
+    "for": {
+      "type": "enumeration",
+      "required": true,
+      "enum": [
+        "Manikúra",
+        "Řasy",
+        "Globální"
+      ]
     }
   }
 }

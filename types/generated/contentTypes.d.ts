@@ -1735,6 +1735,10 @@ export interface ApiStockStock extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     date: Schema.Attribute.Date & Schema.Attribute.Required;
     dateInvertization: Schema.Attribute.Date & Schema.Attribute.Required;
+    for: Schema.Attribute.Enumeration<
+      ['Manik\u00FAra', '\u0158asy', 'Glob\u00E1ln\u00ED']
+    > &
+      Schema.Attribute.Required;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::stock.stock'> &
       Schema.Attribute.Private;
