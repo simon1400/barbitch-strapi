@@ -1,6 +1,6 @@
 {
   "name": "barbitch-strapi",
-  "version": "0.1.0",
+  "version": "3.0.0",
   "private": true,
   "description": "A Strapi application",
   "scripts": {
@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@_sh/strapi-plugin-ckeditor": "6.0.2",
-    "@simon1400/strapi-gpt-5": "^0.1.2",
+    "@simon1400/strapi-gpt-5": "0.2.0",
     "@strapi/plugin-cloud": "5.23.6",
     "@strapi/plugin-color-picker": "^5.23.6",
     "@strapi/plugin-users-permissions": "5.23.6",

@@ -984,6 +984,7 @@ export interface ApiGptMessageGptMessage extends Struct.CollectionTypeSchema {
     model: Schema.Attribute.String;
     personalName: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
+    summary: Schema.Attribute.Text;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
