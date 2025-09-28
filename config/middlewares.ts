@@ -1,6 +1,12 @@
 export default [
   'strapi::logger',
   'strapi::errors',
+  async (ctx, next) => {
+    if (ctx.path.startsWith('/admin')) {
+      console.log('proto=', ctx.headers['x-forwarded-proto'], 'secure=', ctx.secure);
+    }
+    await next();
+  },
   {
     name: 'strapi::security',
     config: {
