@@ -26,6 +26,9 @@
     "personalName": {
       "type": "string",
       "required": true
+    },
+    "summary": {
+      "type": "text"
     }
   }
 }
