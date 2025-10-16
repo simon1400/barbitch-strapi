@@ -16,5 +16,11 @@ export default {
    * This gives you an opportunity to set up your data model,
    * run jobs, or perform some special logic.
    */
-  bootstrap(/* { strapi }: { strapi: Core.Strapi } */) {},
+  bootstrap({ strapi }) {
+    // Force Koa to trust proxy headers (for HTTPS behind Nginx)
+    if (process.env.NODE_ENV === 'production') {
+      strapi.server.app.proxy = true;
+      console.log('🔒 Proxy mode enabled - trusting X-Forwarded-* headers');
+    }
+  },
 };
