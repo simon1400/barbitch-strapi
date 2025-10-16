@@ -1,4 +1,4 @@
-export default ({ env }) => [
+export default () => [
   'strapi::logger',
   'strapi::errors',
   {
@@ -35,8 +35,9 @@ export default ({ env }) => [
     name: 'strapi::session',
     config: {
       cookie: {
-        secure: env('NODE_ENV') === 'production',
-        sameSite: env('NODE_ENV') === 'production' ? 'lax' : 'strict',
+        secure: false,
+        httpOnly: true,
+        sameSite: 'lax',
       },
     },
   },
