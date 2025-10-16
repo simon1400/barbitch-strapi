@@ -13,7 +13,4 @@ export default ({env}) => ({
       },
     },
   },
-  "strapi-gpt-5": {
-    enabled: true,
-  },
 });
