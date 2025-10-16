@@ -31,7 +31,15 @@ export default ({ env }) => [
   'strapi::poweredBy',
   'strapi::query',
   'strapi::body',
-  'strapi::session',
+  {
+    name: 'strapi::session',
+    config: {
+      cookie: {
+        secure: env('NODE_ENV') === 'production',
+        sameSite: env('NODE_ENV') === 'production' ? 'lax' : 'strict',
+      },
+    },
+  },
   'strapi::favicon',
   'strapi::public',
 ];

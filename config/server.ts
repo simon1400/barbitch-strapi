@@ -2,7 +2,7 @@ export default ({ env }) => ({
   host: env('HOST', '0.0.0.0'),
   port: env.int('PORT', 1350),
   url: env('URL'),
-  proxy: env.bool('IS_PROXIED', true),
+  proxy: true,
   app: {
     keys: env.array('APP_KEYS'),
   },
