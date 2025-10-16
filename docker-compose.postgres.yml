@@ -1,0 +1,74 @@
+# Docker Compose для проектів з локальною PostgreSQL базою
+# Використовується для міграції проектів з Wedos
+#
+# Використання:
+#   docker-compose -f docker-compose.postgres.yml up -d
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database (локальна)
+  postgres:
+    container_name: ${PROJECT_NAME:-strapi}-db
+    image: postgres:15-alpine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_USER: strapi
+      POSTGRES_DB: strapi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - strapi-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U strapi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Strapi Application
+  strapi:
+    container_name: ${PROJECT_NAME:-strapi}-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${PROJECT_NAME:-strapi}:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: ${PORT:-1350}
+      DATABASE_CLIENT: postgres
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: strapi
+      DATABASE_USERNAME: strapi
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      DATABASE_SSL: false
+    ports:
+      - '${PORT:-1350}:${PORT:-1350}'
+    volumes:
+      - strapi-uploads:/opt/app/public/uploads
+    networks:
+      - strapi-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${PORT:-1350}/_health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  postgres-data:
+    driver: local
+  strapi-uploads:
+    driver: local
+
+networks:
+  strapi-network:
+    driver: bridge
