@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'barbitch-strapi',
       script: 'npm',
-      args: 'start:prod',
+      args: 'start',
       cwd: '/opt/barbitch-strapi',
       instances: 1,
       exec_mode: 'fork',
