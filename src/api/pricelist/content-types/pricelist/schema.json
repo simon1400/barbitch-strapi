@@ -36,6 +36,16 @@
       },
       "component": "content.table",
       "required": true
+    },
+    "order": {
+      "type": "integer",
+      "required": false,
+      "default": 0,
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      }
     }
   }
 }

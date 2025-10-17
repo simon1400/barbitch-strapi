@@ -18,9 +18,15 @@ export default {
    */
   bootstrap({ strapi }) {
     // Force Koa to trust proxy headers (for HTTPS behind Nginx)
-    if (process.env.NODE_ENV === 'production') {
+    // But only if we're not running on localhost
+    const isLocalhost = process.env.URL?.includes('localhost') || process.env.URL?.includes('127.0.0.1');
+
+    if (process.env.NODE_ENV === 'production' && !isLocalhost) {
       strapi.server.app.proxy = true;
       console.log('🔒 Proxy mode enabled - trusting X-Forwarded-* headers');
+    } else {
+      strapi.server.app.proxy = false;
+      console.log('🔓 Proxy mode disabled - running in local development mode');
     }
   },
 };

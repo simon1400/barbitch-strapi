@@ -1513,6 +1513,13 @@ export interface ApiPricelistPricelist extends Struct.CollectionTypeSchema {
       'oneToMany',
       'api::pricelist.pricelist'
     >;
+    order: Schema.Attribute.Integer &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<0>;
     publishedAt: Schema.Attribute.DateTime;
     table: Schema.Attribute.Component<'content.table', true> &
       Schema.Attribute.Required &
