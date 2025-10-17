@@ -72,6 +72,7 @@ git commit -m "Add GitHub Actions auto-deploy"
 git push origin main
 ```
 
+
 2. Откройте GitHub → ваш репозиторий → вкладка **Actions**
 3. Вы увидите запущенный workflow "Deploy to Production"
 4. Кликните на него чтобы увидеть логи деплоя в реальном времени
