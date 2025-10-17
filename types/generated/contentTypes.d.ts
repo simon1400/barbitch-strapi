@@ -462,6 +462,46 @@ export interface ApiAddMoneyAddMoney extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiAdminUserAdminUser extends Struct.CollectionTypeSchema {
+  collectionName: 'barbitch_admins';
+  info: {
+    description: '\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u0438 \u0441 \u0434\u043E\u0441\u0442\u0443\u043F\u043E\u043C \u043A \u0430\u0434\u043C\u0438\u043D-\u043F\u0430\u043D\u0435\u043B\u0438';
+    displayName: '\u0410\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u044B Barbitch';
+    pluralName: 'admin-users';
+    singularName: 'admin-user';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    isActive: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<true>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::admin-user.admin-user'
+    > &
+      Schema.Attribute.Private;
+    password: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    role: Schema.Attribute.Enumeration<['master', 'owner']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'master'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    username: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+  };
+}
+
 export interface ApiArticleArticle extends Struct.CollectionTypeSchema {
   collectionName: 'articles';
   info: {
@@ -2482,6 +2522,7 @@ declare module '@strapi/strapi' {
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
       'api::add-money.add-money': ApiAddMoneyAddMoney;
+      'api::admin-user.admin-user': ApiAdminUserAdminUser;
       'api::article.article': ApiArticleArticle;
       'api::avans.avans': ApiAvansAvans;
       'api::banner.banner': ApiBannerBanner;

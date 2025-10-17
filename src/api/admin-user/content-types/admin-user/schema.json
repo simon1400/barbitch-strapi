@@ -1,0 +1,37 @@
+{
+  "kind": "collectionType",
+  "collectionName": "barbitch_admins",
+  "info": {
+    "singularName": "admin-user",
+    "pluralName": "admin-users",
+    "displayName": "Администраторы Barbitch",
+    "description": "Пользователи с доступом к админ-панели"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "username": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "password": {
+      "type": "string",
+      "required": true,
+      "private": true
+    },
+    "role": {
+      "type": "enumeration",
+      "enum": ["master", "owner"],
+      "required": true,
+      "default": "master"
+    },
+    "isActive": {
+      "type": "boolean",
+      "default": true,
+      "required": true
+    }
+  }
+}
