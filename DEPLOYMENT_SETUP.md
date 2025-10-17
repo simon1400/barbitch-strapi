@@ -80,6 +80,7 @@ git push origin main
 
 На **продакшн сервере** проверьте:
 
+
 ```bash
 cd /opt/barbitch-strapi
 
