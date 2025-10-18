@@ -67,7 +67,23 @@ export interface ContentGalery extends Struct.ComponentSchema {
     icon: 'chartBubble';
   };
   attributes: {
+    contentAfter: Schema.Attribute.RichText &
+      Schema.Attribute.CustomField<
+        'plugin::ckeditor5.CKEditor',
+        {
+          preset: 'defaultHtml';
+        }
+      >;
+    contentBefore: Schema.Attribute.RichText &
+      Schema.Attribute.CustomField<
+        'plugin::ckeditor5.CKEditor',
+        {
+          preset: 'defaultHtml';
+        }
+      >;
+    cta: Schema.Attribute.Component<'content.link', false>;
     image: Schema.Attribute.Media<'images', true> & Schema.Attribute.Required;
+    title: Schema.Attribute.String;
   };
 }
 
@@ -112,6 +128,36 @@ export interface ContentOficialData extends Struct.ComponentSchema {
     email: Schema.Attribute.String & Schema.Attribute.Required;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     phone: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
+export interface ContentPriceList extends Struct.ComponentSchema {
+  collectionName: 'components_content_price_lists';
+  info: {
+    displayName: 'priceList';
+    icon: 'bulletList';
+  };
+  attributes: {
+    contentAfter: Schema.Attribute.RichText &
+      Schema.Attribute.CustomField<
+        'plugin::ckeditor5.CKEditor',
+        {
+          preset: 'defaultHtml';
+        }
+      >;
+    contentBefore: Schema.Attribute.RichText &
+      Schema.Attribute.CustomField<
+        'plugin::ckeditor5.CKEditor',
+        {
+          preset: 'defaultHtml';
+        }
+      >;
+    cta: Schema.Attribute.Component<'content.link', false>;
+    pricelistTable: Schema.Attribute.Relation<
+      'oneToOne',
+      'api::pricelist.pricelist'
+    >;
+    title: Schema.Attribute.String;
   };
 }
 
@@ -267,6 +313,7 @@ declare module '@strapi/strapi' {
       'content.galery-instagram': ContentGaleryInstagram;
       'content.link': ContentLink;
       'content.oficial-data': ContentOficialData;
+      'content.price-list': ContentPriceList;
       'content.table': ContentTable;
       'content.table-item': ContentTableItem;
       'content.text': ContentText;

@@ -36,33 +36,6 @@
       "targetField": "title",
       "required": true
     },
-    "galery": {
-      "type": "media",
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      },
-      "multiple": true,
-      "required": true,
-      "allowedTypes": [
-        "images",
-        "files",
-        "videos"
-      ]
-    },
-    "description": {
-      "type": "customField",
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      },
-      "customField": "plugin::ckeditor5.CKEditor",
-      "options": {
-        "preset": "defaultHtml"
-      }
-    },
     "personals": {
       "type": "relation",
       "relation": "oneToMany",
@@ -85,18 +58,6 @@
       "target": "api::offer.offer",
       "mappedBy": "service"
     },
-    "additionalDescription": {
-      "type": "customField",
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      },
-      "customField": "plugin::ckeditor5.CKEditor",
-      "options": {
-        "preset": "defaultHtml"
-      }
-    },
     "shortTitle": {
       "type": "string",
       "pluginOptions": {
@@ -111,6 +72,21 @@
       "relation": "oneToMany",
       "target": "api::stock.stock",
       "mappedBy": "service"
+    },
+    "dynamicContent": {
+      "type": "dynamiczone",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "components": [
+        "content.content-baner",
+        "content.faq",
+        "content.galery",
+        "content.text",
+        "content.price-list"
+      ]
     }
   }
 }

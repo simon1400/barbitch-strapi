@@ -1,8 +1,8 @@
 {
-  "collectionName": "components_content_galeries",
+  "collectionName": "components_content_price_lists",
   "info": {
-    "displayName": "galery",
-    "icon": "chartBubble"
+    "displayName": "priceList",
+    "icon": "bulletList"
   },
   "options": {},
   "attributes": {
@@ -16,13 +16,10 @@
         "preset": "defaultHtml"
       }
     },
-    "image": {
-      "type": "media",
-      "multiple": true,
-      "required": true,
-      "allowedTypes": [
-        "images"
-      ]
+    "pricelistTable": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::pricelist.pricelist"
     },
     "contentAfter": {
       "type": "customField",
@@ -36,5 +33,6 @@
       "component": "content.link",
       "repeatable": false
     }
-  }
+  },
+  "config": {}
 }
