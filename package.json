@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@_sh/strapi-plugin-ckeditor": "6.0.2",
+    "@simon1400/strapi-gpt-5": "^0.2.0",
     "@strapi/plugin-cloud": "5.24.1",
     "@strapi/plugin-color-picker": "^5.24.1",
     "@strapi/plugin-users-permissions": "5.24.1",
