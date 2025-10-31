@@ -176,6 +176,15 @@
       "component": "content.oficial-data",
       "repeatable": false,
       "required": true
+    },
+    "excessThreshold": {
+      "type": "integer",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "default": 0
     }
   }
 }
