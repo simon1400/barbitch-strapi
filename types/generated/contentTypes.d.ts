@@ -1378,6 +1378,13 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
           localized: true;
         };
       }>;
+    excessThreshold: Schema.Attribute.Integer &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<0>;
     galery: Schema.Attribute.Media<'images' | 'files' | 'videos', true> &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
