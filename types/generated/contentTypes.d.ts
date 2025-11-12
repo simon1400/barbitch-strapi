@@ -1933,14 +1933,18 @@ export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    city: Schema.Attribute.String;
     comentUser: Schema.Attribute.Text;
     commentAdmin: Schema.Attribute.Text;
+    country: Schema.Attribute.String;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     dateOrder: Schema.Attribute.Date & Schema.Attribute.Required;
     datePay: Schema.Attribute.Date;
     dateRealized: Schema.Attribute.Date;
+    deliveryMethod: Schema.Attribute.Enumeration<['email', 'mail', 'pickup']> &
+      Schema.Attribute.DefaultTo<'email'>;
     email: Schema.Attribute.Email;
     for: Schema.Attribute.String;
     idVoucher: Schema.Attribute.String &
@@ -1954,7 +1958,9 @@ export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     phone: Schema.Attribute.String;
+    postalCode: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
+    street: Schema.Attribute.String;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
