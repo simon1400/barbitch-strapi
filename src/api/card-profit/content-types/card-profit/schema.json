@@ -18,6 +18,10 @@
     "sum": {
       "type": "biginteger",
       "required": true
+    },
+    "extraIncome": {
+      "type": "biginteger",
+      "default": 0
     }
   }
 }
