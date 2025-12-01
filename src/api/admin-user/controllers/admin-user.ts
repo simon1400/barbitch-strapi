@@ -71,4 +71,90 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
       return ctx.internalServerError('An error occurred while checking user status')
     }
   },
+
+  // Получение данных администратора для личного кабинета
+  async getAdministratorData(ctx) {
+    const { username } = ctx.params
+
+    if (!username) {
+      return ctx.badRequest('Username is required')
+    }
+
+    try {
+      // Находим пользователя по username
+      const users = await strapi.entityService.findMany('api::admin-user.admin-user', {
+        filters: { username, isActive: true, role: 'administrator' },
+        limit: 1,
+      })
+
+      if (!users || users.length === 0) {
+        return ctx.notFound('Administrator not found')
+      }
+
+      const user = users[0]
+
+      // Находим персонал с таким же именем
+      const personals: any = await strapi.entityService.findMany('api::personal.personal', {
+        filters: {
+          name: username,
+          position: 'administrator'
+        },
+        populate: ['penalties', 'payroll', 'work_time', 'advances', 'rates'],
+        limit: 1,
+      })
+
+      if (!personals || personals.length === 0) {
+        return ctx.notFound('Personal data not found')
+      }
+
+      const personal: any = personals[0]
+
+      // Получаем зарплаты
+      const salaries: any = await strapi.entityService.findMany('api::salary.salary', {
+        filters: {
+          personal: personal.id
+        },
+        sort: 'date:desc'
+      })
+
+      // Получаем доп. прибыль (премии) - фильтруем по комментарию с именем админа
+      const extraProfits: any = await strapi.entityService.findMany('api::extra-profit.extra-profit', {
+        filters: {
+          comment: {
+            $contains: username
+          }
+        },
+        sort: 'date:desc'
+      })
+
+      // Получаем смены
+      const shifts: any = await strapi.entityService.findMany('api::shift.shift', {
+        sort: 'from:desc',
+        populate: ['days'],
+        limit: 10
+      })
+
+      return {
+        username: user.username,
+        role: user.role,
+        personal: {
+          name: personal.name || '',
+          position: personal.position || 'administrator',
+          excessThreshold: personal.excessThreshold || 0,
+          rates: personal.rates || [],
+          ratePercent: personal.ratePercent || 0
+        },
+        penalties: personal.penalties || [],
+        payrolls: personal.payroll || [],
+        workTimes: personal.work_time || [],
+        advances: personal.advances || [],
+        salaries: salaries || [],
+        extraProfits: extraProfits || [],
+        shifts: shifts || []
+      }
+    } catch (error) {
+      console.error('Get administrator data error:', error)
+      return ctx.internalServerError('An error occurred while fetching administrator data')
+    }
+  },
 }))

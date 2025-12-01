@@ -20,5 +20,15 @@ export default {
         middlewares: [],
       },
     },
+    {
+      method: 'GET',
+      path: '/admin-users/administrator-data/:username',
+      handler: 'admin-user.getAdministratorData',
+      config: {
+        auth: false, // Публичный endpoint для личного кабинета
+        policies: [],
+        middlewares: [],
+      },
+    },
   ],
 }

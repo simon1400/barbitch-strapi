@@ -490,7 +490,7 @@ export interface ApiAdminUserAdminUser extends Struct.CollectionTypeSchema {
       Schema.Attribute.Required &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
-    role: Schema.Attribute.Enumeration<['master', 'owner']> &
+    role: Schema.Attribute.Enumeration<['master', 'owner', 'administrator']> &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'master'>;
     updatedAt: Schema.Attribute.DateTime;
@@ -800,6 +800,7 @@ export interface ApiCardProfitCardProfit extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     date: Schema.Attribute.Date & Schema.Attribute.Required;
+    extraIncome: Schema.Attribute.BigInteger & Schema.Attribute.DefaultTo<0>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',

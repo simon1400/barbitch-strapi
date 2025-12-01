@@ -24,7 +24,7 @@
     },
     "role": {
       "type": "enumeration",
-      "enum": ["master", "owner"],
+      "enum": ["master", "owner", "administrator"],
       "required": true,
       "default": "master"
     },
