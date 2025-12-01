@@ -10,5 +10,15 @@ export default {
         middlewares: [],
       },
     },
+    {
+      method: 'GET',
+      path: '/admin-users/check-status/:id',
+      handler: 'admin-user.checkStatus',
+      config: {
+        auth: false, // Публичный endpoint для проверки статуса
+        policies: [],
+        middlewares: [],
+      },
+    },
   ],
 }

@@ -23,4 +23,13 @@ export default {
       }
     }
   },
+
+  // Логируем изменение статуса isActive
+  async afterUpdate(event) {
+    const { result, params } = event
+
+    if (params.data.isActive === false) {
+      console.log(`User ${result.username} (ID: ${result.id}) has been deactivated`)
+    }
+  },
 }

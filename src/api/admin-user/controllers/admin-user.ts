@@ -45,4 +45,30 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
       return ctx.internalServerError('An error occurred during login')
     }
   },
+
+  // Проверка статуса пользователя (активен ли он)
+  async checkStatus(ctx) {
+    const userId = ctx.params.id
+
+    if (!userId) {
+      return ctx.badRequest('User ID is required')
+    }
+
+    try {
+      const user = await strapi.entityService.findOne('api::admin-user.admin-user', userId, {
+        fields: ['isActive'],
+      })
+
+      if (!user) {
+        return ctx.notFound('User not found')
+      }
+
+      return {
+        isActive: user.isActive,
+      }
+    } catch (error) {
+      console.error('Check status error:', error)
+      return ctx.internalServerError('An error occurred while checking user status')
+    }
+  },
 }))
