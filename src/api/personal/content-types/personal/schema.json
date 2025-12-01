@@ -134,6 +134,12 @@
       "target": "api::avans.avans",
       "mappedBy": "personal"
     },
+    "addMoneys": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::add-money.add-money",
+      "mappedBy": "personal"
+    },
     "position": {
       "type": "enumeration",
       "pluginOptions": {

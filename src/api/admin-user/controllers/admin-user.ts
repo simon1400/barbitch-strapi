@@ -117,15 +117,16 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
         sort: 'date:desc'
       })
 
-      // Получаем доп. прибыль (премии) - фильтруем по комментарию с именем админа
-      const extraProfits: any = await strapi.entityService.findMany('api::extra-profit.extra-profit', {
+      // Получаем доп. прибыль (премии) из add-moneys
+      const extraProfits: any = await strapi.entityService.findMany('api::add-money.add-money', {
         filters: {
-          comment: {
-            $contains: username
-          }
+          personal: personal.id
         },
-        sort: 'date:desc'
+        sort: 'date:desc',
+        publicationState: 'live'
       })
+
+      console.log('Extra profits for', username, ':', extraProfits)
 
       // Получаем смены
       const shifts: any = await strapi.entityService.findMany('api::shift.shift', {

@@ -17,9 +17,9 @@
     },
     "personal": {
       "type": "relation",
-      "relation": "oneToOne",
+      "relation": "manyToOne",
       "target": "api::personal.personal",
-      "required": true
+      "inversedBy": "addMoneys"
     },
     "date": {
       "type": "date",
