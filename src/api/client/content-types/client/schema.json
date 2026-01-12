@@ -35,8 +35,37 @@
       "target": "api::service-provided.service-provided",
       "mappedBy": "client"
     },
+    "loyaltyTransactions": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::loyalty-transaction.loyalty-transaction",
+      "mappedBy": "client"
+    },
     "comment": {
       "type": "blocks"
+    },
+    "loyaltyPoints": {
+      "type": "integer",
+      "default": 0,
+      "required": true
+    },
+    "loyaltyYear": {
+      "type": "integer",
+      "default": 2026
+    },
+    "registrationDate": {
+      "type": "date"
+    },
+    "lastVisitDate": {
+      "type": "date"
+    },
+    "password": {
+      "type": "password",
+      "private": true
+    },
+    "isActive": {
+      "type": "boolean",
+      "default": true
     }
   }
 }
