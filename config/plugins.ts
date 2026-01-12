@@ -1,10 +1,18 @@
 export default ({env}) => ({
+  // Disable all plugins temporarily to test
   imagekit: {
-    enabled: true,
-    config: {
-      publicKey: env('IMAGEKIT_PUBLIC_KEY'),
-      privateKey: env('IMAGEKIT_PRIVATE_KEY'),
-      urlEndpoint: env('IMAGEKIT_URL_ENDPOINT'),
-    },
+    enabled: false,
+  },
+  ckeditor: {
+    enabled: false,
+  },
+  'gpt-5': {
+    enabled: false,
+  },
+  'required-relation-field': {
+    enabled: false,
+  },
+  'responsive-backend': {
+    enabled: false,
   },
 });

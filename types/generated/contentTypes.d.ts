@@ -451,8 +451,7 @@ export interface ApiAddMoneyAddMoney extends Struct.CollectionTypeSchema {
       'api::add-money.add-money'
     > &
       Schema.Attribute.Private;
-    personal: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'> &
-      Schema.Attribute.Required;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.String & Schema.Attribute.Required;
     title: Schema.Attribute.String & Schema.Attribute.Required;
@@ -1363,6 +1362,10 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
     };
   };
   attributes: {
+    addMoneys: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::add-money.add-money'
+    >;
     advances: Schema.Attribute.Relation<'oneToMany', 'api::avans.avans'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
