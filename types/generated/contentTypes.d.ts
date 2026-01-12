@@ -863,19 +863,31 @@ export interface ApiClientClient extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     email: Schema.Attribute.Email & Schema.Attribute.Unique;
+    isActive: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    lastVisitDate: Schema.Attribute.Date;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
       'api::client.client'
     > &
       Schema.Attribute.Private;
+    loyaltyPoints: Schema.Attribute.Integer &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<0>;
+    loyaltyTransactions: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::loyalty-transaction.loyalty-transaction'
+    >;
+    loyaltyYear: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<2026>;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     offers: Schema.Attribute.Relation<
       'oneToMany',
       'api::service-provided.service-provided'
     >;
+    password: Schema.Attribute.Password & Schema.Attribute.Private;
     phone: Schema.Attribute.String & Schema.Attribute.Unique;
     publishedAt: Schema.Attribute.DateTime;
+    registrationDate: Schema.Attribute.Date;
     sum: Schema.Attribute.BigInteger &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'0'>;
@@ -1148,6 +1160,85 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+  };
+}
+
+export interface ApiLoyaltyRewardLoyaltyReward
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'loyalty_rewards';
+  info: {
+    displayName: '\u041B\u043E\u044F\u043B\u044C\u043D\u043E\u0441\u0442\u044C - \u041D\u0430\u0433\u0440\u0430\u0434\u044B';
+    pluralName: 'loyalty-rewards';
+    singularName: 'loyalty-reward';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    description: Schema.Attribute.Text;
+    icon: Schema.Attribute.String;
+    isActive: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::loyalty-reward.loyalty-reward'
+    > &
+      Schema.Attribute.Private;
+    order: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    publishedAt: Schema.Attribute.DateTime;
+    requiredPoints: Schema.Attribute.Integer & Schema.Attribute.Required;
+    rewardType: Schema.Attribute.Enumeration<
+      ['discount_percent', 'discount_amount', 'voucher', 'free_service']
+    > &
+      Schema.Attribute.Required;
+    rewardValue: Schema.Attribute.Integer & Schema.Attribute.Required;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    year: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<2026>;
+  };
+}
+
+export interface ApiLoyaltyTransactionLoyaltyTransaction
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'loyalty_transactions';
+  info: {
+    displayName: '\u041B\u043E\u044F\u043B\u044C\u043D\u043E\u0441\u0442\u044C - \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438';
+    pluralName: 'loyalty-transactions';
+    singularName: 'loyalty-transaction';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    client: Schema.Attribute.Relation<'manyToOne', 'api::client.client'>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    description: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::loyalty-transaction.loyalty-transaction'
+    > &
+      Schema.Attribute.Private;
+    points: Schema.Attribute.Integer & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    serviceProvided: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::service-provided.service-provided'
+    >;
+    type: Schema.Attribute.Enumeration<['earned', 'redeemed', 'expired']> &
+      Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    year: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<2026>;
   };
 }
 
@@ -2536,6 +2627,8 @@ declare module '@strapi/strapi' {
       'api::extra-profit.extra-profit': ApiExtraProfitExtraProfit;
       'api::gpt-message.gpt-message': ApiGptMessageGptMessage;
       'api::homepage.homepage': ApiHomepageHomepage;
+      'api::loyalty-reward.loyalty-reward': ApiLoyaltyRewardLoyaltyReward;
+      'api::loyalty-transaction.loyalty-transaction': ApiLoyaltyTransactionLoyaltyTransaction;
       'api::navigation.navigation': ApiNavigationNavigation;
       'api::note.note': ApiNoteNote;
       'api::offer.offer': ApiOfferOffer;

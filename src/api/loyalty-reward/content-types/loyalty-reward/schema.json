@@ -1,0 +1,50 @@
+{
+  "kind": "collectionType",
+  "collectionName": "loyalty_rewards",
+  "info": {
+    "singularName": "loyalty-reward",
+    "pluralName": "loyalty-rewards",
+    "displayName": "Лояльность - Награды"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "description": {
+      "type": "text"
+    },
+    "requiredPoints": {
+      "type": "integer",
+      "required": true
+    },
+    "rewardType": {
+      "type": "enumeration",
+      "enum": ["discount_percent", "discount_amount", "voucher", "free_service"],
+      "required": true
+    },
+    "rewardValue": {
+      "type": "integer",
+      "required": true
+    },
+    "icon": {
+      "type": "string"
+    },
+    "isActive": {
+      "type": "boolean",
+      "default": true
+    },
+    "order": {
+      "type": "integer",
+      "default": 0
+    },
+    "year": {
+      "type": "integer",
+      "default": 2026
+    }
+  }
+}
