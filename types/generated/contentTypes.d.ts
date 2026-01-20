@@ -485,6 +485,10 @@ export interface ApiAdminUserAdminUser extends Struct.CollectionTypeSchema {
       'api::admin-user.admin-user'
     > &
       Schema.Attribute.Private;
+    masterPersonal: Schema.Attribute.Relation<
+      'oneToOne',
+      'api::personal.personal'
+    >;
     password: Schema.Attribute.String &
       Schema.Attribute.Required &
       Schema.Attribute.Private;
@@ -1019,6 +1023,20 @@ export interface ApiCostCost extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    category: Schema.Attribute.Enumeration<
+      [
+        '\u041C\u0430\u0440\u043A\u0435\u0442\u0438\u043D\u0433',
+        '\u041C\u0430\u0442\u0435\u0440\u0438\u0430\u043B\u044B',
+        '\u041E\u0431\u043E\u0440\u0443\u0434\u043E\u0432\u0430\u043D\u0438\u0435',
+        '\u0423\u0441\u043B\u0443\u0433\u0438',
+        '\u041A\u043E\u043C\u043C\u0443\u043D\u0430\u043B\u044C\u043D\u044B\u0435',
+        '\u041F\u0435\u0440\u0441\u043E\u043D\u0430\u043B',
+        '\u041F\u0440\u043E\u0434\u0443\u043A\u0442\u044B',
+        '\u0418\u043D\u0442\u0435\u0440\u044C\u0435\u0440',
+        '\u041E\u043F\u0442\u043E\u0432\u044B\u0435 \u0437\u0430\u043A\u0443\u043F\u043A\u0438',
+        '\u0414\u0440\u0443\u0433\u043E\u0435',
+      ]
+    >;
     comment: Schema.Attribute.Text;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &

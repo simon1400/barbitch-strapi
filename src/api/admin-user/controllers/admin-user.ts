@@ -81,9 +81,10 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
     }
 
     try {
-      // Находим пользователя по username
-      const users = await strapi.entityService.findMany('api::admin-user.admin-user', {
+      // Находим пользователя по username с привязанным мастером
+      const users: any = await strapi.entityService.findMany('api::admin-user.admin-user', {
         filters: { username, isActive: true, role: 'administrator' },
+        populate: ['masterPersonal'],
         limit: 1,
       })
 
@@ -135,6 +136,58 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
         limit: 10
       })
 
+      // Данные мастера (если администратор также работает мастером)
+      let masterData = null
+      if (user.masterPersonal) {
+        const masterPersonalId = user.masterPersonal.id
+
+        // Получаем полные данные мастера
+        const masterPersonal: any = await strapi.entityService.findOne('api::personal.personal', masterPersonalId, {
+          populate: ['penalties', 'payroll', 'advances', 'rates']
+        })
+
+        // Получаем услуги, оказанные мастером (заработок)
+        const servicesProvided: any = await strapi.entityService.findMany('api::service-provided.service-provided', {
+          filters: {
+            personal: masterPersonalId
+          },
+          populate: ['offer'],
+          sort: 'date:desc'
+        })
+
+        // Получаем премии мастера
+        const masterExtraProfits: any = await strapi.entityService.findMany('api::add-money.add-money', {
+          filters: {
+            personal: masterPersonalId
+          },
+          sort: 'date:desc',
+          publicationState: 'live'
+        })
+
+        // Получаем зарплаты мастера
+        const masterSalaries: any = await strapi.entityService.findMany('api::salary.salary', {
+          filters: {
+            personal: masterPersonalId
+          },
+          sort: 'date:desc'
+        })
+
+        masterData = {
+          personalId: masterPersonalId,
+          name: masterPersonal?.name || '',
+          ratePercent: masterPersonal?.ratePercent || 0,
+          excessThreshold: masterPersonal?.excessThreshold || 0,
+          servicesProvided: servicesProvided || [],
+          penalties: masterPersonal?.penalties || [],
+          payrolls: masterPersonal?.payroll || [],
+          advances: masterPersonal?.advances || [],
+          extraProfits: masterExtraProfits || [],
+          salaries: masterSalaries || []
+        }
+
+        console.log('Master data for', username, ':', masterData)
+      }
+
       return {
         username: user.username,
         role: user.role,
@@ -151,7 +204,8 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
         advances: personal.advances || [],
         salaries: salaries || [],
         extraProfits: extraProfits || [],
-        shifts: shifts || []
+        shifts: shifts || [],
+        masterData: masterData
       }
     } catch (error) {
       console.error('Get administrator data error:', error)
