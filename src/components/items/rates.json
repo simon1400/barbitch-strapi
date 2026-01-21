@@ -19,6 +19,9 @@
       "type": "biginteger",
       "required": true
     },
+    "hourlyRate": {
+      "type": "integer"
+    },
     "from": {
       "type": "date",
       "required": true
