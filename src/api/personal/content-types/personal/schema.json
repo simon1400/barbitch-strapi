@@ -191,6 +191,14 @@
         }
       },
       "default": 0
+    },
+    "noonaEmployeeId": {
+      "type": "string",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      }
     }
   }
 }
