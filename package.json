@@ -24,6 +24,7 @@
     "react-dom": "^18.0.0",
     "react-router-dom": "^6.0.0",
     "strapi-5-plugin-responsive-backend": "^0.0.4",
+    "strapi-google-analytics-dashboard": "^0.0.2",
     "strapi-plugin-imagekit": "^1.0.2",
     "strapi-plugin-required-relation-field": "^0.3.0",
     "styled-components": "^6.0.0"

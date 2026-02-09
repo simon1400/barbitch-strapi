@@ -1504,12 +1504,14 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
           localized: true;
         };
       }>;
-    image: Schema.Attribute.Media<'images' | 'files'> &
+    isActive: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
-          localized: true;
+          localized: false;
         };
-      }>;
+      }> &
+      Schema.Attribute.DefaultTo<true>;
     locale: Schema.Attribute.String;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1528,6 +1530,12 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       Schema.Attribute.SetPluginOptions<{
         i18n: {
           localized: true;
+        };
+      }>;
+    noonaEmployeeId: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
         };
       }>;
     offers: Schema.Attribute.Relation<'manyToMany', 'api::offer.offer'>;
@@ -1572,6 +1580,7 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
           localized: true;
         };
       }>;
+    taxes: Schema.Attribute.Relation<'oneToMany', 'api::tax.tax'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1996,6 +2005,36 @@ export interface ApiStockStock extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'\uD83D\uDFE9\u0414\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiTaxTax extends Struct.CollectionTypeSchema {
+  collectionName: 'taxes';
+  info: {
+    displayName: '\u041D\u0430\u043B\u043E\u0433\u0438';
+    pluralName: 'taxes';
+    singularName: 'tax';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::tax.tax'> &
+      Schema.Attribute.Private;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    publishedAt: Schema.Attribute.DateTime;
+    sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    type: Schema.Attribute.Enumeration<['social', 'health', 'income']> &
+      Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -2662,6 +2701,7 @@ declare module '@strapi/strapi' {
       'api::shift-handover.shift-handover': ApiShiftHandoverShiftHandover;
       'api::shift.shift': ApiShiftShift;
       'api::stock.stock': ApiStockStock;
+      'api::tax.tax': ApiTaxTax;
       'api::vaucher-page.vaucher-page': ApiVaucherPageVaucherPage;
       'api::voucher.voucher': ApiVoucherVoucher;
       'api::work-time.work-time': ApiWorkTimeWorkTime;

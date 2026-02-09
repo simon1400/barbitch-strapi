@@ -263,6 +263,7 @@ export interface ItemsRates extends Struct.ComponentSchema {
   };
   attributes: {
     from: Schema.Attribute.Date & Schema.Attribute.Required;
+    hourlyRate: Schema.Attribute.Integer;
     rate: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     to: Schema.Attribute.Date;
     typeWork: Schema.Attribute.Enumeration<['hpp', 'dpp']> &
