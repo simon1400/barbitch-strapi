@@ -26,7 +26,8 @@
       "inversedBy": "payroll"
     },
     "sum": {
-      "type": "biginteger"
+      "type": "biginteger",
+      "required": true
     }
   }
 }

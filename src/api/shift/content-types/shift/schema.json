@@ -24,10 +24,9 @@
       "required": true
     },
     "days": {
-      "displayName": "week",
       "type": "component",
-      "repeatable": false,
       "component": "content.week",
+      "repeatable": false,
       "required": true
     }
   }

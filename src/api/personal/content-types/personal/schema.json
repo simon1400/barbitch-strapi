@@ -26,57 +26,11 @@
       "required": true,
       "unique": true
     },
-    "slug": {
-      "type": "uid",
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      },
-      "targetField": "name"
-    },
-    "galery": {
-      "type": "media",
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      },
-      "multiple": true,
-      "required": false,
-      "allowedTypes": [
-        "images",
-        "files",
-        "videos"
-      ]
-    },
-    "description": {
-      "type": "customField",
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      },
-      "customField": "plugin::ckeditor5.CKEditor",
-      "options": {
-        "preset": "defaultHtml"
-      }
-    },
     "service": {
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::service.service",
       "inversedBy": "personals"
-    },
-    "metaData": {
-      "type": "component",
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      },
-      "component": "seo.meta",
-      "repeatable": false
     },
     "offers": {
       "type": "relation",

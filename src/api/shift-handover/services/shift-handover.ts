@@ -1,7 +1,0 @@
-/**
- * shift-handover service
- */
-
-import { factories } from '@strapi/strapi';
-
-export default factories.createCoreService('api::shift-handover.shift-handover');
