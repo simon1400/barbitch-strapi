@@ -52,20 +52,10 @@
     },
     "deliveryMethod": {
       "type": "enumeration",
-      "enum": ["email", "mail", "pickup"],
-      "default": "email"
-    },
-    "street": {
-      "type": "string"
-    },
-    "city": {
-      "type": "string"
-    },
-    "postalCode": {
-      "type": "string"
-    },
-    "country": {
-      "type": "string"
+      "default": "email",
+      "enum": [
+        "email"
+      ]
     }
   }
 }

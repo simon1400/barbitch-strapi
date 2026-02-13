@@ -30,8 +30,7 @@
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::offer.offer",
-      "inversedBy": "offerRendered",
-      "required": true
+      "inversedBy": "offerRendered"
     },
     "time": {
       "type": "string"
@@ -61,12 +60,6 @@
       "options": {
         "preset": "defaultHtml"
       }
-    },
-    "client": {
-      "type": "relation",
-      "relation": "manyToOne",
-      "target": "api::client.client",
-      "inversedBy": "offers"
     },
     "verify": {
       "type": "string"

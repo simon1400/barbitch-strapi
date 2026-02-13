@@ -21,7 +21,8 @@
       "required": true
     },
     "date": {
-      "type": "date"
+      "type": "date",
+      "required": true
     },
     "comment": {
       "type": "text"

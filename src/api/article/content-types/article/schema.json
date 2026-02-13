@@ -26,19 +26,6 @@
       "required": true,
       "unique": true
     },
-    "content": {
-      "type": "customField",
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      },
-      "customField": "plugin::ckeditor5.CKEditor",
-      "options": {
-        "preset": "defaultHtml"
-      },
-      "required": true
-    },
     "metaData": {
       "type": "component",
       "pluginOptions": {
