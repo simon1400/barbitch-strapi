@@ -7,7 +7,55 @@ export default {
    *
    * This gives you an opportunity to extend code.
    */
-  register(/* { strapi }: { strapi: Core.Strapi } */) {},
+  register({ strapi }) {
+    // Middleware: hide inactive personnel from relation pickers
+    strapi.server.use(async (ctx, next) => {
+      const path = ctx.request.path;
+
+      if (!path.includes('/content-manager/relations/')) {
+        return next();
+      }
+
+      try {
+        const relPath = path.split('/content-manager/relations/')[1];
+        if (!relPath) return next();
+
+        const parts = relPath.split('/').filter(Boolean).map(decodeURIComponent);
+
+        let modelUid: string;
+        let fieldName: string;
+
+        if (parts.length === 2) {
+          // /content-manager/relations/:model/:field
+          modelUid = parts[0];
+          fieldName = parts[1];
+        } else if (parts.length === 3) {
+          // /content-manager/relations/:model/:id/:field
+          modelUid = parts[0];
+          fieldName = parts[2];
+        } else {
+          return next();
+        }
+
+        const model = strapi.contentType(modelUid as any);
+        const attribute = model?.attributes?.[fieldName];
+
+        if (
+          attribute?.type === 'relation' &&
+          attribute.target === 'api::personal.personal'
+        ) {
+          // Add filter: show only active personnel (isActive != false)
+          // Using $ne:false so existing entries without the field are still shown
+          const separator = ctx.querystring ? '&' : '';
+          ctx.querystring += `${separator}filters[isActive][$ne]=false`;
+        }
+      } catch (e) {
+        // Skip if model/attribute not found
+      }
+
+      return next();
+    });
+  },
 
   /**
    * An asynchronous bootstrap function that runs before

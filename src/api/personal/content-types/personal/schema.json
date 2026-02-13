@@ -35,20 +35,6 @@
       },
       "targetField": "name"
     },
-    "image": {
-      "type": "media",
-      "pluginOptions": {
-        "i18n": {
-          "localized": true
-        }
-      },
-      "multiple": false,
-      "required": false,
-      "allowedTypes": [
-        "images",
-        "files"
-      ]
-    },
     "galery": {
       "type": "media",
       "pluginOptions": {
@@ -140,6 +126,12 @@
       "target": "api::add-money.add-money",
       "mappedBy": "personal"
     },
+    "taxes": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::tax.tax",
+      "mappedBy": "personal"
+    },
     "position": {
       "type": "enumeration",
       "pluginOptions": {
@@ -199,6 +191,16 @@
           "localized": false
         }
       }
+    },
+    "isActive": {
+      "type": "boolean",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "required": true,
+      "default": true
     }
   }
 }

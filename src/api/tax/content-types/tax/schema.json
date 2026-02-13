@@ -1,0 +1,41 @@
+{
+  "kind": "collectionType",
+  "collectionName": "taxes",
+  "info": {
+    "singularName": "tax",
+    "pluralName": "taxes",
+    "displayName": "Налоги"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "personal": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::personal.personal",
+      "inversedBy": "taxes"
+    },
+    "date": {
+      "type": "date",
+      "required": true
+    },
+    "sum": {
+      "type": "biginteger",
+      "required": true
+    },
+    "type": {
+      "type": "enumeration",
+      "enum": [
+        "social",
+        "health",
+        "income"
+      ],
+      "required": true
+    },
+    "comment": {
+      "type": "text"
+    }
+  }
+}
