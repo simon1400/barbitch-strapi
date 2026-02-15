@@ -171,6 +171,7 @@ export interface ContentTable extends Struct.ComponentSchema {
   attributes: {
     item: Schema.Attribute.Component<'content.table-item', true> &
       Schema.Attribute.Required;
+    sectionTitle: Schema.Attribute.String;
     title: Schema.Attribute.String;
   };
 }

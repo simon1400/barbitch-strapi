@@ -7,6 +7,10 @@
   },
   "options": {},
   "attributes": {
+    "sectionTitle": {
+      "type": "string",
+      "required": false
+    },
     "title": {
       "type": "string",
       "required": false,
