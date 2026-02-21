@@ -1,0 +1,18 @@
+{
+  "collectionName": "components_booking_modifier_results",
+  "info": {
+    "displayName": "modifierResult",
+    "icon": "link"
+  },
+  "options": {},
+  "attributes": {
+    "modifier_keys": {
+      "type": "string",
+      "required": true
+    },
+    "result_noona_id": {
+      "type": "string",
+      "required": true
+    }
+  }
+}

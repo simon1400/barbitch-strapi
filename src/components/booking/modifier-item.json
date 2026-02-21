@@ -1,0 +1,22 @@
+{
+  "collectionName": "components_booking_modifier_items",
+  "info": {
+    "displayName": "modifierItem",
+    "icon": "check"
+  },
+  "options": {},
+  "attributes": {
+    "key": {
+      "type": "string",
+      "required": true
+    },
+    "label": {
+      "type": "string",
+      "required": true
+    },
+    "price_diff": {
+      "type": "integer",
+      "required": true
+    }
+  }
+}

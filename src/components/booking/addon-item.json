@@ -1,0 +1,27 @@
+{
+  "collectionName": "components_booking_addon_items",
+  "info": {
+    "displayName": "addonItem",
+    "icon": "plus"
+  },
+  "options": {},
+  "attributes": {
+    "label": {
+      "type": "string",
+      "required": true
+    },
+    "price_diff": {
+      "type": "integer",
+      "required": true
+    },
+    "result_noona_id": {
+      "type": "string",
+      "required": true
+    },
+    "modifier_results": {
+      "type": "component",
+      "component": "booking.modifier-result",
+      "repeatable": true
+    }
+  }
+}

@@ -1,5 +1,47 @@
 import type { Schema, Struct } from '@strapi/strapi';
 
+export interface BookingAddonItem extends Struct.ComponentSchema {
+  collectionName: 'components_booking_addon_items';
+  info: {
+    displayName: 'addonItem';
+    icon: 'plus';
+  };
+  attributes: {
+    label: Schema.Attribute.String & Schema.Attribute.Required;
+    modifier_results: Schema.Attribute.Component<
+      'booking.modifier-result',
+      true
+    >;
+    price_diff: Schema.Attribute.Integer & Schema.Attribute.Required;
+    result_noona_id: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
+export interface BookingModifierItem extends Struct.ComponentSchema {
+  collectionName: 'components_booking_modifier_items';
+  info: {
+    displayName: 'modifierItem';
+    icon: 'check';
+  };
+  attributes: {
+    key: Schema.Attribute.String & Schema.Attribute.Required;
+    label: Schema.Attribute.String & Schema.Attribute.Required;
+    price_diff: Schema.Attribute.Integer & Schema.Attribute.Required;
+  };
+}
+
+export interface BookingModifierResult extends Struct.ComponentSchema {
+  collectionName: 'components_booking_modifier_results';
+  info: {
+    displayName: 'modifierResult';
+    icon: 'link';
+  };
+  attributes: {
+    modifier_keys: Schema.Attribute.String & Schema.Attribute.Required;
+    result_noona_id: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
 export interface ContentAskAnswer extends Struct.ComponentSchema {
   collectionName: 'components_content_ask_answers';
   info: {
@@ -307,6 +349,9 @@ export interface SeoMeta extends Struct.ComponentSchema {
 declare module '@strapi/strapi' {
   export module Public {
     export interface ComponentSchemas {
+      'booking.addon-item': BookingAddonItem;
+      'booking.modifier-item': BookingModifierItem;
+      'booking.modifier-result': BookingModifierResult;
       'content.ask-answer': ContentAskAnswer;
       'content.content-baner': ContentContentBaner;
       'content.faq': ContentFaq;

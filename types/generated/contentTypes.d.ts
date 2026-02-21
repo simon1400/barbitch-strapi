@@ -763,6 +763,48 @@ export interface ApiBlogBlog extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiBookingAddonGroupBookingAddonGroup
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'booking_addon_groups';
+  info: {
+    description: '\u0413\u0440\u0443\u043F\u043F\u044B \u0434\u043E\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u0439 \u043A \u0431\u0430\u0437\u043E\u0432\u044B\u043C \u0443\u0441\u043B\u0443\u0433\u0430\u043C Noona';
+    displayName: 'Booking Addon Group';
+    pluralName: 'booking-addon-groups';
+    singularName: 'booking-addon-group';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    addons: Schema.Attribute.Component<'booking.addon-item', true>;
+    base_modifier_results: Schema.Attribute.Component<
+      'booking.modifier-result',
+      true
+    >;
+    base_noona_id: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+    base_price: Schema.Attribute.Integer & Schema.Attribute.Required;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::booking-addon-group.booking-addon-group'
+    > &
+      Schema.Attribute.Private;
+    modifiers: Schema.Attribute.Component<'booking.modifier-item', true>;
+    publishedAt: Schema.Attribute.DateTime;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiCardProfitCardProfit extends Struct.CollectionTypeSchema {
   collectionName: 'card_profits';
   info: {
@@ -2162,12 +2204,13 @@ export interface PluginUploadFile extends Struct.CollectionTypeSchema {
     };
   };
   attributes: {
-    alternativeText: Schema.Attribute.String;
-    caption: Schema.Attribute.String;
+    alternativeText: Schema.Attribute.Text;
+    caption: Schema.Attribute.Text;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     ext: Schema.Attribute.String;
+    focalPoint: Schema.Attribute.JSON;
     folder: Schema.Attribute.Relation<'manyToOne', 'plugin::upload.folder'> &
       Schema.Attribute.Private;
     folderPath: Schema.Attribute.String &
@@ -2187,7 +2230,7 @@ export interface PluginUploadFile extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     mime: Schema.Attribute.String & Schema.Attribute.Required;
     name: Schema.Attribute.String & Schema.Attribute.Required;
-    previewUrl: Schema.Attribute.String;
+    previewUrl: Schema.Attribute.Text;
     provider: Schema.Attribute.String & Schema.Attribute.Required;
     provider_metadata: Schema.Attribute.JSON;
     publishedAt: Schema.Attribute.DateTime;
@@ -2196,7 +2239,7 @@ export interface PluginUploadFile extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    url: Schema.Attribute.String & Schema.Attribute.Required;
+    url: Schema.Attribute.Text & Schema.Attribute.Required;
     width: Schema.Attribute.Integer;
   };
 }
@@ -2422,6 +2465,7 @@ declare module '@strapi/strapi' {
       'api::banner.banner': ApiBannerBanner;
       'api::blog-page.blog-page': ApiBlogPageBlogPage;
       'api::blog.blog': ApiBlogBlog;
+      'api::booking-addon-group.booking-addon-group': ApiBookingAddonGroupBookingAddonGroup;
       'api::card-profit.card-profit': ApiCardProfitCardProfit;
       'api::cash.cash': ApiCashCash;
       'api::contact.contact': ApiContactContact;

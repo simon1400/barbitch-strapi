@@ -1,0 +1,45 @@
+{
+  "kind": "collectionType",
+  "collectionName": "booking_addon_groups",
+  "info": {
+    "singularName": "booking-addon-group",
+    "pluralName": "booking-addon-groups",
+    "displayName": "Booking Addon Group",
+    "description": "Группы дополнений к базовым услугам Noona"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "base_noona_id": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "base_price": {
+      "type": "integer",
+      "required": true
+    },
+    "modifiers": {
+      "type": "component",
+      "component": "booking.modifier-item",
+      "repeatable": true
+    },
+    "base_modifier_results": {
+      "type": "component",
+      "component": "booking.modifier-result",
+      "repeatable": true
+    },
+    "addons": {
+      "type": "component",
+      "component": "booking.addon-item",
+      "repeatable": true
+    }
+  }
+}
