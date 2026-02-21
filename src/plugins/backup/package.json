@@ -1,0 +1,15 @@
+{
+  "name": "strapi-plugin-backup",
+  "version": "1.0.0",
+  "description": "Database backup plugin for Barbitch",
+  "exports": {
+    "./strapi-admin": "./admin/index.tsx",
+    "./strapi-server": "./server/index.ts"
+  },
+  "strapi": {
+    "kind": "plugin",
+    "name": "backup",
+    "displayName": "Backup",
+    "description": "Download a full database backup from the admin panel"
+  }
+}
