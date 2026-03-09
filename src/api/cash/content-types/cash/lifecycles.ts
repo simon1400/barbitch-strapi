@@ -77,6 +77,8 @@ export default {
     event.params.data.profit = String(await computeProfit(event.params.data));
   },
   async beforeUpdate(event: any) {
+    // Skip validation during publish (no meaningful data fields)
+    if (!event.params.data.date) return;
     await validateSum(event);
     event.params.data.profit = String(await computeProfit(event.params.data));
   },
