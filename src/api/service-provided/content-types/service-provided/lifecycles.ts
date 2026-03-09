@@ -23,11 +23,14 @@ async function validateOfferMoney(event: any) {
     const offer = dataCurrent?.offer?.connect?.length ? await (strapi.db as any).query(OfferUID).findOne({
       where: { id: { $in: dataCurrent.offer.connect[0].id } },
       select: ['price'],
-    }) : current.offer
+    }) : current?.offer
     const personal = dataCurrent?.personal?.connect?.length ? await (strapi.db as any).query(PersonalUID).findOne({
       where: { id: { $in: dataCurrent.personal.connect[0].id } },
       select: ['ratePercent'],
-    }) : current.personal
+    }) : current?.personal
+
+    // Skip validation if offer or personal data is not available (e.g. during publish)
+    if (!offer || !personal) return;
 
 
     const staffSalaries = Number(dataCurrent.staffSalaries)
