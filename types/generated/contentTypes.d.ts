@@ -697,6 +697,97 @@ export interface ApiBlogPageBlogPage extends Struct.SingleTypeSchema {
   };
 }
 
+export interface ApiBlogPlanBlogPlan extends Struct.CollectionTypeSchema {
+  collectionName: 'blog_plans';
+  info: {
+    displayName: 'Blog Plan';
+    pluralName: 'blog-plans';
+    singularName: 'blog-plan';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::blog-plan.blog-plan'
+    > &
+      Schema.Attribute.Private;
+    month: Schema.Attribute.Integer &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 12;
+          min: 1;
+        },
+        number
+      >;
+    publishedAt: Schema.Attribute.DateTime;
+    stage: Schema.Attribute.Enumeration<['draft', 'approved', 'completed']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'draft'>;
+    topics: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::blog-topic.blog-topic'
+    >;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    year: Schema.Attribute.Integer & Schema.Attribute.Required;
+  };
+}
+
+export interface ApiBlogTopicBlogTopic extends Struct.CollectionTypeSchema {
+  collectionName: 'blog_topics';
+  info: {
+    displayName: 'Blog Topic';
+    pluralName: 'blog-topics';
+    singularName: 'blog-topic';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    blog: Schema.Attribute.Relation<'oneToOne', 'api::blog.blog'>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    description: Schema.Attribute.Text;
+    internalLinks: Schema.Attribute.JSON;
+    keywords: Schema.Attribute.JSON;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::blog-topic.blog-topic'
+    > &
+      Schema.Attribute.Private;
+    plan: Schema.Attribute.Relation<'manyToOne', 'api::blog-plan.blog-plan'>;
+    publishedAt: Schema.Attribute.DateTime;
+    scheduledDate: Schema.Attribute.Date;
+    stage: Schema.Attribute.Enumeration<
+      [
+        'proposed',
+        'approved',
+        'rejected',
+        'generating',
+        'generated',
+        'published',
+      ]
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'proposed'>;
+    targetSlug: Schema.Attribute.String;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiBlogBlog extends Struct.CollectionTypeSchema {
   collectionName: 'blogs';
   info: {
@@ -2464,6 +2555,8 @@ declare module '@strapi/strapi' {
       'api::avans.avans': ApiAvansAvans;
       'api::banner.banner': ApiBannerBanner;
       'api::blog-page.blog-page': ApiBlogPageBlogPage;
+      'api::blog-plan.blog-plan': ApiBlogPlanBlogPlan;
+      'api::blog-topic.blog-topic': ApiBlogTopicBlogTopic;
       'api::blog.blog': ApiBlogBlog;
       'api::booking-addon-group.booking-addon-group': ApiBookingAddonGroupBookingAddonGroup;
       'api::card-profit.card-profit': ApiCardProfitCardProfit;

@@ -1,0 +1,50 @@
+{
+  "kind": "collectionType",
+  "collectionName": "blog_topics",
+  "info": {
+    "singularName": "blog-topic",
+    "pluralName": "blog-topics",
+    "displayName": "Blog Topic"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "description": {
+      "type": "text"
+    },
+    "keywords": {
+      "type": "json"
+    },
+    "targetSlug": {
+      "type": "string"
+    },
+    "scheduledDate": {
+      "type": "date"
+    },
+    "stage": {
+      "type": "enumeration",
+      "enum": ["proposed", "approved", "rejected", "generating", "generated", "published"],
+      "default": "proposed",
+      "required": true
+    },
+    "internalLinks": {
+      "type": "json"
+    },
+    "plan": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::blog-plan.blog-plan",
+      "inversedBy": "topics"
+    },
+    "blog": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::blog.blog"
+    }
+  }
+}

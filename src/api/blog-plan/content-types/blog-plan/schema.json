@@ -1,0 +1,36 @@
+{
+  "kind": "collectionType",
+  "collectionName": "blog_plans",
+  "info": {
+    "singularName": "blog-plan",
+    "pluralName": "blog-plans",
+    "displayName": "Blog Plan"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "month": {
+      "type": "integer",
+      "required": true,
+      "min": 1,
+      "max": 12
+    },
+    "year": {
+      "type": "integer",
+      "required": true
+    },
+    "stage": {
+      "type": "enumeration",
+      "enum": ["draft", "approved", "completed"],
+      "default": "draft",
+      "required": true
+    },
+    "topics": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::blog-topic.blog-topic",
+      "mappedBy": "plan"
+    }
+  }
+}
