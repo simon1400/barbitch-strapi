@@ -25,20 +25,20 @@ jobs:
           script: |
             cd /opt/barbitch-strapi
 
-            echo "🔄 Pulling latest changes from GitHub..."
+            echo "Pulling latest changes..."
             git pull origin main
 
-            echo "📦 Installing dependencies..."
+            echo "Installing dependencies..."
             NODE_ENV=development npm ci
 
-            echo "🏗️  Building Strapi admin panel..."
+            echo "Cleaning old build artifacts..."
+            rm -rf dist
+
+            echo "Building Strapi admin panel..."
             NODE_OPTIONS='--max-old-space-size=4096' npm run build
 
-            echo "🔄 Restarting PM2 process..."
+            echo "Restarting PM2 process..."
             pm2 restart barbitch-strapi || pm2 start ecosystem.config.js
 
-            echo "💾 Saving PM2 configuration..."
             pm2 save
-
-            echo "✅ Deployment completed successfully!"
-            pm2 list
+            echo "Deployment completed!"
