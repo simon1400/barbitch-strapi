@@ -22,7 +22,9 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 10m
           script: |
+            set -e
             cd /opt/barbitch-strapi
 
             echo "Pulling latest changes..."
@@ -36,6 +38,9 @@ jobs:
 
             echo "Building Strapi admin panel..."
             NODE_OPTIONS='--max-old-space-size=4096' npm run build
+
+            echo "Verifying build..."
+            test -f dist/build/index.html || { echo "BUILD FAILED: index.html not found!"; exit 1; }
 
             echo "Restarting PM2 process..."
             pm2 restart barbitch-strapi || pm2 start ecosystem.config.js
