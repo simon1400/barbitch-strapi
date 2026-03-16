@@ -236,7 +236,7 @@ BANNERY:
       ],
       response_format: { type: 'json_object' },
       temperature: 0.7,
-      max_tokens: 8000,
+      max_completion_tokens: 8000,
     });
 
     const article = JSON.parse(response.choices[0].message.content || '{}');
