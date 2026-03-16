@@ -3,9 +3,13 @@ export default ({env}) => ({
     enabled: true,
     resolve: './src/plugins/backup',
   },
-  // Disable all plugins temporarily to test
   imagekit: {
-    enabled: false,
+    enabled: true,
+    config: {
+      publicKey: env('IMAGEKIT_PUBLIC_KEY'),
+      privateKey: env('IMAGEKIT_PRIVATE_KEY'),
+      urlEndpoint: env('IMAGEKIT_URL_ENDPOINT'),
+    },
   },
   ckeditor: {
     enabled: false,
