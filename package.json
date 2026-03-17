@@ -8,7 +8,8 @@
     "dev": "cross-env NODE_ENV=development strapi develop",
     "start": "cross-env NODE_ENV=production strapi start",
     "deploy": "pm2 deploy production",
-    "strapi": "strapi"
+    "strapi": "strapi",
+    "postinstall": "node patches/fix-imagekit-null-formats.js"
   },
   "dependencies": {
     "@_sh/strapi-plugin-ckeditor": "6.0.2",
