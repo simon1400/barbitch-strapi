@@ -1,0 +1,37 @@
+{
+  "kind": "collectionType",
+  "collectionName": "chat_sessions",
+  "info": {
+    "singularName": "chat-session",
+    "pluralName": "chat-sessions",
+    "displayName": "Chat Session"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "sessionId": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "visitorName": {
+      "type": "string",
+      "default": "Návštěvník"
+    },
+    "stage": {
+      "type": "enumeration",
+      "enum": ["active", "closed"],
+      "default": "active"
+    },
+    "telegramTopicId": {
+      "type": "integer"
+    },
+    "messages": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::chat-message.chat-message",
+      "mappedBy": "session"
+    }
+  }
+}
