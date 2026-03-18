@@ -1218,6 +1218,49 @@ export interface ApiExtraProfitExtraProfit extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiGoogleReviewGoogleReview
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'google_reviews';
+  info: {
+    description: 'Google reviews synced from Places API';
+    displayName: 'Google Reviews';
+    pluralName: 'google-reviews';
+    singularName: 'google-review';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    googleReviewId: Schema.Attribute.String & Schema.Attribute.Unique;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::google-review.google-review'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    rating: Schema.Attribute.Integer &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMax<
+        {
+          max: 5;
+          min: 1;
+        },
+        number
+      >;
+    reviewDate: Schema.Attribute.String;
+    reviewerName: Schema.Attribute.String & Schema.Attribute.Required;
+    reviewerPhoto: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
   collectionName: 'homepages';
   info: {
@@ -2640,6 +2683,7 @@ declare module '@strapi/strapi' {
       'api::contact.contact': ApiContactContact;
       'api::cost.cost': ApiCostCost;
       'api::extra-profit.extra-profit': ApiExtraProfitExtraProfit;
+      'api::google-review.google-review': ApiGoogleReviewGoogleReview;
       'api::homepage.homepage': ApiHomepageHomepage;
       'api::navigation.navigation': ApiNavigationNavigation;
       'api::note.note': ApiNoteNote;

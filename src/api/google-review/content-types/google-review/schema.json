@@ -1,0 +1,39 @@
+{
+  "kind": "collectionType",
+  "collectionName": "google_reviews",
+  "info": {
+    "singularName": "google-review",
+    "pluralName": "google-reviews",
+    "displayName": "Google Reviews",
+    "description": "Google reviews synced from Places API"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "reviewerName": {
+      "type": "string",
+      "required": true
+    },
+    "reviewerPhoto": {
+      "type": "string"
+    },
+    "rating": {
+      "type": "integer",
+      "required": true,
+      "min": 1,
+      "max": 5
+    },
+    "comment": {
+      "type": "text"
+    },
+    "googleReviewId": {
+      "type": "string",
+      "unique": true
+    },
+    "reviewDate": {
+      "type": "string"
+    }
+  }
+}
