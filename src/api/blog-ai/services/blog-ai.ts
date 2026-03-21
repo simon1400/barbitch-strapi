@@ -224,6 +224,14 @@ FORMÁTOVÁNÍ (DŮLEŽITÉ pro SEO — structured content = vyšší šance na 
 - <h3> — podnadpisy v delších sekcích
 - <a href="..."> — interní linky s přirozeným anchor textem
 
+INLINE OBRÁZKY (1-2 v článku):
+- Vlož do contentText placeholder {{IMAGE:popis obrázku v angličtině pro DALL-E}}
+- Obrázky MUSÍ být smysluplné a vysvětlující — NE jen dekorativní
+- Příklady: "Close-up of eyebrow lamination process step by step", "Comparison of gel nails vs acrylic nails side by side", "Proper hand care routine illustration"
+- Umísti je tam kde vizuální znázornění pomůže čtenáři pochopit text (po vysvětlení procesu, u srovnání, u návodů)
+- Placeholder vlož na vlastní řádek MEZI odstavce <p>, např: <p>Text před...</p>{{IMAGE:popis}}<p>Text po...</p>
+- Maximálně 2 obrázky v celém článku
+
 BANNERY:
 - CTA bannery vedou na /book (rezervace) nebo relevantní službu
 - Texty: kreativní, motivační ("Rezervuj si termín", "Přijď na konzultaci", apod.)`;
@@ -242,17 +250,25 @@ BANNERY:
     const article = JSON.parse(response.choices[0].message.content || '{}');
 
     // Generate featured image with DALL-E
-    let imageId: number | null = null;
+    let headerImage: { id: number; url: string; alt: string } | null = null;
     try {
-      imageId = await generateAndUploadImage(topic.title, topic.keywords || []);
+      headerImage = await generateAndUploadImage(topic.title, topic.keywords || [], 'header');
     } catch (err) {
-      strapi.log.warn('DALL-E image generation failed, creating post without image:', err);
+      strapi.log.warn('DALL-E header image generation failed, creating post without image:', err);
     }
 
-    // Inject image into banner components
-    const dynamicContent = (article.dynamicContent || []).map((component: any) => {
-      if (component.__component === 'content.content-baner' && imageId) {
-        return { ...component, image: imageId };
+    // Generate inline content images (replaces {{IMAGE:...}} placeholders)
+    let dynamicContent = article.dynamicContent || [];
+    try {
+      dynamicContent = await generateContentImages(dynamicContent, topic.title, topic.keywords || []);
+    } catch (err) {
+      strapi.log.warn('Content image generation failed, continuing without inline images:', err);
+    }
+
+    // Inject header image into banner components
+    dynamicContent = dynamicContent.map((component: any) => {
+      if (component.__component === 'content.content-baner' && headerImage) {
+        return { ...component, image: headerImage.id };
       }
       return component;
     });
@@ -264,13 +280,13 @@ BANNERY:
       metaData: {
         title: article.metaTitle || topic.title,
         description: article.metaDescription || topic.description,
-        ...(imageId ? { image: imageId } : {}),
+        ...(headerImage ? { image: headerImage.id } : {}),
       },
       dynamicContent,
     };
 
-    if (imageId) {
-      blogData.image = imageId;
+    if (headerImage) {
+      blogData.image = headerImage.id;
     }
 
     const blogPost: any = await strapi.entityService.create('api::blog.blog' as any, {
@@ -304,17 +320,87 @@ BANNERY:
   }
 }
 
+// Generate contextual inline images for article content
+async function generateContentImages(
+  dynamicContent: any[],
+  title: string,
+  keywords: string[]
+): Promise<any[]> {
+  // Find placeholders like {{IMAGE:description of what to generate}}
+  const imagePattern = /\{\{IMAGE:([^}]+)\}\}/g;
+  const imagesToGenerate: { componentIdx: number; placeholder: string; description: string }[] = [];
+
+  dynamicContent.forEach((component, idx) => {
+    if (component.__component === 'content.text' && component.contentText) {
+      let match;
+      while ((match = imagePattern.exec(component.contentText)) !== null) {
+        imagesToGenerate.push({
+          componentIdx: idx,
+          placeholder: match[0],
+          description: match[1].trim(),
+        });
+      }
+    }
+  });
+
+  if (imagesToGenerate.length === 0) return dynamicContent;
+
+  strapi.log.info(`Generating ${imagesToGenerate.length} inline content image(s)...`);
+
+  // Generate images (max 2 to keep costs reasonable)
+  const toGenerate = imagesToGenerate.slice(0, 2);
+  const results = await Promise.allSettled(
+    toGenerate.map(async (img) => {
+      const uploaded = await generateAndUploadImage(
+        img.description,
+        keywords,
+        'content'
+      );
+      return { ...img, uploaded };
+    })
+  );
+
+  // Replace placeholders with <img> tags
+  const updatedContent = [...dynamicContent];
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue;
+    const { componentIdx, placeholder, uploaded } = result.value;
+    const component = updatedContent[componentIdx];
+    const imgTag = `<figure class="content-image"><img src="${uploaded.url}" alt="${uploaded.alt}" width="896" height="512" loading="lazy" /><figcaption>${uploaded.alt}</figcaption></figure>`;
+    component.contentText = component.contentText.replace(placeholder, imgTag);
+  }
+
+  // Clean up any remaining ungenerated placeholders
+  for (const component of updatedContent) {
+    if (component.__component === 'content.text' && component.contentText) {
+      component.contentText = component.contentText.replace(/\{\{IMAGE:[^}]+\}\}/g, '');
+    }
+  }
+
+  return updatedContent;
+}
+
 // Generate image with DALL-E and upload to Strapi media library
-async function generateAndUploadImage(title: string, keywords: string[]): Promise<number> {
+async function generateAndUploadImage(
+  title: string,
+  keywords: string[],
+  type: 'header' | 'content' = 'header'
+): Promise<{ id: number; url: string; alt: string }> {
   const openai = getOpenAI();
 
-  const imagePrompt = `Professional beauty salon blog header image. Theme: "${title}". Style: modern, clean, soft pastel colors, professional beauty photography aesthetic. Keywords: ${keywords.slice(0, 3).join(', ')}. No text on image. High quality, editorial style.`;
+  const styleByType = type === 'content'
+    ? 'Informative illustration that visually explains the concept. Clean, educational, modern style. Not just decorative — should help the reader understand the topic.'
+    : 'Modern, clean, soft pastel colors, professional beauty photography aesthetic. High quality, editorial style.';
+
+  const sizeByType = type === 'content' ? '1024x1024' as const : '1792x1024' as const;
+
+  const imagePrompt = `Professional beauty salon blog image. Theme: "${title}". Style: ${styleByType} Keywords: ${keywords.slice(0, 3).join(', ')}. No text on image.`;
 
   const imageResponse = await openai.images.generate({
     model: 'dall-e-3',
     prompt: imagePrompt,
     n: 1,
-    size: '1792x1024',
+    size: sizeByType,
     quality: 'standard',
   });
 
@@ -362,7 +448,8 @@ async function generateAndUploadImage(title: string, keywords: string[]): Promis
       throw new Error('Failed to upload image to Strapi');
     }
 
-    return uploadedFiles[0].id;
+    const file = uploadedFiles[0];
+    return { id: file.id, url: file.url, alt: title };
   } catch (uploadErr) {
     // Fallback: try alternative upload format
     strapi.log.warn('Primary upload failed, trying fallback:', uploadErr);
@@ -386,7 +473,8 @@ async function generateAndUploadImage(title: string, keywords: string[]): Promis
         throw new Error('Failed to upload image to Strapi (fallback)');
       }
 
-      return uploadedFiles[0].id;
+      const file = uploadedFiles[0];
+      return { id: file.id, url: file.url, alt: title };
     } catch (fallbackErr) {
       strapi.log.error('Both upload methods failed:', fallbackErr);
       throw fallbackErr;
