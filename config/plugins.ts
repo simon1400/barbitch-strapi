@@ -16,13 +16,19 @@ export default ({env}) => ({
   ckeditor: {
     enabled: false,
   },
-  'gpt-5': {
-    enabled: false,
-  },
   'required-relation-field': {
     enabled: false,
   },
   'responsive-backend': {
     enabled: false,
   },
+  "bulk-editor": {
+    enabled: true,
+  },
+  'document-metadata': {
+    enabled: true,
+  },
+  'publisher': {
+		enabled: true,
+	},
 });
