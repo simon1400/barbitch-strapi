@@ -155,6 +155,15 @@
       },
       "required": true,
       "default": true
+    },
+    "bookingPriority": {
+      "type": "integer",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "default": 0
     }
   }
 }

@@ -1541,6 +1541,13 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       'api::add-money.add-money'
     >;
     advances: Schema.Attribute.Relation<'oneToMany', 'api::avans.avans'>;
+    bookingPriority: Schema.Attribute.Integer &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<0>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
