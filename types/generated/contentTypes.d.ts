@@ -1623,6 +1623,14 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       }>;
     service: Schema.Attribute.Relation<'manyToOne', 'api::service.service'>;
     taxes: Schema.Attribute.Relation<'oneToMany', 'api::tax.tax'>;
+    tier: Schema.Attribute.Enumeration<['senior', 'junior']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<'senior'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1808,6 +1816,42 @@ export interface ApiSalarySalary extends Struct.CollectionTypeSchema {
       Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiServiceJuniorMapServiceJuniorMap
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'service_junior_maps';
+  info: {
+    description: '\u041C\u0430\u043F\u043F\u0438\u043D\u0433 senior event_type ID \u2192 junior event_type ID \u0432 Noona';
+    displayName: 'Service Junior Map';
+    pluralName: 'service-junior-maps';
+    singularName: 'service-junior-map';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    junior_noona_id: Schema.Attribute.String & Schema.Attribute.Required;
+    junior_price: Schema.Attribute.Integer;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::service-junior-map.service-junior-map'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    senior_noona_id: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+    senior_price: Schema.Attribute.Integer;
+    title: Schema.Attribute.String;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -2742,6 +2786,7 @@ declare module '@strapi/strapi' {
       'api::pricelist.pricelist': ApiPricelistPricelist;
       'api::qr-pay.qr-pay': ApiQrPayQrPay;
       'api::salary.salary': ApiSalarySalary;
+      'api::service-junior-map.service-junior-map': ApiServiceJuniorMapServiceJuniorMap;
       'api::service-provided.service-provided': ApiServiceProvidedServiceProvided;
       'api::service.service': ApiServiceService;
       'api::shift.shift': ApiShiftShift;

@@ -164,6 +164,20 @@
         }
       },
       "default": 0
+    },
+    "tier": {
+      "type": "enumeration",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "required": true,
+      "default": "senior",
+      "enum": [
+        "senior",
+        "junior"
+      ]
     }
   }
 }

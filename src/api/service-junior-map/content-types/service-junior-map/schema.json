@@ -1,0 +1,34 @@
+{
+  "kind": "collectionType",
+  "collectionName": "service_junior_maps",
+  "info": {
+    "singularName": "service-junior-map",
+    "pluralName": "service-junior-maps",
+    "displayName": "Service Junior Map",
+    "description": "Маппинг senior event_type ID → junior event_type ID в Noona"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "senior_noona_id": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "junior_noona_id": {
+      "type": "string",
+      "required": true
+    },
+    "title": {
+      "type": "string"
+    },
+    "senior_price": {
+      "type": "integer"
+    },
+    "junior_price": {
+      "type": "integer"
+    }
+  }
+}
