@@ -16,10 +16,8 @@
         "preset": "defaultHtml"
       }
     },
-    "pricelistTable": {
-      "type": "relation",
-      "relation": "oneToOne",
-      "target": "api::pricelist.pricelist"
+    "pricelistFilter": {
+      "type": "string"
     },
     "contentAfter": {
       "type": "customField",

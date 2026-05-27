@@ -13,22 +13,20 @@ export default ({env}) => ({
       useTransformUrls: true,
     },
   },
-  ckeditor: {
-    enabled: false,
-  },
-  'required-relation-field': {
-    enabled: false,
-  },
-  'responsive-backend': {
-    enabled: false,
+  'strapi-plugin-required-relation-field': {
+    enabled: true,
   },
   "bulk-editor": {
     enabled: true,
   },
-  'document-metadata': {
-    enabled: true,
-  },
-  'publisher': {
-		enabled: true,
-	},
+  // 'document-metadata' — НЕ внешний плагин, а внутренний сервис @strapi/content-manager
+  // (грузится автоматически). Конфиг-запись была ошибочной и ломала загрузку плагинов.
+  // 'document-metadata': {
+  //   enabled: true,
+  // },
+  // 'publisher' (strapi-plugin-publisher) — пакет удалён из node_modules.
+  // Чтобы вернуть отложенную публикацию: npm i strapi-plugin-publisher и раскомментировать.
+  // 'publisher': {
+  // 	enabled: true,
+  // },
 });

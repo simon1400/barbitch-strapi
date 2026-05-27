@@ -172,7 +172,6 @@
           "localized": false
         }
       },
-      "required": true,
       "default": "senior",
       "enum": [
         "senior",

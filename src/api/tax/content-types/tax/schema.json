@@ -30,7 +30,8 @@
       "enum": [
         "social",
         "health",
-        "income"
+        "income",
+        "all"
       ],
       "required": true
     },

@@ -24,13 +24,15 @@
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::personal.personal",
-      "inversedBy": "offersDone"
+      "inversedBy": "offersDone",
+      "required": true
     },
     "offer": {
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::offer.offer",
-      "inversedBy": "offerRendered"
+      "inversedBy": "offerRendered",
+      "required": true
     },
     "time": {
       "type": "string"

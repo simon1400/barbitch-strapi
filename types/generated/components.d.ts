@@ -195,42 +195,8 @@ export interface ContentPriceList extends Struct.ComponentSchema {
         }
       >;
     cta: Schema.Attribute.Component<'content.link', false>;
-    pricelistTable: Schema.Attribute.Relation<
-      'oneToOne',
-      'api::pricelist.pricelist'
-    >;
+    pricelistFilter: Schema.Attribute.String;
     title: Schema.Attribute.String;
-  };
-}
-
-export interface ContentTable extends Struct.ComponentSchema {
-  collectionName: 'components_content_tables';
-  info: {
-    description: '';
-    displayName: 'table';
-    icon: 'bulletList';
-  };
-  attributes: {
-    item: Schema.Attribute.Component<'content.table-item', true> &
-      Schema.Attribute.Required;
-    sectionTitle: Schema.Attribute.String;
-    title: Schema.Attribute.String;
-  };
-}
-
-export interface ContentTableItem extends Struct.ComponentSchema {
-  collectionName: 'components_content_table_items';
-  info: {
-    description: '';
-    displayName: 'tableItem';
-    icon: 'database';
-  };
-  attributes: {
-    juniorPrice: Schema.Attribute.String & Schema.Attribute.Required;
-    linkRezervation: Schema.Attribute.String;
-    masterPrice: Schema.Attribute.String;
-    title: Schema.Attribute.String & Schema.Attribute.Required;
-    topMasterPrice: Schema.Attribute.String;
   };
 }
 
@@ -361,8 +327,6 @@ declare module '@strapi/strapi' {
       'content.link': ContentLink;
       'content.oficial-data': ContentOficialData;
       'content.price-list': ContentPriceList;
-      'content.table': ContentTable;
-      'content.table-item': ContentTableItem;
       'content.text': ContentText;
       'content.week': ContentWeek;
       'items.money-flow': ItemsMoneyFlow;

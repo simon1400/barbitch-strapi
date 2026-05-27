@@ -28,10 +28,12 @@
       "type": "text"
     },
     "noDph": {
-      "type": "biginteger"
+      "type": "biginteger",
+      "required": true
     },
     "category": {
       "type": "enumeration",
+      "required": true,
       "enum": [
         "Маркетинг",
         "Материалы",

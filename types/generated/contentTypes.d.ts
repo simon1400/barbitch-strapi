@@ -26,6 +26,11 @@ export interface AdminApiToken extends Struct.CollectionTypeSchema {
       Schema.Attribute.SetMinMaxLength<{
         minLength: 1;
       }>;
+    adminPermissions: Schema.Attribute.Relation<
+      'oneToMany',
+      'admin::permission'
+    >;
+    adminUserOwner: Schema.Attribute.Relation<'manyToOne', 'admin::user'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -39,6 +44,9 @@ export interface AdminApiToken extends Struct.CollectionTypeSchema {
         minLength: 1;
       }>;
     expiresAt: Schema.Attribute.DateTime;
+    kind: Schema.Attribute.Enumeration<['content-api', 'admin']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'content-api'>;
     lastUsedAt: Schema.Attribute.DateTime;
     lifespan: Schema.Attribute.BigInteger;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
@@ -56,7 +64,6 @@ export interface AdminApiToken extends Struct.CollectionTypeSchema {
     >;
     publishedAt: Schema.Attribute.DateTime;
     type: Schema.Attribute.Enumeration<['read-only', 'full-access', 'custom']> &
-      Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'read-only'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -134,6 +141,7 @@ export interface AdminPermission extends Struct.CollectionTypeSchema {
         minLength: 1;
       }>;
     actionParameters: Schema.Attribute.JSON & Schema.Attribute.DefaultTo<{}>;
+    apiToken: Schema.Attribute.Relation<'manyToOne', 'admin::api-token'>;
     conditions: Schema.Attribute.JSON & Schema.Attribute.DefaultTo<[]>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -385,6 +393,8 @@ export interface AdminUser extends Struct.CollectionTypeSchema {
     };
   };
   attributes: {
+    apiTokens: Schema.Attribute.Relation<'oneToMany', 'admin::api-token'> &
+      Schema.Attribute.Private;
     blocked: Schema.Attribute.Boolean &
       Schema.Attribute.Private &
       Schema.Attribute.DefaultTo<false>;
@@ -1168,7 +1178,8 @@ export interface ApiCostCost extends Struct.CollectionTypeSchema {
         '\u041E\u043F\u0442\u043E\u0432\u044B\u0435 \u0437\u0430\u043A\u0443\u043F\u043A\u0438',
         '\u0414\u0440\u0443\u0433\u043E\u0435',
       ]
-    >;
+    > &
+      Schema.Attribute.Required;
     comment: Schema.Attribute.Text;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -1178,7 +1189,7 @@ export interface ApiCostCost extends Struct.CollectionTypeSchema {
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::cost.cost'> &
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
-    noDph: Schema.Attribute.BigInteger;
+    noDph: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
@@ -1624,7 +1635,6 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
     service: Schema.Attribute.Relation<'manyToOne', 'api::service.service'>;
     taxes: Schema.Attribute.Relation<'oneToMany', 'api::tax.tax'>;
     tier: Schema.Attribute.Enumeration<['senior', 'junior']> &
-      Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
           localized: false;
@@ -1696,60 +1706,6 @@ export interface ApiPricelistPagePricelistPage extends Struct.SingleTypeSchema {
     publishedAt: Schema.Attribute.DateTime;
     title: Schema.Attribute.String &
       Schema.Attribute.Required &
-      Schema.Attribute.SetPluginOptions<{
-        i18n: {
-          localized: true;
-        };
-      }>;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-  };
-}
-
-export interface ApiPricelistPricelist extends Struct.CollectionTypeSchema {
-  collectionName: 'pricelists';
-  info: {
-    description: '';
-    displayName: '\u0426\u0435\u043D\u043D\u0438\u043A';
-    pluralName: 'pricelists';
-    singularName: 'pricelist';
-  };
-  options: {
-    draftAndPublish: true;
-  };
-  pluginOptions: {
-    i18n: {
-      localized: true;
-    };
-  };
-  attributes: {
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    locale: Schema.Attribute.String;
-    localizations: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::pricelist.pricelist'
-    >;
-    order: Schema.Attribute.Integer &
-      Schema.Attribute.SetPluginOptions<{
-        i18n: {
-          localized: false;
-        };
-      }> &
-      Schema.Attribute.DefaultTo<0>;
-    publishedAt: Schema.Attribute.DateTime;
-    table: Schema.Attribute.Component<'content.table', true> &
-      Schema.Attribute.Required &
-      Schema.Attribute.SetPluginOptions<{
-        i18n: {
-          localized: true;
-        };
-      }>;
-    title: Schema.Attribute.String &
-      Schema.Attribute.Required &
-      Schema.Attribute.Unique &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
           localized: true;
@@ -1892,8 +1848,10 @@ export interface ApiServiceProvidedServiceProvided
       'api::service-provided.service-provided'
     > &
       Schema.Attribute.Private;
-    offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'>;
-    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'> &
+      Schema.Attribute.Required;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'> &
+      Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     sale: Schema.Attribute.String;
     salonSalaries: Schema.Attribute.String & Schema.Attribute.Required;
@@ -2083,7 +2041,7 @@ export interface ApiTaxTax extends Struct.CollectionTypeSchema {
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
-    type: Schema.Attribute.Enumeration<['social', 'health', 'income']> &
+    type: Schema.Attribute.Enumeration<['social', 'health', 'income', 'all']> &
       Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -2338,46 +2296,6 @@ export interface PluginI18NLocale extends Struct.CollectionTypeSchema {
         },
         number
       >;
-    publishedAt: Schema.Attribute.DateTime;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-  };
-}
-
-export interface PluginPublisherAction extends Struct.CollectionTypeSchema {
-  collectionName: 'actions';
-  info: {
-    displayName: 'actions';
-    pluralName: 'actions';
-    singularName: 'action';
-  };
-  options: {
-    comment: '';
-    draftAndPublish: false;
-  };
-  pluginOptions: {
-    'content-manager': {
-      visible: false;
-    };
-    'content-type-builder': {
-      visible: false;
-    };
-  };
-  attributes: {
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    entityId: Schema.Attribute.String & Schema.Attribute.Required;
-    entitySlug: Schema.Attribute.String & Schema.Attribute.Required;
-    executeAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<
-      'oneToMany',
-      'plugin::publisher.action'
-    > &
-      Schema.Attribute.Private;
-    mode: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -2783,7 +2701,6 @@ declare module '@strapi/strapi' {
       'api::penalty.penalty': ApiPenaltyPenalty;
       'api::personal.personal': ApiPersonalPersonal;
       'api::pricelist-page.pricelist-page': ApiPricelistPagePricelistPage;
-      'api::pricelist.pricelist': ApiPricelistPricelist;
       'api::qr-pay.qr-pay': ApiQrPayQrPay;
       'api::salary.salary': ApiSalarySalary;
       'api::service-junior-map.service-junior-map': ApiServiceJuniorMapServiceJuniorMap;
@@ -2798,7 +2715,6 @@ declare module '@strapi/strapi' {
       'plugin::content-releases.release': PluginContentReleasesRelease;
       'plugin::content-releases.release-action': PluginContentReleasesReleaseAction;
       'plugin::i18n.locale': PluginI18NLocale;
-      'plugin::publisher.action': PluginPublisherAction;
       'plugin::review-workflows.workflow': PluginReviewWorkflowsWorkflow;
       'plugin::review-workflows.workflow-stage': PluginReviewWorkflowsWorkflowStage;
       'plugin::upload.file': PluginUploadFile;
