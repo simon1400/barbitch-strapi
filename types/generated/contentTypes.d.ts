@@ -1862,6 +1862,7 @@ export interface ApiServiceProvidedServiceProvided
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     verify: Schema.Attribute.String;
+    verifyFlags: Schema.Attribute.JSON;
   };
 }
 

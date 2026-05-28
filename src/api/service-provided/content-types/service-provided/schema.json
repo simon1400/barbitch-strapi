@@ -65,6 +65,9 @@
     },
     "verify": {
       "type": "string"
+    },
+    "verifyFlags": {
+      "type": "json"
     }
   }
 }
