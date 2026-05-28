@@ -27,6 +27,7 @@
     "strapi-5-plugin-responsive-backend": "^0.0.4",
     "strapi-google-analytics-dashboard": "^0.0.2",
     "strapi-plugin-bulk-editor": "^0.1.11",
+    "strapi-plugin-content-manager-organizer": "^1.0.0",
     "strapi-plugin-imagekit": "^1.0.2",
     "strapi-plugin-required-relation-field": "^0.3.0",
     "styled-components": "^6.0.0"

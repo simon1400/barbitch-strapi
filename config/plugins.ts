@@ -19,14 +19,7 @@ export default ({env}) => ({
   "bulk-editor": {
     enabled: true,
   },
-  // 'document-metadata' — НЕ внешний плагин, а внутренний сервис @strapi/content-manager
-  // (грузится автоматически). Конфиг-запись была ошибочной и ломала загрузку плагинов.
-  // 'document-metadata': {
-  //   enabled: true,
-  // },
-  // 'publisher' (strapi-plugin-publisher) — пакет удалён из node_modules.
-  // Чтобы вернуть отложенную публикацию: npm i strapi-plugin-publisher и раскомментировать.
-  // 'publisher': {
-  // 	enabled: true,
-  // },
+  'content-manager-organizer': {
+    enabled: true,
+  },
 });
