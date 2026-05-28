@@ -1,0 +1,62 @@
+{
+  "kind": "collectionType",
+  "collectionName": "client_error_logs",
+  "info": {
+    "singularName": "client-error-log",
+    "pluralName": "client-error-logs",
+    "displayName": "Client Error Log",
+    "description": "Browser-side errors reported from client app"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "errorHash": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "message": {
+      "type": "text",
+      "required": true
+    },
+    "stack": {
+      "type": "text"
+    },
+    "source": {
+      "type": "enumeration",
+      "enum": ["window-error", "unhandled-rejection", "react-error", "manual"],
+      "default": "window-error"
+    },
+    "url": {
+      "type": "string"
+    },
+    "userAgent": {
+      "type": "string"
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "environment": {
+      "type": "enumeration",
+      "enum": ["production", "development"],
+      "default": "production"
+    },
+    "count": {
+      "type": "integer",
+      "default": 1,
+      "min": 1
+    },
+    "firstSeen": {
+      "type": "datetime"
+    },
+    "lastSeen": {
+      "type": "datetime"
+    },
+    "resolved": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}

@@ -1043,6 +1043,60 @@ export interface ApiChatSessionChatSession extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiClientErrorLogClientErrorLog
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'client_error_logs';
+  info: {
+    description: 'Browser-side errors reported from client app';
+    displayName: 'Client Error Log';
+    pluralName: 'client-error-logs';
+    singularName: 'client-error-log';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    count: Schema.Attribute.Integer &
+      Schema.Attribute.SetMinMax<
+        {
+          min: 1;
+        },
+        number
+      > &
+      Schema.Attribute.DefaultTo<1>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    environment: Schema.Attribute.Enumeration<['production', 'development']> &
+      Schema.Attribute.DefaultTo<'production'>;
+    errorHash: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+    firstSeen: Schema.Attribute.DateTime;
+    lastSeen: Schema.Attribute.DateTime;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::client-error-log.client-error-log'
+    > &
+      Schema.Attribute.Private;
+    message: Schema.Attribute.Text & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    resolved: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    sessionId: Schema.Attribute.String;
+    source: Schema.Attribute.Enumeration<
+      ['window-error', 'unhandled-rejection', 'react-error', 'manual']
+    > &
+      Schema.Attribute.DefaultTo<'window-error'>;
+    stack: Schema.Attribute.Text;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    url: Schema.Attribute.String;
+    userAgent: Schema.Attribute.String;
+  };
+}
+
 export interface ApiContactContact extends Struct.SingleTypeSchema {
   collectionName: 'contacts';
   info: {
@@ -2731,6 +2785,7 @@ declare module '@strapi/strapi' {
       'api::cash.cash': ApiCashCash;
       'api::chat-message.chat-message': ApiChatMessageChatMessage;
       'api::chat-session.chat-session': ApiChatSessionChatSession;
+      'api::client-error-log.client-error-log': ApiClientErrorLogClientErrorLog;
       'api::contact.contact': ApiContactContact;
       'api::cost.cost': ApiCostCost;
       'api::extra-profit.extra-profit': ApiExtraProfitExtraProfit;
