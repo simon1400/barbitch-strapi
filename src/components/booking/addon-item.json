@@ -18,6 +18,9 @@
       "type": "string",
       "required": true
     },
+    "description": {
+      "type": "text"
+    },
     "modifier_results": {
       "type": "component",
       "component": "booking.modifier-result",

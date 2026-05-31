@@ -20,6 +20,9 @@
     },
     "group": {
       "type": "string"
+    },
+    "description": {
+      "type": "text"
     }
   }
 }
