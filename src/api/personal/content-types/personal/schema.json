@@ -56,6 +56,12 @@
       "target": "api::penalty.penalty",
       "mappedBy": "personal"
     },
+    "timeOffs": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::time-off.time-off",
+      "mappedBy": "personal"
+    },
     "payroll": {
       "type": "relation",
       "relation": "oneToMany",

@@ -1695,6 +1695,7 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
         };
       }> &
       Schema.Attribute.DefaultTo<'senior'>;
+    timeOffs: Schema.Attribute.Relation<'oneToMany', 'api::time-off.time-off'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -2098,6 +2099,42 @@ export interface ApiTaxTax extends Struct.CollectionTypeSchema {
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     type: Schema.Attribute.Enumeration<['social', 'health', 'income', 'all']> &
       Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiTimeOffTimeOff extends Struct.CollectionTypeSchema {
+  collectionName: 'time_offs';
+  info: {
+    description: '\u042D\u0432\u0438\u0434\u0435\u043D\u0446\u0438\u044F \u0431\u043E\u043B\u044C\u043D\u0438\u0447\u043D\u044B\u0445 \u0438 \u043E\u0442\u043F\u0443\u0441\u043A\u043E\u0432 \u0441\u043E\u0442\u0440\u0443\u0434\u043D\u0438\u043A\u043E\u0432';
+    displayName: '\u0411\u043E\u043B\u044C\u043D\u0438\u0447\u043D\u044B\u0435 \u0438 \u043E\u0442\u043F\u0443\u0441\u043A\u0430';
+    pluralName: 'time-offs';
+    singularName: 'time-off';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    endDate: Schema.Attribute.Date & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::time-off.time-off'
+    > &
+      Schema.Attribute.Private;
+    paid: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    publishedAt: Schema.Attribute.DateTime;
+    startDate: Schema.Attribute.Date & Schema.Attribute.Required;
+    type: Schema.Attribute.Enumeration<['sick', 'vacation', 'personal']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'sick'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -2806,6 +2843,7 @@ declare module '@strapi/strapi' {
       'api::shift.shift': ApiShiftShift;
       'api::stock.stock': ApiStockStock;
       'api::tax.tax': ApiTaxTax;
+      'api::time-off.time-off': ApiTimeOffTimeOff;
       'api::vaucher-page.vaucher-page': ApiVaucherPageVaucherPage;
       'api::voucher.voucher': ApiVoucherVoucher;
       'api::work-time.work-time': ApiWorkTimeWorkTime;

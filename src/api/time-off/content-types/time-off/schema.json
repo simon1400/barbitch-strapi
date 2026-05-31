@@ -1,0 +1,47 @@
+{
+  "kind": "collectionType",
+  "collectionName": "time_offs",
+  "info": {
+    "singularName": "time-off",
+    "pluralName": "time-offs",
+    "displayName": "Больничные и отпуска",
+    "description": "Эвиденция больничных и отпусков сотрудников"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "personal": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::personal.personal",
+      "inversedBy": "timeOffs"
+    },
+    "type": {
+      "type": "enumeration",
+      "required": true,
+      "default": "sick",
+      "enum": [
+        "sick",
+        "vacation",
+        "personal"
+      ]
+    },
+    "startDate": {
+      "type": "date",
+      "required": true
+    },
+    "endDate": {
+      "type": "date",
+      "required": true
+    },
+    "paid": {
+      "type": "boolean",
+      "default": true
+    },
+    "comment": {
+      "type": "text"
+    }
+  }
+}

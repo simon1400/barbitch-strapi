@@ -24,6 +24,7 @@ export interface BookingModifierItem extends Struct.ComponentSchema {
     icon: 'check';
   };
   attributes: {
+    group: Schema.Attribute.String;
     key: Schema.Attribute.String & Schema.Attribute.Required;
     label: Schema.Attribute.String & Schema.Attribute.Required;
     price_diff: Schema.Attribute.Integer & Schema.Attribute.Required;
