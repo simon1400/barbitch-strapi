@@ -32,12 +32,6 @@
       "target": "api::service.service",
       "inversedBy": "personals"
     },
-    "offers": {
-      "type": "relation",
-      "relation": "manyToMany",
-      "target": "api::offer.offer",
-      "mappedBy": "personals"
-    },
     "offersDone": {
       "type": "relation",
       "relation": "oneToMany",

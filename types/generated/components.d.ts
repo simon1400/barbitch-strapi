@@ -7,6 +7,7 @@ export interface BookingAddonItem extends Struct.ComponentSchema {
     icon: 'plus';
   };
   attributes: {
+    description: Schema.Attribute.Text;
     label: Schema.Attribute.String & Schema.Attribute.Required;
     modifier_results: Schema.Attribute.Component<
       'booking.modifier-result',
@@ -24,6 +25,7 @@ export interface BookingModifierItem extends Struct.ComponentSchema {
     icon: 'check';
   };
   attributes: {
+    description: Schema.Attribute.Text;
     group: Schema.Attribute.String;
     key: Schema.Attribute.String & Schema.Attribute.Required;
     label: Schema.Attribute.String & Schema.Attribute.Required;

@@ -9,7 +9,7 @@
     "start": "cross-env NODE_ENV=production strapi start",
     "deploy": "pm2 deploy production",
     "strapi": "strapi",
-    "postinstall": "node patches/fix-imagekit-null-formats.js"
+    "postinstall": "node patches/fix-imagekit-null-formats.js && node patches/fix-relation-picker.js"
   },
   "dependencies": {
     "@_sh/strapi-plugin-ckeditor": "6.0.2",
@@ -30,6 +30,7 @@
     "strapi-plugin-content-manager-organizer": "^1.0.0",
     "strapi-plugin-imagekit": "^1.0.2",
     "strapi-plugin-required-relation-field": "^0.3.0",
+    "straplight": "^1.2.1",
     "styled-components": "^6.0.0"
   },
   "devDependencies": {

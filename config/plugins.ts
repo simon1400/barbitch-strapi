@@ -22,4 +22,7 @@ export default ({env}) => ({
   'content-manager-organizer': {
     enabled: true,
   },
+  straplight: {
+    enabled: true,
+  },
 });

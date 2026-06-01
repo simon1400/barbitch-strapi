@@ -54,15 +54,24 @@ const computeFlags = (
     ? offerPrice * (1 - discountRate) - mustStaff
     : offerPrice - mustStaff
 
+  // Round to whole crowns (cents) before comparing. Otherwise float noise like
+  // 1112 * 0.3 = 333.59999999999997 makes an exact 333.6 look "bigger" → false
+  // mistr_up + ztrata. Rounding kills the artifact without masking real diffs.
+  const r = (n: number) => Math.round(n * 100) / 100
+  const rStaff = r(staffSalaries)
+  const rSalon = r(salonSalaries)
+  const rMustStaff = r(mustStaff)
+  const rMustSalon = r(mustSalonNow)
+
   const flags: VerifyFlag[] = []
 
   // Master always compared to full-price rule — sale is absorbed by salon
-  if (staffSalaries > mustStaff) flags.push('mistr_up')
-  if (staffSalaries < mustStaff) flags.push('mistr_down')
+  if (rStaff > rMustStaff) flags.push('mistr_up')
+  if (rStaff < rMustStaff) flags.push('mistr_down')
 
   // Salon compared to sale-adjusted expectation
-  if (salonSalaries > mustSalonNow) flags.push('salon_up')
-  if (salonSalaries < mustSalonNow) flags.push('ztrata')
+  if (rSalon > rMustSalon) flags.push('salon_up')
+  if (rSalon < rMustSalon) flags.push('ztrata')
 
   // Informational tag — record has a discount
   if (hasSale) flags.push('sleva')

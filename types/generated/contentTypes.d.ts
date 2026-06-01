@@ -1493,10 +1493,6 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
       'oneToMany',
       'api::service-provided.service-provided'
     >;
-    personals: Schema.Attribute.Relation<
-      'manyToMany',
-      'api::personal.personal'
-    >;
     price: Schema.Attribute.Float &
       Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
@@ -1651,7 +1647,6 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
           localized: false;
         };
       }>;
-    offers: Schema.Attribute.Relation<'manyToMany', 'api::offer.offer'>;
     offersDone: Schema.Attribute.Relation<
       'oneToMany',
       'api::service-provided.service-provided'

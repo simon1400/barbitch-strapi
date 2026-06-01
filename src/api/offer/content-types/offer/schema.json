@@ -15,12 +15,6 @@
     }
   },
   "attributes": {
-    "personals": {
-      "type": "relation",
-      "relation": "manyToMany",
-      "target": "api::personal.personal",
-      "inversedBy": "offers"
-    },
     "service": {
       "type": "relation",
       "relation": "manyToOne",
