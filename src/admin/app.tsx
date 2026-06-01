@@ -40,5 +40,20 @@ export default {
     });
   },
 
-  bootstrap(_app: StrapiApp) {},
+  bootstrap(_app: StrapiApp) {
+    // Make relation/combobox option dropdowns ~3× taller. The design-system caps the
+    // scrollable options list at max-height: 15rem (~3 visible rows). We override the
+    // scroll container (direct parent of [role="listbox"]) and the listbox itself.
+    if (typeof document !== 'undefined') {
+      const style = document.createElement('style');
+      style.setAttribute('data-barbitch', 'taller-relation-dropdown');
+      style.textContent = `
+        [role="listbox"],
+        :has(> [role="listbox"]) {
+          max-height: min(45rem, 70vh) !important;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  },
 };
