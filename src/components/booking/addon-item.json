@@ -14,6 +14,10 @@
       "type": "integer",
       "required": true
     },
+    "duration_diff": {
+      "type": "integer",
+      "default": 0
+    },
     "result_noona_id": {
       "type": "string",
       "required": true
