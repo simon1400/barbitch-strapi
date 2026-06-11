@@ -547,7 +547,7 @@ export default {
     if (weekPct !== null) {
       lines.push(
         '',
-        `📊 Загрузка на 7 дней: ${weekPct} % (занято ${fmtH(weekBookedMin)} из ${fmtH(weekCapacityMin)})`
+        `📊 Загрузка на 7 дней вперёд (${fmtDateCz(today).slice(0, 5)}–${fmtDateCz(weekEnd).slice(0, 5)}): ${weekPct} % (занято ${fmtH(weekBookedMin)} из ${fmtH(weekCapacityMin)})`
       );
     }
     return lines.join('\n') + vouchersLine + errorsLine;
