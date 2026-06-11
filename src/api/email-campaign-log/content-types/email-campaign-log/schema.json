@@ -1,0 +1,33 @@
+{
+  "kind": "collectionType",
+  "collectionName": "email_campaign_logs",
+  "info": {
+    "singularName": "email-campaign-log",
+    "pluralName": "email-campaign-logs",
+    "displayName": "Email campaign logs",
+    "description": "Лог маркетинговых рассылок (одна запись = одна кампания). Для защиты от повторной отправки тем же клиентам."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "template": {
+      "type": "string",
+      "required": true
+    },
+    "subject": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "count": {
+      "type": "integer",
+      "default": 0
+    },
+    "recipients": {
+      "type": "json"
+    }
+  }
+}

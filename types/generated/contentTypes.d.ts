@@ -1252,6 +1252,40 @@ export interface ApiCostCost extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiEmailCampaignLogEmailCampaignLog
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'email_campaign_logs';
+  info: {
+    description: '\u041B\u043E\u0433 \u043C\u0430\u0440\u043A\u0435\u0442\u0438\u043D\u0433\u043E\u0432\u044B\u0445 \u0440\u0430\u0441\u0441\u044B\u043B\u043E\u043A (\u043E\u0434\u043D\u0430 \u0437\u0430\u043F\u0438\u0441\u044C = \u043E\u0434\u043D\u0430 \u043A\u0430\u043C\u043F\u0430\u043D\u0438\u044F). \u0414\u043B\u044F \u0437\u0430\u0449\u0438\u0442\u044B \u043E\u0442 \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u043E\u0439 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438 \u0442\u0435\u043C \u0436\u0435 \u043A\u043B\u0438\u0435\u043D\u0442\u0430\u043C.';
+    displayName: 'Email campaign logs';
+    pluralName: 'email-campaign-logs';
+    singularName: 'email-campaign-log';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    count: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::email-campaign-log.email-campaign-log'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    recipients: Schema.Attribute.JSON;
+    source: Schema.Attribute.String;
+    subject: Schema.Attribute.String;
+    template: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiExtraProfitExtraProfit extends Struct.CollectionTypeSchema {
   collectionName: 'extra_profits';
   info: {
@@ -2820,6 +2854,7 @@ declare module '@strapi/strapi' {
       'api::client-error-log.client-error-log': ApiClientErrorLogClientErrorLog;
       'api::contact.contact': ApiContactContact;
       'api::cost.cost': ApiCostCost;
+      'api::email-campaign-log.email-campaign-log': ApiEmailCampaignLogEmailCampaignLog;
       'api::extra-profit.extra-profit': ApiExtraProfitExtraProfit;
       'api::google-review.google-review': ApiGoogleReviewGoogleReview;
       'api::homepage.homepage': ApiHomepageHomepage;
