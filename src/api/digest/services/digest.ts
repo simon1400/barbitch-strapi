@@ -531,7 +531,12 @@ export default {
 
     const masterLines = [...todayByMaster.entries()]
       .sort((a, b) => b[1].count - a[1].count)
-      .map(([name, m]) => `• ${name}: ${m.count}${m.first ? ` (${m.first}–${m.last})` : ''}`)
+      .map(
+        ([name, m]) =>
+          `• <b>${name}</b> — ${m.count} ${m.count === 1 ? 'бронь' : m.count < 5 ? 'брони' : 'броней'}${
+            m.first ? ` · <i>${m.first}–${m.last}</i>` : ''
+          }`
+      )
       .join('\n');
 
     const lines = [
