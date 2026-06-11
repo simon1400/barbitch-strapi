@@ -400,17 +400,20 @@ export default {
         if (!b.customer || seen.has(b.customer)) continue;
         const reasons = [];
 
-        // 1) прошлый визит — no-show (и сколько их всего за год)
+        // 1) no-show среди ПОСЛЕДНИХ 5 визитов (прошлый раз — главный флаг)
         const hist = (historyByCustomer.get(b.customer) || []).sort((a, x) =>
           a.date < x.date ? -1 : 1
         );
         if (hist.length) {
-          const last = hist[hist.length - 1];
-          const noshowCount = hist.filter((h) => h.status === 'noshow').length;
+          const last5 = hist.slice(-5);
+          const last = last5[last5.length - 1];
+          const noshowCount = last5.filter((h) => h.status === 'noshow').length;
           if (last.status === 'noshow') {
-            reasons.push(`прошлый раз no-show${noshowCount > 1 ? ` (${noshowCount}× за год)` : ''}`);
+            reasons.push(
+              `прошлый раз no-show${noshowCount > 1 ? ` (${noshowCount}× из последних ${last5.length})` : ''}`
+            );
           } else if (noshowCount >= 2) {
-            reasons.push(`${noshowCount}× no-show за год`);
+            reasons.push(`${noshowCount}× no-show из последних ${last5.length} визитов`);
           }
         }
 
