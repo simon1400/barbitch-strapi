@@ -32,6 +32,9 @@ const fmtDateCz = (d: string): string => {
 
 const fmtMoney = (n: number): string => `${Math.round(n).toLocaleString('cs-CZ')} Kč`;
 const fmtSigned = (n: number): string => `${n >= 0 ? '+' : ''}${fmtMoney(n)}`;
+// Разница = реальные деньги − записи: плюс → излишек, минус → недостача
+const diffLabel = (n: number): string =>
+  Math.round(n) === 0 ? 'сходится ✓' : n > 0 ? 'излишек' : 'недостача';
 const fmtH = (min: number): string => `${Math.round((min / 60) * 10) / 10} ч`;
 
 const num = (v): number => {
@@ -248,14 +251,14 @@ export default {
         financeLines = [
           `💰 Смена вчера: <b>${fmtSigned(dayProfit)}</b>${dayVisits > 0 ? ` · ${dayVisits} визитов` : ''}`,
           `📈 Результат месяца: <b>${fmtMoney(current.result)}</b>`,
-          `⚖️ Разница (недостача): <b>${fmtMoney(current.difference)}</b>${
-            Math.round(dayDiff) !== 0 ? ` (за вчера ${fmtSigned(dayDiff)})` : ' (без изменений)'
+          `⚖️ Разница: <b>${fmtSigned(current.difference)}</b> (${diffLabel(current.difference)})${
+            Math.round(dayDiff) !== 0 ? ` · за вчера ${fmtSigned(dayDiff)}` : ' · без изменений'
           }`,
         ];
       } else {
         financeLines = [
           `📈 Результат месяца: <b>${fmtMoney(current.result)}</b>`,
-          `⚖️ Разница (недостача): <b>${fmtMoney(current.difference)}</b>`,
+          `⚖️ Разница: <b>${fmtSigned(current.difference)}</b> (${diffLabel(current.difference)})`,
           snap && snap.monthKey !== current.monthKey
             ? '(новый месяц — дельты смены появятся завтра)'
             : '(первый дайджест — дельты смены появятся завтра)',
