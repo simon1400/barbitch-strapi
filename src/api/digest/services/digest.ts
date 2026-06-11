@@ -317,16 +317,28 @@ export default {
     const historyByCustomer = new Map(); // customer → [{date, status}]
     const activeByCustomer = new Map(); // customer → Set активных дат (не cancelled, будущее окно)
 
-    // карта мастер → ratePercent из Strapi (для доли салона)
+    // карта мастер → ratePercent из Strapi (для доли салона) + почасовая ставка админа
     const rateByEmployee = new Map();
+    let adminHourlyRate = 150; // fallback — типичная ставка администратора
     try {
       const personals = await strapi.documents('api::personal.personal').findMany({
         status: 'published',
         limit: 200,
-        fields: ['noonaEmployeeId', 'ratePercent'],
+        fields: ['noonaEmployeeId', 'ratePercent', 'position', 'isActive'],
+        populate: { rates: { fields: ['rate', 'hourlyRate', 'from', 'to', 'typeWork'] } },
       });
+      const [py, pm] = today.split('-').map(Number);
+      const monthStart = new Date(Date.UTC(py, pm - 1, 1));
+      const monthEnd = new Date(Date.UTC(py, pm, 0, 23, 59, 59));
+      const adminRates = [];
       for (const p of personals) {
         if (p.noonaEmployeeId) rateByEmployee.set(p.noonaEmployeeId, num(p.ratePercent) || 40);
+        if (p.position === 'administrator' && p.isActive !== false) {
+          adminRates.push(rateForMonth(p.rates, monthStart, monthEnd));
+        }
+      }
+      if (adminRates.length) {
+        adminHourlyRate = adminRates.reduce((a, r) => a + r, 0) / adminRates.length;
       }
     } catch (e) {
       strapi.log.warn(`digest: personals failed: ${e.message}`);
@@ -445,6 +457,7 @@ export default {
 
     // ── Неделя: капацита (часы салона − блоки) по активным мастерам ──
     let weekCapacityMin = 0;
+    let openTodayMin = 0; // часы салона сегодня — для стоимости админа
     try {
       const opParams = new URLSearchParams();
       opParams.append('filter', JSON.stringify({ from: today, to: weekEnd }));
@@ -462,6 +475,7 @@ export default {
           0
         );
       }
+      openTodayMin = openMin[today] || 0;
       const blockedMin = new Map();
       for (const b of blocked || []) {
         if (!b.employee || !b.date) continue;
@@ -522,7 +536,9 @@ export default {
       '',
       ...financeLines,
       '',
-      `💅 Сегодня броней: ${todayCount} · оборот ~${fmtMoney(todayTurnover)} · салону ~${fmtMoney(todaySalonShare)}`,
+      // «салону» = доля салона от цен броней МИНУС стоимость админа за день
+      // (часы салона × средняя почасовая ставка активных администраторов)
+      `💅 Сегодня броней: ${todayCount} · оборот ~${fmtMoney(todayTurnover)} · салону ~${fmtMoney(todaySalonShare - (openTodayMin / 60) * adminHourlyRate)}`,
       masterLines || '• записей нет',
     ];
     if (suspiciousLines.length) {
