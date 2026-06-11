@@ -541,7 +541,7 @@ export default {
       '',
       // «салону» = доля салона от цен броней МИНУС стоимость админа за день
       // (часы салона × средняя почасовая ставка активных администраторов)
-      `💅 Сегодня броней: ${todayCount} · оборот ~${fmtMoney(todayTurnover)} · салону ~${fmtMoney(todaySalonShare - (openTodayMin / 60) * adminHourlyRate)}`,
+      `💅 Сегодня броней: <b>${todayCount}</b> · оборот ~${fmtMoney(todayTurnover)} · салону ~<b>${fmtMoney(todaySalonShare - (openTodayMin / 60) * adminHourlyRate)}</b>`,
       masterLines || '• записей нет',
     ];
     if (suspiciousLines.length) {
