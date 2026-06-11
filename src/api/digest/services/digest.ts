@@ -447,9 +447,11 @@ export default {
         if (reasons.length) {
           seen.add(b.customer);
           const phone = phoneById.get(b.customer);
-          const time = b.starts_at ? ` ${pragueTime(b.starts_at)}` : '';
+          const time = b.starts_at ? ` · <i>${pragueTime(b.starts_at)}</i>` : '';
+          // имя/время/телефон — первая строка, причины — отдельной строкой ниже,
+          // между клиентами пустая строка; <code> у телефона = тап-копирование в TG
           suspiciousLines.push(
-            `• ${b.customer_name || '—'}${time}${phone ? ` · ${phone}` : ''} — ${reasons.join('; ')}`
+            `<b>${b.customer_name || '—'}</b>${time}${phone ? ` · <code>${phone}</code>` : ''}\n      ⚠ ${reasons.join('; ')}`
           );
         }
       }
@@ -550,7 +552,7 @@ export default {
       masterLines || '• записей нет',
     ];
     if (suspiciousLines.length) {
-      lines.push('', '🚩 Подозрительные записи сегодня:', ...suspiciousLines);
+      lines.push('', '🚩 <b>Подозрительные записи сегодня:</b>', '', suspiciousLines.join('\n\n'));
     }
     if (weekPct !== null) {
       lines.push(
