@@ -28,16 +28,21 @@ const dominantEmoji = (flags: VerifyFlag[]): string => {
   return FLAG_EMOJI.ok
 }
 
-// Parse discount string ("20%", "0.2", "20") → fraction 0..1
-const parseSaleRate = (raw: unknown): number => {
-  if (raw == null) return 0
-  if (typeof raw === 'number') return Number.isFinite(raw) ? (raw > 1 ? raw / 100 : raw) : 0
-  if (typeof raw !== 'string') return 0
-  const m = raw.match(/(-?\d+(?:[.,]\d+)?)/)
-  if (!m) return 0
-  const n = parseFloat(m[1].replace(',', '.'))
+// Parse discount → fraction 0..1 of the full offer price.
+// Accepts percent ("20%", "20", "0.2") or an absolute amount in Kč ("400"):
+// a percent can't exceed 100, so values above 100 are treated as crowns off
+// the full price. Values in 1..100 stay percent ("50" = 50 %, not 50 Kč).
+const parseSaleRate = (raw: unknown, offerPrice: number): number => {
+  let n = 0
+  if (typeof raw === 'number') n = Number.isFinite(raw) ? raw : 0
+  else if (typeof raw === 'string') {
+    const m = raw.match(/(-?\d+(?:[.,]\d+)?)/)
+    n = m ? parseFloat(m[1].replace(',', '.')) : 0
+  }
   if (!Number.isFinite(n) || n <= 0) return 0
-  return n > 1 ? n / 100 : n
+  if (n <= 1) return n
+  if (n <= 100) return n / 100
+  return offerPrice > 0 ? Math.min(n / offerPrice, 1) : 0
 }
 
 const computeFlags = (
@@ -47,7 +52,7 @@ const computeFlags = (
   salonSalaries: number,
   sale: unknown,
 ): VerifyFlag[] => {
-  const discountRate = parseSaleRate(sale)
+  const discountRate = parseSaleRate(sale, offerPrice)
   const hasSale = discountRate > 0
   const mustStaff = offerPrice * (ratePercent / 100)
   const mustSalonNow = hasSale
