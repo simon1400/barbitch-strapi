@@ -5,9 +5,9 @@ export default {
       path: '/admin-users/login',
       handler: 'admin-user.login',
       config: {
-        auth: false, // Публичный endpoint
+        auth: false, // Публичный endpoint (вход), защищён rate-limit'ом от брутфорса
         policies: [],
-        middlewares: [],
+        middlewares: ['global::rate-limit-login'],
       },
     },
     {

@@ -4,6 +4,7 @@
 
 import { factories } from '@strapi/strapi'
 import bcrypt from 'bcryptjs'
+import { signSession, verifySession, tokenFromCtx } from '../../../utils/admin-jwt'
 
 export default factories.createCoreController('api::admin-user.admin-user', ({ strapi }) => ({
   // Кастомный endpoint для проверки логина
@@ -34,11 +35,19 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
         return ctx.unauthorized('Invalid credentials')
       }
 
+      // Выдаём подписанный сессионный токен (роль зашита в токене, проверяется на сервере)
+      const jwt = signSession({
+        id: user.id as number,
+        username: user.username as string,
+        role: user.role as 'owner' | 'administrator' | 'master',
+      })
+
       // Возвращаем данные пользователя (без пароля)
       return {
         username: user.username,
         role: user.role,
         id: user.id,
+        jwt,
       }
     } catch (error) {
       console.error('Login error:', error)
@@ -48,11 +57,13 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
 
   // Проверка статуса пользователя (активен ли он)
   async checkStatus(ctx) {
-    const userId = ctx.params.id
-
-    if (!userId) {
-      return ctx.badRequest('User ID is required')
+    // Только владелец токена может узнавать СВОЙ статус (никакой энумерации по id)
+    const session = verifySession(tokenFromCtx(ctx))
+    if (!session) {
+      return ctx.unauthorized('Authentication required')
     }
+
+    const userId = session.id
 
     try {
       const user = await strapi.entityService.findOne('api::admin-user.admin-user', userId, {
@@ -78,6 +89,16 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
 
     if (!username) {
       return ctx.badRequest('Username is required')
+    }
+
+    // Доступ только к СВОИМ данным (или владельцу) — иначе любой мог вытащить
+    // зарплаты/штрафы/авансы всего персонала перебором username
+    const session = verifySession(tokenFromCtx(ctx))
+    if (!session) {
+      return ctx.unauthorized('Authentication required')
+    }
+    if (session.role !== 'owner' && session.username !== username) {
+      return ctx.forbidden('You can only access your own data')
     }
 
     try {
@@ -126,8 +147,6 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
         sort: 'date:desc',
         publicationState: 'live'
       })
-
-      console.log('Extra profits for', username, ':', extraProfits)
 
       // Получаем смены
       const shifts: any = await strapi.entityService.findMany('api::shift.shift', {
@@ -184,8 +203,6 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
           extraProfits: masterExtraProfits || [],
           salaries: masterSalaries || []
         }
-
-        console.log('Master data for', username, ':', masterData)
       }
 
       return {
