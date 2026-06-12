@@ -28,6 +28,9 @@
     },
     "recipients": {
       "type": "json"
+    },
+    "filters": {
+      "type": "json"
     }
   }
 }
