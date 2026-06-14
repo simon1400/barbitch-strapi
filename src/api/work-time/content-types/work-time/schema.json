@@ -12,12 +12,20 @@
   },
   "pluginOptions": {},
   "attributes": {
-    "start": {
-      "type": "datetime",
+    "date": {
+      "type": "date",
       "required": true
     },
-    "end": {
-      "type": "datetime",
+    "startTime": {
+      "type": "customField",
+      "customField": "global::time-slot",
+      "default": "10:00",
+      "required": true
+    },
+    "endTime": {
+      "type": "customField",
+      "customField": "global::time-slot",
+      "default": "19:00",
       "required": true
     },
     "sum": {

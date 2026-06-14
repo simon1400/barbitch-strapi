@@ -18,9 +18,6 @@ export default {
     if (!date || !DATE_RE.test(date)) {
       throw new Error('Invalid date (expected YYYY-MM-DD)');
     }
-    const dayStart = `${date}T00:00:00.000Z`;
-    const dayEnd = `${date}T23:59:59.999Z`;
-
     const result = {
       date,
       unpublished: { cashs: 0, 'services-provided': 0, 'work-times': 0, payrolls: 0 },
@@ -30,11 +27,7 @@ export default {
     const collections = [
       { key: 'cashs', uid: 'api::cash.cash', filters: { date } },
       { key: 'services-provided', uid: 'api::service-provided.service-provided', filters: { date } },
-      {
-        key: 'work-times',
-        uid: 'api::work-time.work-time',
-        filters: { start: { $gte: dayStart, $lte: dayEnd } },
-      },
+      { key: 'work-times', uid: 'api::work-time.work-time', filters: { date } },
       { key: 'payrolls', uid: 'api::payroll.payroll', filters: { date } },
     ];
 

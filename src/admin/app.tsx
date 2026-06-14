@@ -20,12 +20,46 @@ const DatabaseIcon = () => (
   </svg>
 );
 
+const ClockIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <circle cx="12" cy="12" r="10" />
+    <polyline points="12 6 12 12 16 14" />
+  </svg>
+);
+
 export default {
   config: {
     locales: [],
   },
 
   register(app: StrapiApp) {
+    // Trimmed time dropdown (08:00..21:00) for work-time start/end. App-level custom field
+    // → uid `global::time-slot` (server side registered in src/index.ts). Stores "HH:MM".
+    (app as any).customFields.register({
+      name: 'time-slot',
+      type: 'string',
+      intlLabel: { id: 'time-slot.label', defaultMessage: 'Время (слот)' },
+      intlDescription: {
+        id: 'time-slot.description',
+        defaultMessage: 'Время из расписания салона (08:00–21:00)',
+      },
+      icon: ClockIcon,
+      components: {
+        Input: async () =>
+          import('./extensions/timeSlot/TimeSlotInput').then((m) => ({ default: m.default })),
+      },
+    });
+
     (app as any).addMenuLink({
       to: '/plugins/backup',
       icon: DatabaseIcon,

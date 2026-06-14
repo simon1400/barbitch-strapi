@@ -8,6 +8,14 @@ export default {
    * This gives you an opportunity to extend code.
    */
   register({ strapi }) {
+    // Custom field `global::time-slot` — a trimmed time dropdown (08:00..21:00, used by
+    // work-time start/end). Server side only declares the underlying storage type so the
+    // schema validates; the dropdown UI lives in src/admin (TimeSlotInput).
+    strapi.customFields.register({
+      name: 'time-slot',
+      type: 'string',
+    });
+
     // Backup download route — registered as Koa middleware (bypasses plugin routing)
     strapi.server.use(async (ctx: any, next: any) => {
       if (ctx.path !== '/backup/download' || ctx.method !== 'GET') {

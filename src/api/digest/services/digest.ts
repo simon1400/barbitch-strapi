@@ -120,7 +120,7 @@ export default {
       find('api::salary.salary', withPersonal),
       find('api::tax.tax', withPersonal),
       find('api::work-time.work-time', {
-        filters: { start: dateFilter },
+        filters: { date: dateFilter },
         fields: ['sum'],
         populate: {
           personal: {

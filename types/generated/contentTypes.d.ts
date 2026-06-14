@@ -2274,7 +2274,11 @@ export interface ApiWorkTimeWorkTime extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    end: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    endTime: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.CustomField<'global::time-slot'> &
+      Schema.Attribute.DefaultTo<'19:00'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -2283,7 +2287,10 @@ export interface ApiWorkTimeWorkTime extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
-    start: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    startTime: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.CustomField<'global::time-slot'> &
+      Schema.Attribute.DefaultTo<'10:00'>;
     sum: Schema.Attribute.Decimal & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
