@@ -9,7 +9,9 @@ const PersonalUID = 'api::personal.personal';
 //   salon_up    🟪 salon got more than rule (suspicious)
 //   mistr_up    🟨↑ master received more than rule
 //   mistr_down  🟨↓ master received less than rule
-type VerifyFlag = 'ok' | 'sleva' | 'ztrata' | 'salon_up' | 'mistr_up' | 'mistr_down'
+//   internal    🤝 internal worker-to-worker service: salon profit 0 is normal,
+//               only the master percentage is checked
+type VerifyFlag = 'ok' | 'sleva' | 'ztrata' | 'salon_up' | 'mistr_up' | 'mistr_down' | 'internal'
 
 const FLAG_EMOJI: Record<VerifyFlag, string> = {
   ok: '🟩',
@@ -18,10 +20,11 @@ const FLAG_EMOJI: Record<VerifyFlag, string> = {
   salon_up: '🟪',
   mistr_up: '🟨',
   mistr_down: '🟨',
+  internal: '🤝',
 }
 
 // Priority for the legacy single-emoji `verify` field (highest first)
-const FLAG_PRIORITY: VerifyFlag[] = ['ztrata', 'salon_up', 'mistr_down', 'mistr_up', 'sleva', 'ok']
+const FLAG_PRIORITY: VerifyFlag[] = ['ztrata', 'salon_up', 'mistr_down', 'mistr_up', 'internal', 'sleva', 'ok']
 
 const dominantEmoji = (flags: VerifyFlag[]): string => {
   for (const f of FLAG_PRIORITY) if (flags.includes(f)) return FLAG_EMOJI[f]
@@ -51,21 +54,32 @@ const computeFlags = (
   staffSalaries: number,
   salonSalaries: number,
   sale: unknown,
+  internal: boolean,
 ): VerifyFlag[] => {
-  const discountRate = parseSaleRate(sale, offerPrice)
-  const hasSale = discountRate > 0
   const mustStaff = offerPrice * (ratePercent / 100)
-  const mustSalonNow = hasSale
-    ? offerPrice * (1 - discountRate) - mustStaff
-    : offerPrice - mustStaff
 
   // Round to whole crowns (cents) before comparing. Otherwise float noise like
   // 1112 * 0.3 = 333.59999999999997 makes an exact 333.6 look "bigger" → false
   // mistr_up + ztrata. Rounding kills the artifact without masking real diffs.
   const r = (n: number) => Math.round(n * 100) / 100
   const rStaff = r(staffSalaries)
-  const rSalon = r(salonSalaries)
   const rMustStaff = r(mustStaff)
+
+  // Internal worker-to-worker service: the salon earns nothing, so a salon profit of 0
+  // is normal. Only the master percentage is verified; salon is NOT checked.
+  if (internal) {
+    const flags: VerifyFlag[] = ['internal']
+    if (rStaff > rMustStaff) flags.push('mistr_up')
+    if (rStaff < rMustStaff) flags.push('mistr_down')
+    return flags
+  }
+
+  const discountRate = parseSaleRate(sale, offerPrice)
+  const hasSale = discountRate > 0
+  const mustSalonNow = hasSale
+    ? offerPrice * (1 - discountRate) - mustStaff
+    : offerPrice - mustStaff
+  const rSalon = r(salonSalaries)
   const rMustSalon = r(mustSalonNow)
 
   const flags: VerifyFlag[] = []
@@ -116,12 +130,20 @@ async function validateOfferMoney(event: any) {
     const staffSalaries = Number(dataCurrent.staffSalaries)
     const salonSalaries = Number(dataCurrent.salonSalaries)
 
+    // `internal` may be absent on a partial update (e.g. publish) — fall back to current.
+    const internalRaw = dataCurrent.internal
+    const internal =
+      internalRaw === undefined || internalRaw === null
+        ? Boolean(current?.internal)
+        : Boolean(internalRaw)
+
     const flags = computeFlags(
       Number(offer.price),
       Number(personal.ratePercent),
       staffSalaries,
       salonSalaries,
       dataCurrent.sale,
+      internal,
     )
 
     event.params.data.verifyFlags = flags

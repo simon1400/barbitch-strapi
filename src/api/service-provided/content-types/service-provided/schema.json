@@ -68,6 +68,15 @@
     },
     "verifyFlags": {
       "type": "json"
+    },
+    "voucher": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::voucher.voucher"
+    },
+    "internal": {
+      "type": "boolean",
+      "default": false
     }
   }
 }

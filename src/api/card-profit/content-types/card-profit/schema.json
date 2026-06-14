@@ -22,6 +22,14 @@
     "extraIncome": {
       "type": "biginteger",
       "default": 0
+    },
+    "prevSum": {
+      "type": "biginteger",
+      "default": 0
+    },
+    "prevExtraIncome": {
+      "type": "biginteger",
+      "default": 0
     }
   }
 }

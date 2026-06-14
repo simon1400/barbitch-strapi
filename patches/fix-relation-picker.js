@@ -19,6 +19,12 @@
  *     extension (CREATE EXTENSION IF NOT EXISTS unaccent;). On non-postgres / on any
  *     metadata error it falls back to the original $containsi (with the recovered term).
  *
+ *  4. VOUCHER PICKER — for the `service-provided.voucher` relation field, list only
+ *     vouchers that are paid but not yet realized (datePay set, dateRealized empty) —
+ *     i.e. the outstanding vouchers admins actually attach to a service. Scoped to
+ *     exactly that source field. Patched independently (own marker) so it applies on
+ *     top of an already-patched install.
+ *
  * Version-pinned to @strapi/content-manager 5.46.1 — re-verify after Strapi upgrades.
  * Idempotent. Runs from `postinstall` (see package.json), patches both .js and .mjs.
  */
@@ -115,3 +121,36 @@ function patchFile(fileName, isOperatorRef, contentTypesRef) {
 
 patchFile('relations.js', 'strapiUtils.isOperatorOfType', 'strapiUtils.contentTypes');
 patchFile('relations.mjs', 'isOperatorOfType', 'contentTypes');
+
+// --- Fix 4: restrict the service-provided.voucher picker to outstanding vouchers ---
+// Independent marker so it applies even when fixes 1-3 are already in place.
+const VOUCHER_MARKER = '__bbVoucherFilter';
+
+function patchVoucherFilter(fileName) {
+  const filePath = path.join(baseDir, fileName);
+  if (!fs.existsSync(filePath)) {
+    console.log(`[patch] voucher-filter: ${fileName} not found, skipping`);
+    return;
+  }
+  let content = fs.readFileSync(filePath, 'utf8');
+  if (content.includes(VOUCHER_MARKER)) {
+    console.log(`[patch] voucher-filter: ${fileName} already patched`);
+    return;
+  }
+  // Anchor: the locale comment that immediately follows the publishedAt clause in
+  // findAvailable — present in both patched and unpatched bundles.
+  const anchor = '// We will only filter by locale if the target content type is localized';
+  if (!content.includes(anchor)) {
+    console.error(`[patch] voucher-filter: ${fileName} — locale anchor not found`);
+    process.exit(1);
+  }
+  const inject =
+    "if (/* " + VOUCHER_MARKER + " */ sourceUid === 'api::service-provided.service-provided' && targetField === 'voucher') { " +
+    'addFiltersClause(queryParams, { datePay: { $notNull: true }, dateRealized: { $null: true } }); }\n        ';
+  content = content.replace(anchor, inject + anchor);
+  fs.writeFileSync(filePath, content, 'utf8');
+  console.log(`[patch] voucher-filter: ${fileName} patched (outstanding vouchers only)`);
+}
+
+patchVoucherFilter('relations.js');
+patchVoucherFilter('relations.mjs');

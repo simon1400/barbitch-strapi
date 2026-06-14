@@ -928,6 +928,9 @@ export interface ApiCardProfitCardProfit extends Struct.CollectionTypeSchema {
       'api::card-profit.card-profit'
     > &
       Schema.Attribute.Private;
+    prevExtraIncome: Schema.Attribute.BigInteger &
+      Schema.Attribute.DefaultTo<0>;
+    prevSum: Schema.Attribute.BigInteger & Schema.Attribute.DefaultTo<0>;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
@@ -1927,6 +1930,7 @@ export interface ApiServiceProvidedServiceProvided
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     date: Schema.Attribute.Date & Schema.Attribute.Required;
+    internal: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1948,6 +1952,7 @@ export interface ApiServiceProvidedServiceProvided
       Schema.Attribute.Private;
     verify: Schema.Attribute.String;
     verifyFlags: Schema.Attribute.JSON;
+    voucher: Schema.Attribute.Relation<'oneToOne', 'api::voucher.voucher'>;
   };
 }
 
