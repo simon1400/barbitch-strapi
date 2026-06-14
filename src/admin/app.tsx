@@ -1,5 +1,6 @@
 import type { StrapiApp } from '@strapi/strapi/admin';
 import React from 'react';
+import { ServiceMoneyPanel } from './extensions/serviceMoneyHint/ServiceMoneyHint';
 
 const DatabaseIcon = () => (
   <svg
@@ -40,7 +41,18 @@ export default {
     });
   },
 
-  bootstrap(_app: StrapiApp) {
+  bootstrap(app: StrapiApp) {
+    // Money hint side panel in the "Оказанные услуги" Edit view — mirrors the
+    // verifyFlags math and shows recommended "Цена мастера" / "Прибыль салона"
+    // so the admin doesn't compute on a calculator. Display-only (no auto-fill).
+    try {
+      (app as any)
+        .getPlugin('content-manager')
+        .apis.addEditViewSidePanel((panels: any[]) => [...panels, ServiceMoneyPanel]);
+    } catch (e) {
+      // content-manager plugin not ready / API changed — fail silently, don't break admin boot.
+    }
+
     // Make relation/combobox option dropdowns ~3× taller. The design-system caps the
     // scrollable options list at max-height: 15rem (~3 visible rows). We override the
     // scroll container (direct parent of [role="listbox"]) and the listbox itself.
