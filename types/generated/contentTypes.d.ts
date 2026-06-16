@@ -2251,6 +2251,48 @@ export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiWindowOfferLogWindowOfferLog
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'window_offer_logs';
+  info: {
+    description: '\u041B\u043E\u0433 cross-sell \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u0439 \u00AB\u0434\u043E\u0437\u0430\u043F\u0438\u0441\u044C \u0432 \u043E\u043A\u043D\u043E\u00BB (\u043E\u0434\u043D\u0430 \u0437\u0430\u043F\u0438\u0441\u044C = \u043E\u0434\u043D\u043E \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043D\u043E\u0435 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u0435). \u041A\u043B\u044E\u0447 \u0434\u0435\u0434\u0443\u043F\u043B\u0438\u043A\u0430\u0446\u0438\u0438 \u2014 bookingEventId (\u0431\u0440\u043E\u043D\u044C-\u044F\u043A\u043E\u0440\u044C). \u0417\u0430\u0449\u0438\u0442\u0430 \u043E\u0442 \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u043E\u0439 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438 + \u043E\u0441\u043D\u043E\u0432\u0430 \u0434\u043B\u044F \u0430\u043D\u0430\u043B\u0438\u0442\u0438\u043A\u0438 \u043A\u043E\u043D\u0432\u0435\u0440\u0441\u0438\u0438.';
+    displayName: 'Window offer logs';
+    pluralName: 'window-offer-logs';
+    singularName: 'window-offer-log';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    anchorDate: Schema.Attribute.Date;
+    bookingEventId: Schema.Attribute.String & Schema.Attribute.Required;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    customerId: Schema.Attribute.String;
+    customerName: Schema.Attribute.String;
+    discount: Schema.Attribute.String;
+    email: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::window-offer-log.window-offer-log'
+    > &
+      Schema.Attribute.Private;
+    masterId: Schema.Attribute.String;
+    masterName: Schema.Attribute.String;
+    offeredCategory: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    sentAt: Schema.Attribute.DateTime;
+    serviceId: Schema.Attribute.String;
+    serviceTitle: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    windowTime: Schema.Attribute.String;
+  };
+}
+
 export interface ApiWorkTimeWorkTime extends Struct.CollectionTypeSchema {
   collectionName: 'work_times';
   info: {
@@ -2889,6 +2931,7 @@ declare module '@strapi/strapi' {
       'api::time-off.time-off': ApiTimeOffTimeOff;
       'api::vaucher-page.vaucher-page': ApiVaucherPageVaucherPage;
       'api::voucher.voucher': ApiVoucherVoucher;
+      'api::window-offer-log.window-offer-log': ApiWindowOfferLogWindowOfferLog;
       'api::work-time.work-time': ApiWorkTimeWorkTime;
       'plugin::content-manager-organizer.content-manager-configuration': PluginContentManagerOrganizerContentManagerConfiguration;
       'plugin::content-releases.release': PluginContentReleasesRelease;

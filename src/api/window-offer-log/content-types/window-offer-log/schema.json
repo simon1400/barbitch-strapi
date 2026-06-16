@@ -1,0 +1,56 @@
+{
+  "kind": "collectionType",
+  "collectionName": "window_offer_logs",
+  "info": {
+    "singularName": "window-offer-log",
+    "pluralName": "window-offer-logs",
+    "displayName": "Window offer logs",
+    "description": "Лог cross-sell предложений «дозапись в окно» (одна запись = одно отправленное предложение). Ключ дедупликации — bookingEventId (бронь-якорь). Защита от повторной отправки + основа для аналитики конверсии."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "bookingEventId": {
+      "type": "string",
+      "required": true
+    },
+    "offeredCategory": {
+      "type": "string"
+    },
+    "customerId": {
+      "type": "string"
+    },
+    "customerName": {
+      "type": "string"
+    },
+    "email": {
+      "type": "string"
+    },
+    "masterId": {
+      "type": "string"
+    },
+    "masterName": {
+      "type": "string"
+    },
+    "serviceId": {
+      "type": "string"
+    },
+    "serviceTitle": {
+      "type": "string"
+    },
+    "anchorDate": {
+      "type": "date"
+    },
+    "windowTime": {
+      "type": "string"
+    },
+    "discount": {
+      "type": "string"
+    },
+    "sentAt": {
+      "type": "datetime"
+    }
+  }
+}
