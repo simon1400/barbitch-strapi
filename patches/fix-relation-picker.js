@@ -25,6 +25,14 @@
  *     exactly that source field. Patched independently (own marker) so it applies on
  *     top of an already-patched install.
  *
+ *  5. PERSONAL PICKER — for any relation whose TARGET is `api::personal.personal`, hide
+ *     deactivated staff (isActive === false) so they never appear in the picker. Fix 1
+ *     only hides drafts/unpublished; a person who stays published but is flagged
+ *     isActive=false still leaked into the picker for every role. We filter
+ *     `isActive: { $ne: false }` (keeps true + null, hides only explicitly deactivated).
+ *     Uses the ATTRIBUTE name `isActive` (query-params.transform maps it to the
+ *     `is_active` column). Scoped by targetUid, own marker, applied on top.
+ *
  * Version-pinned to @strapi/content-manager 5.46.1 — re-verify after Strapi upgrades.
  * Idempotent. Runs from `postinstall` (see package.json), patches both .js and .mjs.
  */
@@ -154,3 +162,35 @@ function patchVoucherFilter(fileName) {
 
 patchVoucherFilter('relations.js');
 patchVoucherFilter('relations.mjs');
+
+// --- Fix 5: hide deactivated staff (isActive=false) from any personal relation picker ---
+// Independent marker so it applies even when fixes 1-4 are already in place.
+const PERSONAL_MARKER = '__bbPersonalActive';
+
+function patchPersonalActive(fileName) {
+  const filePath = path.join(baseDir, fileName);
+  if (!fs.existsSync(filePath)) {
+    console.log(`[patch] personal-active: ${fileName} not found, skipping`);
+    return;
+  }
+  let content = fs.readFileSync(filePath, 'utf8');
+  if (content.includes(PERSONAL_MARKER)) {
+    console.log(`[patch] personal-active: ${fileName} already patched`);
+    return;
+  }
+  // Same findAvailable locale anchor used by Fix 4 (first occurrence = findAvailable).
+  const anchor = '// We will only filter by locale if the target content type is localized';
+  if (!content.includes(anchor)) {
+    console.error(`[patch] personal-active: ${fileName} — locale anchor not found`);
+    process.exit(1);
+  }
+  const inject =
+    "if (/* " + PERSONAL_MARKER + " */ targetUid === 'api::personal.personal') { " +
+    'addFiltersClause(queryParams, { isActive: { $ne: false } }); }\n        ';
+  content = content.replace(anchor, inject + anchor);
+  fs.writeFileSync(filePath, content, 'utf8');
+  console.log(`[patch] personal-active: ${fileName} patched (hide isActive=false staff)`);
+}
+
+patchPersonalActive('relations.js');
+patchPersonalActive('relations.mjs');
