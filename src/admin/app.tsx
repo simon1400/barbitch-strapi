@@ -37,6 +37,23 @@ const ClockIcon = () => (
   </svg>
 );
 
+const ChecklistIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M9 11l3 3L22 4" />
+    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+  </svg>
+);
+
 export default {
   config: {
     locales: [],
@@ -73,6 +90,27 @@ export default {
       },
       permissions: [],
     });
+
+    // Homepage widget «Kontrola směny» — read-only самопроверка сегодняшней смены
+    // для администраторов (расхождения Noona↔Strapi, неверные суммы, отсутствующие
+    // записи + Rozdíl). НЕ публикует. Данные с /api/shift-selfcheck. try/catch —
+    // чтобы смена Widgets API в будущих версиях не валила boot админки.
+    try {
+      (app as any).widgets.register({
+        id: 'shift-selfcheck',
+        icon: ChecklistIcon,
+        title: {
+          id: 'shift-selfcheck.widget.title',
+          defaultMessage: 'Kontrola směny (dnes)',
+        },
+        component: async () => {
+          const { default: Widget } = await import('./extensions/shiftSelfCheck/Widget');
+          return Widget;
+        },
+      });
+    } catch (e) {
+      // Widgets API недоступен / изменился — тихо пропускаем.
+    }
   },
 
   bootstrap(app: StrapiApp) {
@@ -97,6 +135,13 @@ export default {
         [role="listbox"],
         :has(> [role="listbox"]) {
           max-height: min(45rem, 70vh) !important;
+        }
+        /* Виджет «Kontrola směny»: убрать внутренний скролл (Strapi даёт <main>
+           фикс-высоту 261px + overflow:auto) → растягиваем под содержимое. */
+        main:has([data-bb-shift-selfcheck]) {
+          height: auto !important;
+          max-height: none !important;
+          overflow: visible !important;
         }
       `;
       document.head.appendChild(style);
