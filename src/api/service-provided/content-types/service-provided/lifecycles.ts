@@ -127,8 +127,23 @@ async function validateOfferMoney(event: any) {
     // Skip validation if offer or personal data is not available (e.g. during publish)
     if (!offer || !personal) return;
 
-    const staffSalaries = Number(dataCurrent.staffSalaries)
-    const salonSalaries = Number(dataCurrent.salonSalaries)
+    // Money is stored as a string; junior prices may use a comma decimal ("237,6").
+    // Number("237,6") = NaN, so normalize the comma before parsing.
+    const num = (v: unknown): number => {
+      const n = Number(String(v ?? '').replace(',', '.').replace(/\s/g, ''))
+      return Number.isFinite(n) ? n : 0
+    }
+
+    // 🟥 On a partial update (e.g. publish) Strapi omits the scalar money/sale fields.
+    // Number(undefined) = NaN, and every comparison with NaN is false, so computeFlags
+    // used to fall through to 'ok' — silently overwriting the correct verifyFlags with
+    // a green tick even when the salon/master price was never filled. Fall back to the
+    // stored values (nullish-coalescing keeps an explicitly-emptied "" → 0 → real flag).
+    const staffRaw = dataCurrent.staffSalaries ?? current?.staffSalaries
+    const salonRaw = dataCurrent.salonSalaries ?? current?.salonSalaries
+    const saleRaw = dataCurrent.sale ?? current?.sale
+    const staffSalaries = num(staffRaw)
+    const salonSalaries = num(salonRaw)
 
     // `internal` may be absent on a partial update (e.g. publish) — fall back to current.
     const internalRaw = dataCurrent.internal
@@ -142,7 +157,7 @@ async function validateOfferMoney(event: any) {
       Number(personal.ratePercent),
       staffSalaries,
       salonSalaries,
-      dataCurrent.sale,
+      saleRaw,
       internal,
     )
 
