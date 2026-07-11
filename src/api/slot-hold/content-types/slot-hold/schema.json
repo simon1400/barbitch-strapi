@@ -1,0 +1,50 @@
+{
+  "kind": "collectionType",
+  "collectionName": "slot_holds",
+  "info": {
+    "singularName": "slot-hold",
+    "pluralName": "slot-holds",
+    "displayName": "Холды слотов (rezervace)",
+    "description": "Временная резервация слота (5 мин) собственного движка бронирования. Ephemeral: без relations (raw-вставки движка), протухшие чистит крон + POST /engine/holds."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "employeeDocId": {
+      "type": "string",
+      "required": true
+    },
+    "employeeName": {
+      "type": "string"
+    },
+    "date": {
+      "type": "date"
+    },
+    "startsAt": {
+      "type": "datetime",
+      "required": true
+    },
+    "endsAt": {
+      "type": "datetime",
+      "required": true
+    },
+    "services": {
+      "type": "json"
+    },
+    "totalPrice": {
+      "type": "decimal"
+    },
+    "durationMin": {
+      "type": "integer"
+    },
+    "expiresAt": {
+      "type": "datetime",
+      "required": true
+    },
+    "sessionKey": {
+      "type": "string"
+    }
+  }
+}

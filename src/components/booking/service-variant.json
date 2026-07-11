@@ -1,0 +1,26 @@
+{
+  "collectionName": "components_booking_service_variants",
+  "info": {
+    "displayName": "serviceVariant",
+    "icon": "layer"
+  },
+  "options": {},
+  "attributes": {
+    "label": {
+      "type": "string",
+      "required": true
+    },
+    "priceDiff": {
+      "type": "integer",
+      "required": true,
+      "default": 0
+    },
+    "durationDiff": {
+      "type": "integer",
+      "default": 0
+    },
+    "description": {
+      "type": "text"
+    }
+  }
+}

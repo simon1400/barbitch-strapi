@@ -927,11 +927,13 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    createdByName: Schema.Attribute.String;
     customerComment: Schema.Attribute.Text;
     date: Schema.Attribute.Date;
     employee: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     employeeNameRaw: Schema.Attribute.String;
     endsAt: Schema.Attribute.DateTime;
+    engineEmployeeId: Schema.Attribute.String;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -943,6 +945,7 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     noonaEventId: Schema.Attribute.String & Schema.Attribute.Unique;
     noonaStatus: Schema.Attribute.String;
     origin: Schema.Attribute.String;
+    priceOverride: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     publishedAt: Schema.Attribute.DateTime;
     remindersSent: Schema.Attribute.JSON;
     services: Schema.Attribute.JSON;
@@ -1811,6 +1814,10 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
         };
       }>;
     service: Schema.Attribute.Relation<'manyToOne', 'api::service.service'>;
+    services: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::salon-service.salon-service'
+    >;
     taxes: Schema.Attribute.Relation<'oneToMany', 'api::tax.tax'>;
     tier: Schema.Attribute.Enumeration<['senior', 'junior']> &
       Schema.Attribute.SetPluginOptions<{
@@ -1988,6 +1995,52 @@ export interface ApiSalonHourSalonHour extends Struct.CollectionTypeSchema {
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     windows: Schema.Attribute.JSON;
+  };
+}
+
+export interface ApiSalonServiceSalonService
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'salon_services';
+  info: {
+    description: '\u0421\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u044B\u0439 \u043A\u0430\u0442\u0430\u043B\u043E\u0433 \u0443\u0441\u043B\u0443\u0433 \u0440\u0435\u0437\u0435\u0440\u0432\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439 \u0441\u0438\u0441\u0442\u0435\u043C\u044B (\u0437\u0430\u043C\u0435\u043D\u044F\u0435\u0442 Noona event_types + combo-\u0432\u0437\u0440\u044B\u0432). \u0426\u0435\u043D\u0430/\u0434\u043B\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0431\u0440\u043E\u043D\u0438 = base + variant + \u03A3 modifiers, junior \u221220% \u0444\u043E\u0440\u043C\u0443\u043B\u043E\u0439.';
+    displayName: '\u041A\u0430\u0442\u0430\u043B\u043E\u0433 \u0443\u0441\u043B\u0443\u0433 (rezervace)';
+    pluralName: 'salon-services';
+    singularName: 'salon-service';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    active: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    category: Schema.Attribute.String;
+    categoryOrder: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    color: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    description: Schema.Attribute.Text;
+    durationMin: Schema.Attribute.Integer & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::salon-service.salon-service'
+    > &
+      Schema.Attribute.Private;
+    modifiers: Schema.Attribute.Component<'booking.service-modifier', true>;
+    noonaBaseId: Schema.Attribute.String & Schema.Attribute.Unique;
+    onlineBookable: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    order: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    personals: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::personal.personal'
+    >;
+    price: Schema.Attribute.Integer & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    variants: Schema.Attribute.Component<'booking.service-variant', true>;
   };
 }
 
@@ -2184,6 +2237,44 @@ export interface ApiShiftShift extends Struct.CollectionTypeSchema {
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     week: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
+export interface ApiSlotHoldSlotHold extends Struct.CollectionTypeSchema {
+  collectionName: 'slot_holds';
+  info: {
+    description: '\u0412\u0440\u0435\u043C\u0435\u043D\u043D\u0430\u044F \u0440\u0435\u0437\u0435\u0440\u0432\u0430\u0446\u0438\u044F \u0441\u043B\u043E\u0442\u0430 (5 \u043C\u0438\u043D) \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u0433\u043E \u0434\u0432\u0438\u0436\u043A\u0430 \u0431\u0440\u043E\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F. Ephemeral: \u0431\u0435\u0437 relations (raw-\u0432\u0441\u0442\u0430\u0432\u043A\u0438 \u0434\u0432\u0438\u0436\u043A\u0430), \u043F\u0440\u043E\u0442\u0443\u0445\u0448\u0438\u0435 \u0447\u0438\u0441\u0442\u0438\u0442 \u043A\u0440\u043E\u043D + POST /engine/holds.';
+    displayName: '\u0425\u043E\u043B\u0434\u044B \u0441\u043B\u043E\u0442\u043E\u0432 (rezervace)';
+    pluralName: 'slot-holds';
+    singularName: 'slot-hold';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date;
+    durationMin: Schema.Attribute.Integer;
+    employeeDocId: Schema.Attribute.String & Schema.Attribute.Required;
+    employeeName: Schema.Attribute.String;
+    endsAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    expiresAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::slot-hold.slot-hold'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    services: Schema.Attribute.JSON;
+    sessionKey: Schema.Attribute.String;
+    startsAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    totalPrice: Schema.Attribute.Decimal;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
   };
 }
 
@@ -3088,10 +3179,12 @@ declare module '@strapi/strapi' {
       'api::qr-pay.qr-pay': ApiQrPayQrPay;
       'api::salary.salary': ApiSalarySalary;
       'api::salon-hour.salon-hour': ApiSalonHourSalonHour;
+      'api::salon-service.salon-service': ApiSalonServiceSalonService;
       'api::service-junior-map.service-junior-map': ApiServiceJuniorMapServiceJuniorMap;
       'api::service-provided.service-provided': ApiServiceProvidedServiceProvided;
       'api::service.service': ApiServiceService;
       'api::shift.shift': ApiShiftShift;
+      'api::slot-hold.slot-hold': ApiSlotHoldSlotHold;
       'api::stock.stock': ApiStockStock;
       'api::tax.tax': ApiTaxTax;
       'api::time-block.time-block': ApiTimeBlockTimeBlock;

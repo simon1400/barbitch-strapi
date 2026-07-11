@@ -1,0 +1,73 @@
+{
+  "kind": "collectionType",
+  "collectionName": "salon_services",
+  "info": {
+    "singularName": "salon-service",
+    "pluralName": "salon-services",
+    "displayName": "Каталог услуг (rezervace)",
+    "description": "Собственный каталог услуг резервационной системы (заменяет Noona event_types + combo-взрыв). Цена/длительность брони = base + variant + Σ modifiers, junior −20% формулой."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "category": {
+      "type": "string"
+    },
+    "categoryOrder": {
+      "type": "integer",
+      "default": 0
+    },
+    "durationMin": {
+      "type": "integer",
+      "required": true
+    },
+    "price": {
+      "type": "integer",
+      "required": true
+    },
+    "description": {
+      "type": "text"
+    },
+    "color": {
+      "type": "string"
+    },
+    "order": {
+      "type": "integer",
+      "default": 0
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "onlineBookable": {
+      "type": "boolean",
+      "default": true
+    },
+    "variants": {
+      "type": "component",
+      "component": "booking.service-variant",
+      "repeatable": true
+    },
+    "modifiers": {
+      "type": "component",
+      "component": "booking.service-modifier",
+      "repeatable": true
+    },
+    "noonaBaseId": {
+      "type": "string",
+      "unique": true
+    },
+    "personals": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::personal.personal",
+      "mappedBy": "services"
+    }
+  }
+}

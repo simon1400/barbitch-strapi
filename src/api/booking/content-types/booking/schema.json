@@ -82,6 +82,16 @@
     },
     "remindersSent": {
       "type": "json"
+    },
+    "engineEmployeeId": {
+      "type": "string"
+    },
+    "createdByName": {
+      "type": "string"
+    },
+    "priceOverride": {
+      "type": "boolean",
+      "default": false
     }
   }
 }

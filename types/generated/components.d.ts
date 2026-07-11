@@ -47,6 +47,40 @@ export interface BookingModifierResult extends Struct.ComponentSchema {
   };
 }
 
+export interface BookingServiceModifier extends Struct.ComponentSchema {
+  collectionName: 'components_booking_service_modifiers';
+  info: {
+    displayName: 'serviceModifier';
+    icon: 'check';
+  };
+  attributes: {
+    description: Schema.Attribute.Text;
+    durationDiff: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    group: Schema.Attribute.String;
+    key: Schema.Attribute.String & Schema.Attribute.Required;
+    label: Schema.Attribute.String & Schema.Attribute.Required;
+    priceDiff: Schema.Attribute.Integer &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<0>;
+  };
+}
+
+export interface BookingServiceVariant extends Struct.ComponentSchema {
+  collectionName: 'components_booking_service_variants';
+  info: {
+    displayName: 'serviceVariant';
+    icon: 'layer';
+  };
+  attributes: {
+    description: Schema.Attribute.Text;
+    durationDiff: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    label: Schema.Attribute.String & Schema.Attribute.Required;
+    priceDiff: Schema.Attribute.Integer &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<0>;
+  };
+}
+
 export interface ContentAskAnswer extends Struct.ComponentSchema {
   collectionName: 'components_content_ask_answers';
   info: {
@@ -323,6 +357,8 @@ declare module '@strapi/strapi' {
       'booking.addon-item': BookingAddonItem;
       'booking.modifier-item': BookingModifierItem;
       'booking.modifier-result': BookingModifierResult;
+      'booking.service-modifier': BookingServiceModifier;
+      'booking.service-variant': BookingServiceVariant;
       'content.ask-answer': ContentAskAnswer;
       'content.content-baner': ContentContentBaner;
       'content.faq': ContentFaq;

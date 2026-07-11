@@ -1,0 +1,33 @@
+{
+  "collectionName": "components_booking_service_modifiers",
+  "info": {
+    "displayName": "serviceModifier",
+    "icon": "check"
+  },
+  "options": {},
+  "attributes": {
+    "key": {
+      "type": "string",
+      "required": true
+    },
+    "label": {
+      "type": "string",
+      "required": true
+    },
+    "priceDiff": {
+      "type": "integer",
+      "required": true,
+      "default": 0
+    },
+    "durationDiff": {
+      "type": "integer",
+      "default": 0
+    },
+    "group": {
+      "type": "string"
+    },
+    "description": {
+      "type": "text"
+    }
+  }
+}

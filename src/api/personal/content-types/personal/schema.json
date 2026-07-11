@@ -177,6 +177,12 @@
         "senior",
         "junior"
       ]
+    },
+    "services": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::salon-service.salon-service",
+      "inversedBy": "personals"
     }
   }
 }
