@@ -1,0 +1,87 @@
+{
+  "kind": "collectionType",
+  "collectionName": "bookings",
+  "info": {
+    "singularName": "booking",
+    "pluralName": "bookings",
+    "displayName": "Брони (rezervace)",
+    "description": "Брони собственной системы бронирования (фаза 1 — зеркало Noona events)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "client": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::client.client",
+      "inversedBy": "bookings"
+    },
+    "employee": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::personal.personal"
+    },
+    "clientNameRaw": {
+      "type": "string"
+    },
+    "employeeNameRaw": {
+      "type": "string"
+    },
+    "noonaEmployeeId": {
+      "type": "string"
+    },
+    "date": {
+      "type": "date"
+    },
+    "startsAt": {
+      "type": "datetime"
+    },
+    "endsAt": {
+      "type": "datetime"
+    },
+    "status": {
+      "type": "enumeration",
+      "default": "active",
+      "enum": ["active", "checkedOut", "cancelled", "noshow"]
+    },
+    "noonaStatus": {
+      "type": "string"
+    },
+    "services": {
+      "type": "json"
+    },
+    "totalPrice": {
+      "type": "decimal"
+    },
+    "comment": {
+      "type": "text"
+    },
+    "customerComment": {
+      "type": "text"
+    },
+    "origin": {
+      "type": "string"
+    },
+    "bsChannel": {
+      "type": "string"
+    },
+    "bsGroup": {
+      "type": "string"
+    },
+    "noonaEventId": {
+      "type": "string",
+      "unique": true
+    },
+    "noonaCreatedAt": {
+      "type": "datetime"
+    },
+    "cancelToken": {
+      "type": "string"
+    },
+    "remindersSent": {
+      "type": "json"
+    }
+  }
+}

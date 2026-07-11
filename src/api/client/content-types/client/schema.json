@@ -1,0 +1,54 @@
+{
+  "kind": "collectionType",
+  "collectionName": "clients",
+  "info": {
+    "singularName": "client",
+    "pluralName": "clients",
+    "displayName": "Клиенты (rezervace)",
+    "description": "База клиентов собственной системы бронирования (фаза 1 — зеркало Noona customers)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "phone": {
+      "type": "string"
+    },
+    "email": {
+      "type": "string"
+    },
+    "noonaCustomerId": {
+      "type": "string",
+      "unique": true
+    },
+    "blacklisted": {
+      "type": "boolean",
+      "default": false
+    },
+    "blacklistReason": {
+      "type": "text"
+    },
+    "notes": {
+      "type": "text"
+    },
+    "tags": {
+      "type": "json"
+    },
+    "source": {
+      "type": "enumeration",
+      "default": "import",
+      "enum": ["import", "site", "admin"]
+    },
+    "bookings": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::booking.booking",
+      "mappedBy": "client"
+    }
+  }
+}

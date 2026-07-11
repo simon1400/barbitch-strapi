@@ -906,6 +906,58 @@ export interface ApiBookingAddonGroupBookingAddonGroup
   };
 }
 
+export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
+  collectionName: 'bookings';
+  info: {
+    description: '\u0411\u0440\u043E\u043D\u0438 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u0439 \u0441\u0438\u0441\u0442\u0435\u043C\u044B \u0431\u0440\u043E\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F (\u0444\u0430\u0437\u0430 1 \u2014 \u0437\u0435\u0440\u043A\u0430\u043B\u043E Noona events)';
+    displayName: '\u0411\u0440\u043E\u043D\u0438 (rezervace)';
+    pluralName: 'bookings';
+    singularName: 'booking';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    bsChannel: Schema.Attribute.String;
+    bsGroup: Schema.Attribute.String;
+    cancelToken: Schema.Attribute.String;
+    client: Schema.Attribute.Relation<'manyToOne', 'api::client.client'>;
+    clientNameRaw: Schema.Attribute.String;
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    customerComment: Schema.Attribute.Text;
+    date: Schema.Attribute.Date;
+    employee: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    employeeNameRaw: Schema.Attribute.String;
+    endsAt: Schema.Attribute.DateTime;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::booking.booking'
+    > &
+      Schema.Attribute.Private;
+    noonaCreatedAt: Schema.Attribute.DateTime;
+    noonaEmployeeId: Schema.Attribute.String;
+    noonaEventId: Schema.Attribute.String & Schema.Attribute.Unique;
+    noonaStatus: Schema.Attribute.String;
+    origin: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    remindersSent: Schema.Attribute.JSON;
+    services: Schema.Attribute.JSON;
+    startsAt: Schema.Attribute.DateTime;
+    status: Schema.Attribute.Enumeration<
+      ['active', 'checkedOut', 'cancelled', 'noshow']
+    > &
+      Schema.Attribute.DefaultTo<'active'>;
+    totalPrice: Schema.Attribute.Decimal;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiCardProfitCardProfit extends Struct.CollectionTypeSchema {
   collectionName: 'card_profits';
   info: {
@@ -1097,6 +1149,45 @@ export interface ApiClientErrorLogClientErrorLog
       Schema.Attribute.Private;
     url: Schema.Attribute.String;
     userAgent: Schema.Attribute.String;
+  };
+}
+
+export interface ApiClientClient extends Struct.CollectionTypeSchema {
+  collectionName: 'clients';
+  info: {
+    description: '\u0411\u0430\u0437\u0430 \u043A\u043B\u0438\u0435\u043D\u0442\u043E\u0432 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u0439 \u0441\u0438\u0441\u0442\u0435\u043C\u044B \u0431\u0440\u043E\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F (\u0444\u0430\u0437\u0430 1 \u2014 \u0437\u0435\u0440\u043A\u0430\u043B\u043E Noona customers)';
+    displayName: '\u041A\u043B\u0438\u0435\u043D\u0442\u044B (rezervace)';
+    pluralName: 'clients';
+    singularName: 'client';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    blacklisted: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    blacklistReason: Schema.Attribute.Text;
+    bookings: Schema.Attribute.Relation<'oneToMany', 'api::booking.booking'>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    email: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::client.client'
+    > &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    noonaCustomerId: Schema.Attribute.String & Schema.Attribute.Unique;
+    notes: Schema.Attribute.Text;
+    phone: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    source: Schema.Attribute.Enumeration<['import', 'site', 'admin']> &
+      Schema.Attribute.DefaultTo<'import'>;
+    tags: Schema.Attribute.JSON;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
   };
 }
 
@@ -2902,11 +2993,13 @@ declare module '@strapi/strapi' {
       'api::blog-topic.blog-topic': ApiBlogTopicBlogTopic;
       'api::blog.blog': ApiBlogBlog;
       'api::booking-addon-group.booking-addon-group': ApiBookingAddonGroupBookingAddonGroup;
+      'api::booking.booking': ApiBookingBooking;
       'api::card-profit.card-profit': ApiCardProfitCardProfit;
       'api::cash.cash': ApiCashCash;
       'api::chat-message.chat-message': ApiChatMessageChatMessage;
       'api::chat-session.chat-session': ApiChatSessionChatSession;
       'api::client-error-log.client-error-log': ApiClientErrorLogClientErrorLog;
+      'api::client.client': ApiClientClient;
       'api::contact.contact': ApiContactContact;
       'api::cost.cost': ApiCostCost;
       'api::email-campaign-log.email-campaign-log': ApiEmailCampaignLogEmailCampaignLog;

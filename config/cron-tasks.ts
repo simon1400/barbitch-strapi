@@ -3,6 +3,23 @@
 // и NOONA_TOKEN/NOONA_COMPANY_ID — иначе тихий skip (см. сервис digest).
 
 export default {
+  // Синк-зеркало Noona → client/booking (own-booking фаза 1). Выключен по умолчанию:
+  // включается ТОЛЬКО env MIRROR_SYNC_ENABLED=true (+ NOONA_TOKEN/NOONA_COMPANY_ID).
+  // На проде без явного включения не запустится.
+  mirrorSync: {
+    task: async ({ strapi }) => {
+      if (process.env.MIRROR_SYNC_ENABLED !== 'true') return;
+      try {
+        await strapi.service('api::booking-mirror.booking-mirror').syncRecent();
+      } catch (e) {
+        strapi.log.error(`booking-mirror cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '*/10 * * * *', // каждые 10 минут
+      tz: 'Europe/Prague',
+    },
+  },
   dailyDigest: {
     task: async ({ strapi }) => {
       try {
