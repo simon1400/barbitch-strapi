@@ -19,7 +19,9 @@ export default {
       if (from && to) {
         const customers = await service.syncCustomers();
         const events = await service.syncEvents(String(from), String(to));
-        ctx.body = { window: { from, to }, customers, events };
+        // schedule принимает даты 'YYYY-MM-DD' — берём из from/to (обрезаем время)
+        const schedule = await service.syncSchedule(String(from).slice(0, 10), String(to).slice(0, 10));
+        ctx.body = { window: { from, to }, customers, events, schedule };
         return;
       }
       ctx.body = await service.syncRecent();

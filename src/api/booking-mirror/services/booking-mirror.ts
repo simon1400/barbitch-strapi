@@ -16,6 +16,18 @@ const NOONA_BASE = 'https://api.noona.is/v1/hq/companies';
 const CLIENT_UID = 'api::client.client';
 const BOOKING_UID = 'api::booking.booking';
 const PERSONAL_UID = 'api::personal.personal';
+const SALON_HOUR_UID = 'api::salon-hour.salon-hour';
+const TIME_BLOCK_UID = 'api::time-block.time-block';
+
+// 'YYYY-MM-DD' в Праге со смещением дней (сервер в UTC)
+const pragueDate = (offsetDays = 0): string =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(
+    new Date(Date.now() + offsetDays * 86400000)
+  );
+const hhmmToMin = (s: string): number => {
+  const [h, m] = (s || '0:0').split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+};
 
 const normalizeStatus = (raw: string | undefined): string => {
   if (raw === 'cancelled' || raw === 'noshow' || raw === 'checkedOut') return raw;
@@ -129,6 +141,29 @@ export default {
     return this.noonaGet(`events?${params.toString()}`);
   },
 
+  // blocked_times ограничен ≤31 днём на запрос (span 45 → 400) → чанкуем по 30д.
+  // `to` у эндпоинта ИСКЛЮЧАЮЩИЙ → передаём границу+1 день.
+  async fetchBlockedRange(fromDate: string, toDate: string) {
+    const addDays = (d: string, n: number): string => {
+      const [y, m, dd] = d.split('-').map(Number);
+      const x = new Date(Date.UTC(y, m - 1, dd + n));
+      return `${x.getUTCFullYear()}-${String(x.getUTCMonth() + 1).padStart(2, '0')}-${String(x.getUTCDate()).padStart(2, '0')}`;
+    };
+    const out = [];
+    let cursor = fromDate;
+    let guard = 0;
+    while (cursor <= toDate && guard < 40) {
+      guard += 1;
+      let chunkEnd = addDays(cursor, 29);
+      if (chunkEnd > toDate) chunkEnd = toDate;
+      const toExcl = addDays(chunkEnd, 1);
+      const part = await this.noonaGet(`blocked_times?from=${cursor}&to=${toExcl}`);
+      if (Array.isArray(part)) out.push(...part);
+      cursor = addDays(chunkEnd, 1);
+    }
+    return out;
+  },
+
   // Все customers Noona отдаются одним запросом (~1800), limit/skip игнорируются
   async syncCustomers() {
     const groups = await this.noonaGet('customer_groups');
@@ -237,6 +272,123 @@ export default {
     return { total: (events || []).length, created, updated, skipped, errors };
   },
 
+  // Расписание: opening_hours + blocked_times за окно дат ['YYYY-MM-DD'..].
+  // blocked_times: `to` у эндпоинта ИСКЛЮЧАЮЩИЙ → передаём day+1; повторяющиеся
+  // блоки (rrule) разворачиваются по датам с тем же id → ключ дедупа = `id|date`.
+  async syncSchedule(fromDate: string, toDate: string) {
+    const openingParams = new URLSearchParams();
+    openingParams.append('filter', JSON.stringify({ from: fromDate, to: toDate }));
+    const [opening, blocked] = await Promise.all([
+      this.noonaGet(`opening_hours?${openingParams.toString()}`),
+      this.fetchBlockedRange(fromDate, toDate),
+    ]);
+
+    // ── salon-hours upsert по дате ──
+    const existingHours = await strapi.documents(SALON_HOUR_UID).findMany({
+      filters: { date: { $gte: fromDate, $lte: toDate } },
+      limit: 100000,
+    });
+    const hoursByDate = new Map(existingHours.map((h) => [h.date, h]));
+    let hoursCreated = 0;
+    let hoursUpdated = 0;
+    const hErrors = [];
+    for (const [date, wins] of Object.entries(opening || {})) {
+      const windows = (wins as Array<{ starts_at?: string; ends_at?: string }>) || [];
+      const starts = windows.map((w) => (w.starts_at ? hhmmToMin(w.starts_at) : null)).filter((v) => v != null);
+      const ends = windows.map((w) => (w.ends_at ? hhmmToMin(w.ends_at) : null)).filter((v) => v != null);
+      const openMin = starts.length ? Math.min(...starts) : null;
+      const closeMin = ends.length ? Math.max(...ends) : null;
+      const data = { date, openMin, closeMin, windows };
+      const cur = hoursByDate.get(date);
+      try {
+        if (!cur) {
+          await strapi.documents(SALON_HOUR_UID).create({ data });
+          hoursCreated += 1;
+        } else if (cur.openMin !== openMin || cur.closeMin !== closeMin) {
+          await strapi.documents(SALON_HOUR_UID).update({ documentId: cur.documentId, data });
+          hoursUpdated += 1;
+        }
+      } catch (e) {
+        hErrors.push(`hours ${date}: ${e.message}`);
+      }
+    }
+
+    // ── time-block upsert + reconcile (удаляем исчезнувшие в окне) ──
+    const personals = await strapi.documents(PERSONAL_UID).findMany({
+      fields: ['noonaEmployeeId'],
+      status: 'published',
+      limit: 1000,
+    });
+    const personalByNoona = new Map(
+      personals.filter((p) => p.noonaEmployeeId).map((p) => [p.noonaEmployeeId, p.documentId])
+    );
+
+    const freshRaw = (Array.isArray(blocked) ? blocked : []).filter(
+      (b) => b?.employee && b?.date && b.date >= fromDate && b.date <= toDate
+    );
+    // dedup по id|date (rrule-инстанс может прийти в двух смежных чанках)
+    const freshBlocks = [...new Map(freshRaw.map((b) => [`${b.id}|${b.date}`, b])).values()];
+    const freshKeys = new Set(freshBlocks.map((b) => `${b.id}|${b.date}`));
+
+    const existingBlocks = await strapi.documents(TIME_BLOCK_UID).findMany({
+      filters: { date: { $gte: fromDate, $lte: toDate } },
+      limit: 100000,
+    });
+    const blockByKey = new Map(existingBlocks.map((b) => [b.noonaKey, b]));
+
+    let blCreated = 0;
+    let blUpdated = 0;
+    let blDeleted = 0;
+    const blErrors = [];
+    for (const b of freshBlocks) {
+      const key = `${b.id}|${b.date}`;
+      const data = {
+        noonaKey: key,
+        noonaBlockedId: b.id,
+        noonaEmployeeId: b.employee,
+        employee: personalByNoona.get(b.employee) || null,
+        date: b.date,
+        startsAt: b.starts_at || null,
+        endsAt: b.ends_at || null,
+        title: b.title || '',
+        theme: b.theme || '',
+      };
+      const cur = blockByKey.get(key);
+      try {
+        if (!cur) {
+          await strapi.documents(TIME_BLOCK_UID).create({ data });
+          blCreated += 1;
+        } else if (
+          cur.startsAt !== data.startsAt ||
+          cur.endsAt !== data.endsAt ||
+          (cur.title ?? '') !== data.title ||
+          (cur.noonaEmployeeId ?? '') !== data.noonaEmployeeId
+        ) {
+          await strapi.documents(TIME_BLOCK_UID).update({ documentId: cur.documentId, data });
+          blUpdated += 1;
+        }
+      } catch (e) {
+        blErrors.push(`block ${key}: ${e.message}`);
+      }
+    }
+    // Reconcile: блоки зеркала в окне, которых больше нет в Noona → удалить
+    for (const b of existingBlocks) {
+      if (!freshKeys.has(b.noonaKey)) {
+        try {
+          await strapi.documents(TIME_BLOCK_UID).delete({ documentId: b.documentId });
+          blDeleted += 1;
+        } catch (e) {
+          blErrors.push(`block-del ${b.noonaKey}: ${e.message}`);
+        }
+      }
+    }
+
+    return {
+      hours: { created: hoursCreated, updated: hoursUpdated, errors: hErrors },
+      blocks: { total: freshBlocks.length, created: blCreated, updated: blUpdated, deleted: blDeleted, errors: blErrors },
+    };
+  },
+
   // Инкрементальный синк: окно [сегодня−30д, сегодня+90д] + все customers (дёшево)
   async syncRecent() {
     if (!this.hasEnv()) {
@@ -249,6 +401,7 @@ export default {
 
     const customers = await this.syncCustomers();
     const events = await this.syncEvents(fromIso, toIso);
+    const schedule = await this.syncSchedule(pragueDate(-30), pragueDate(90));
 
     const summary = {
       window: { from: fromIso, to: toIso },
@@ -259,6 +412,10 @@ export default {
         updated: events.updated,
         skipped: events.skipped,
         errors: events.errors.length,
+      },
+      schedule: {
+        hours: schedule.hours.created + schedule.hours.updated,
+        blocks: `+${schedule.blocks.created}/~${schedule.blocks.updated}/-${schedule.blocks.deleted}`,
       },
     };
     strapi.log.info(`booking-mirror sync: ${JSON.stringify(summary)}`);

@@ -1,0 +1,30 @@
+{
+  "kind": "collectionType",
+  "collectionName": "salon_hours",
+  "info": {
+    "singularName": "salon-hour",
+    "pluralName": "salon-hours",
+    "displayName": "Часы салона (rezervace)",
+    "description": "Рабочие часы салона по датам (зеркало Noona opening_hours, фаза 2 own-booking)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "date": {
+      "type": "date",
+      "required": true,
+      "unique": true
+    },
+    "openMin": {
+      "type": "integer"
+    },
+    "closeMin": {
+      "type": "integer"
+    },
+    "windows": {
+      "type": "json"
+    }
+  }
+}

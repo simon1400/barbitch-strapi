@@ -1,0 +1,49 @@
+{
+  "kind": "collectionType",
+  "collectionName": "time_blocks",
+  "info": {
+    "singularName": "time-block",
+    "pluralName": "time-blocks",
+    "displayName": "Блоки времени (rezervace)",
+    "description": "Нерабочее время мастеров (зеркало Noona blocked_times, фаза 2 own-booking)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "employee": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::personal.personal"
+    },
+    "noonaEmployeeId": {
+      "type": "string"
+    },
+    "employeeNameRaw": {
+      "type": "string"
+    },
+    "date": {
+      "type": "date"
+    },
+    "startsAt": {
+      "type": "datetime"
+    },
+    "endsAt": {
+      "type": "datetime"
+    },
+    "title": {
+      "type": "string"
+    },
+    "theme": {
+      "type": "string"
+    },
+    "noonaKey": {
+      "type": "string",
+      "unique": true
+    },
+    "noonaBlockedId": {
+      "type": "string"
+    }
+  }
+}

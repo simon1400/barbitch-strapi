@@ -1957,6 +1957,40 @@ export interface ApiSalarySalary extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiSalonHourSalonHour extends Struct.CollectionTypeSchema {
+  collectionName: 'salon_hours';
+  info: {
+    description: '\u0420\u0430\u0431\u043E\u0447\u0438\u0435 \u0447\u0430\u0441\u044B \u0441\u0430\u043B\u043E\u043D\u0430 \u043F\u043E \u0434\u0430\u0442\u0430\u043C (\u0437\u0435\u0440\u043A\u0430\u043B\u043E Noona opening_hours, \u0444\u0430\u0437\u0430 2 own-booking)';
+    displayName: '\u0427\u0430\u0441\u044B \u0441\u0430\u043B\u043E\u043D\u0430 (rezervace)';
+    pluralName: 'salon-hours';
+    singularName: 'salon-hour';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    closeMin: Schema.Attribute.Integer;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::salon-hour.salon-hour'
+    > &
+      Schema.Attribute.Private;
+    openMin: Schema.Attribute.Integer;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    windows: Schema.Attribute.JSON;
+  };
+}
+
 export interface ApiServiceJuniorMapServiceJuniorMap
   extends Struct.CollectionTypeSchema {
   collectionName: 'service_junior_maps';
@@ -2225,6 +2259,44 @@ export interface ApiTaxTax extends Struct.CollectionTypeSchema {
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     type: Schema.Attribute.Enumeration<['social', 'health', 'income', 'all']> &
       Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiTimeBlockTimeBlock extends Struct.CollectionTypeSchema {
+  collectionName: 'time_blocks';
+  info: {
+    description: '\u041D\u0435\u0440\u0430\u0431\u043E\u0447\u0435\u0435 \u0432\u0440\u0435\u043C\u044F \u043C\u0430\u0441\u0442\u0435\u0440\u043E\u0432 (\u0437\u0435\u0440\u043A\u0430\u043B\u043E Noona blocked_times, \u0444\u0430\u0437\u0430 2 own-booking)';
+    displayName: '\u0411\u043B\u043E\u043A\u0438 \u0432\u0440\u0435\u043C\u0435\u043D\u0438 (rezervace)';
+    pluralName: 'time-blocks';
+    singularName: 'time-block';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date;
+    employee: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    employeeNameRaw: Schema.Attribute.String;
+    endsAt: Schema.Attribute.DateTime;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::time-block.time-block'
+    > &
+      Schema.Attribute.Private;
+    noonaBlockedId: Schema.Attribute.String;
+    noonaEmployeeId: Schema.Attribute.String;
+    noonaKey: Schema.Attribute.String & Schema.Attribute.Unique;
+    publishedAt: Schema.Attribute.DateTime;
+    startsAt: Schema.Attribute.DateTime;
+    theme: Schema.Attribute.String;
+    title: Schema.Attribute.String;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -3015,12 +3087,14 @@ declare module '@strapi/strapi' {
       'api::pricelist-page.pricelist-page': ApiPricelistPagePricelistPage;
       'api::qr-pay.qr-pay': ApiQrPayQrPay;
       'api::salary.salary': ApiSalarySalary;
+      'api::salon-hour.salon-hour': ApiSalonHourSalonHour;
       'api::service-junior-map.service-junior-map': ApiServiceJuniorMapServiceJuniorMap;
       'api::service-provided.service-provided': ApiServiceProvidedServiceProvided;
       'api::service.service': ApiServiceService;
       'api::shift.shift': ApiShiftShift;
       'api::stock.stock': ApiStockStock;
       'api::tax.tax': ApiTaxTax;
+      'api::time-block.time-block': ApiTimeBlockTimeBlock;
       'api::time-off.time-off': ApiTimeOffTimeOff;
       'api::vaucher-page.vaucher-page': ApiVaucherPageVaucherPage;
       'api::voucher.voucher': ApiVoucherVoucher;
