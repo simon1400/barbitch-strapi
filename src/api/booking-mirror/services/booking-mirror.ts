@@ -371,8 +371,11 @@ export default {
         blErrors.push(`block ${key}: ${e.message}`);
       }
     }
-    // Reconcile: блоки зеркала в окне, которых больше нет в Noona → удалить
+    // Reconcile: блоки зеркала в окне, которых больше нет в Noona → удалить.
+    // Блоки нашего движка (noonaKey 'own|…', booking-engine adminCreateBlock)
+    // Noona не знает — их реконсайл НЕ трогает.
     for (const b of existingBlocks) {
+      if (String(b.noonaKey || '').startsWith('own|')) continue;
       if (!freshKeys.has(b.noonaKey)) {
         try {
           await strapi.documents(TIME_BLOCK_UID).delete({ documentId: b.documentId });

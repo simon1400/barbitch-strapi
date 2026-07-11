@@ -20,6 +20,21 @@ export default {
       tz: 'Europe/Prague',
     },
   },
+  // Чистка протухших слот-холдов движка бронирования (own-booking). Безвредна
+  // везде: до появления таблицы slot_holds сервис тихо возвращает 0.
+  engineHoldsCleanup: {
+    task: async ({ strapi }) => {
+      try {
+        await strapi.service('api::booking-engine.booking-engine').cleanupHolds();
+      } catch (e) {
+        strapi.log.error(`engine holds cleanup cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '* * * * *', // каждую минуту
+      tz: 'Europe/Prague',
+    },
+  },
   dailyDigest: {
     task: async ({ strapi }) => {
       try {
