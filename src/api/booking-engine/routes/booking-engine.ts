@@ -18,6 +18,9 @@ const admin = (method: string, path: string, handler: string) => ({
 
 export default {
   routes: [
+    pub('GET', '/engine/services', 'booking-engine.listServices'),
+    pub('GET', '/engine/services/:id', 'booking-engine.getService'),
+    pub('GET', '/engine/services/:id/employees', 'booking-engine.listServiceEmployees'),
     pub('GET', '/engine/availability', 'booking-engine.availability'),
     pub('POST', '/engine/holds', 'booking-engine.createHold'),
     pub('GET', '/engine/holds/:id', 'booking-engine.getHold'),

@@ -43,6 +43,21 @@ const parseModifiers = (raw) => {
 };
 
 export default {
+  // GET /api/engine/services — публичный каталог для сайта (/book), сгруппирован по категориям
+  async listServices(ctx) {
+    await handle(ctx, () => svc().publicCatalog());
+  },
+
+  // GET /api/engine/services/:id — одна услуга (шаг /extras); :id = documentId или легаси noonaBaseId
+  async getService(ctx) {
+    await handle(ctx, () => svc().publicService(ctx.params.id));
+  },
+
+  // GET /api/engine/services/:id/employees — мастера услуги (страница выбора мастера)
+  async listServiceEmployees(ctx) {
+    await handle(ctx, () => svc().publicServiceEmployees(ctx.params.id));
+  },
+
   // GET /api/engine/availability?service=&variant=&modifiers=a,b&employee=id|any&from=&to=
   async availability(ctx) {
     await handle(ctx, () =>

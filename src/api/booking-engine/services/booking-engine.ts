@@ -38,7 +38,7 @@ const PERSONAL_UID = 'api::personal.personal';
 const SALON_HOUR_UID = 'api::salon-hour.salon-hour';
 const TIME_BLOCK_UID = 'api::time-block.time-block';
 
-const MAX_RANGE_DAYS = 62; // потолок окна availability за один запрос
+const MAX_RANGE_DAYS = 120; // потолок окна availability за один запрос (сайт просит ~3,5 месяца, как в Noona-флоу)
 const PG_EXCLUSION_VIOLATION = '23P01';
 const OWN_BLOCK_PREFIX = 'own|'; // noonaKey engine-блоков — реконсайл зеркала их не трогает
 
@@ -98,12 +98,97 @@ export default {
 
   async resolveService(serviceDocId) {
     if (!serviceDocId) throw new EngineError(400, 'service_required', 'Параметр service обязателен');
-    const svc = await strapi.documents(SALON_SERVICE_UID).findOne({
+    let svc = await strapi.documents(SALON_SERVICE_UID).findOne({
       documentId: serviceDocId,
       populate: { variants: true, modifiers: true },
     });
+    if (!svc) {
+      // легаси-ссылки (/cenik, старые письма) несут Noona event_type id базовой услуги
+      const byNoona = await strapi.documents(SALON_SERVICE_UID).findMany({
+        filters: { noonaBaseId: serviceDocId },
+        populate: { variants: true, modifiers: true },
+        limit: 1,
+      });
+      svc = byNoona[0] || null;
+    }
     if (!svc || svc.active === false) throw new EngineError(404, 'service_not_found', 'Услуга не найдена или выключена');
     return svc;
+  },
+
+  // ── публичный каталог (сайт, auth:false + rate-limit) ──
+
+  shapeService(svc) {
+    return {
+      id: svc.documentId,
+      title: svc.title,
+      category: svc.category || '',
+      durationMin: svc.durationMin,
+      price: svc.price,
+      description: svc.description || '',
+      variants: (svc.variants || []).map((v) => ({
+        label: v.label,
+        priceDiff: v.priceDiff || 0,
+        durationDiff: v.durationDiff || 0,
+        description: v.description || '',
+      })),
+      modifiers: (svc.modifiers || []).map((m) => ({
+        key: m.key,
+        label: m.label,
+        priceDiff: m.priceDiff || 0,
+        durationDiff: m.durationDiff || 0,
+        group: m.group || '',
+        description: m.description || '',
+      })),
+    };
+  },
+
+  async publicCatalog() {
+    const list = await strapi.documents(SALON_SERVICE_UID).findMany({
+      filters: { active: true, onlineBookable: true },
+      sort: ['categoryOrder:asc', 'order:asc', 'title:asc'],
+      populate: { variants: true, modifiers: true },
+      limit: 500,
+    });
+    const groups = [];
+    const byCat = new Map();
+    for (const s of list) {
+      const cat = s.category || 'Ostatní';
+      if (!byCat.has(cat)) {
+        const g = { title: cat, services: [] };
+        byCat.set(cat, g);
+        groups.push(g);
+      }
+      byCat.get(cat).services.push(this.shapeService(s));
+    }
+    return { groups };
+  },
+
+  async publicService(serviceDocId) {
+    const svc = await this.resolveService(serviceDocId);
+    if (svc.onlineBookable === false) {
+      throw new EngineError(404, 'service_not_bookable', 'Услуга недоступна для онлайн-записи');
+    }
+    return this.shapeService(svc);
+  },
+
+  async publicServiceEmployees(serviceDocId) {
+    const svc = await this.resolveService(serviceDocId);
+    const employees = await strapi.documents(PERSONAL_UID).findMany({
+      status: 'published',
+      filters: { isActive: true, services: { documentId: { $eq: svc.documentId } } },
+      fields: ['name', 'tier'],
+      populate: { photo: true },
+      limit: 100,
+    });
+    return {
+      serviceId: svc.documentId,
+      employees: employees.map((e) => ({
+        documentId: e.documentId,
+        name: e.name,
+        tier: e.tier === 'junior' ? 'junior' : 'senior',
+        photoUrl: e.photo?.formats?.thumbnail?.url || e.photo?.url || null,
+      })),
+    };
   },
 
   resolveVariantAndModifiers(svc, variantLabel, modifierKeys) {
@@ -251,7 +336,7 @@ export default {
     });
     if (durationMin <= 0) throw new EngineError(400, 'bad_duration', 'Нулевая длительность услуги');
 
-    const assigned = await this.listEmployeesForService(serviceDocId);
+    const assigned = await this.listEmployeesForService(svc.documentId);
     let employees = assigned;
     if (employee && employee !== 'any') {
       employees = assigned.filter((p) => p.documentId === employee);
@@ -344,7 +429,7 @@ export default {
     // кандидаты: конкретный мастер или балансировка среди свободных (порт selectMaster s75)
     let chosenDocId;
     const svc = await this.resolveService(serviceDocId);
-    const allEmployees = await this.listEmployeesForService(serviceDocId);
+    const allEmployees = await this.listEmployeesForService(svc.documentId);
     if (employee && employee !== 'any') {
       chosenDocId = employee;
     } else {
