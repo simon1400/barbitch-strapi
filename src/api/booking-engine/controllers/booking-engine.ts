@@ -177,6 +177,13 @@ export default {
     await handle(ctx, () => svc().adminPatchBooking(ctx.params.id, ctx.request.body || {}, session));
   },
 
+  // DELETE /api/engine/admin/bookings/:id — полное удаление брони (не отмена)
+  async adminDeleteBooking(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => svc().adminDeleteBooking(ctx.params.id, session));
+  },
+
   // POST /api/engine/admin/blocks {employee, date, startMin, endMin, title?}
   async adminCreateBlock(ctx) {
     const session = requireAdmin(ctx);

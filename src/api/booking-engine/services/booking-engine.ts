@@ -922,6 +922,22 @@ export default {
     return strapi.documents(BOOKING_UID).findOne({ documentId: bookingDocId, populate: { employee: { fields: ['name'] }, client: { fields: ['name', 'phone'] } } });
   },
 
+  // Полное удаление брони (корзина в drawer). ЖЁСТКОЕ удаление записи, НЕ отмена:
+  // бронь исчезает из БД (link-строки чистит FK cascade). Зеркальные (Noona) брони
+  // при включённом синке удалять нельзя — реконсайл их воскресит.
+  async adminDeleteBooking(bookingDocId, session) {
+    const booking = await strapi.documents(BOOKING_UID).findOne({ documentId: bookingDocId });
+    if (!booking) throw new EngineError(404, 'booking_not_found', 'Бронь не найдена');
+    if (booking.noonaEventId && String(process.env.MIRROR_SYNC_ENABLED || '').toLowerCase() === 'true') {
+      throw new EngineError(409, 'mirror_booking', 'Бронь из зеркала Noona — синк её восстановит, удалять в Noona');
+    }
+    await strapi.documents(BOOKING_UID).delete({ documentId: bookingDocId });
+    strapi.log.info(
+      `booking-engine: admin ${session?.username || '?'} DELETED booking ${bookingDocId} (${booking.clientNameRaw || ''} ${booking.date})`
+    );
+    return { deleted: 1 };
+  },
+
   // ── админ: блоки времени ──
 
   // Разворачивает серию блоков в список дат (YYYY-MM-DD).

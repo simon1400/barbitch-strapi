@@ -32,6 +32,7 @@ export default {
     admin('POST', '/engine/notify/run-reminders', 'booking-engine.notifyRunReminders'),
     admin('POST', '/engine/admin/bookings', 'booking-engine.adminCreateBooking'),
     admin('PATCH', '/engine/admin/bookings/:id', 'booking-engine.adminPatchBooking'),
+    admin('DELETE', '/engine/admin/bookings/:id', 'booking-engine.adminDeleteBooking'),
     admin('POST', '/engine/admin/blocks', 'booking-engine.adminCreateBlock'),
     admin('PATCH', '/engine/admin/blocks/:id', 'booking-engine.adminPatchBlock'),
     admin('DELETE', '/engine/admin/blocks/:id', 'booking-engine.adminDeleteBlock'),
