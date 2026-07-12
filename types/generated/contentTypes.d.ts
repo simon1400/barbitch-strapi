@@ -1792,6 +1792,12 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       }>;
     payroll: Schema.Attribute.Relation<'oneToMany', 'api::payroll.payroll'>;
     penalties: Schema.Attribute.Relation<'oneToMany', 'api::penalty.penalty'>;
+    photo: Schema.Attribute.Media<'images'> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }>;
     position: Schema.Attribute.Enumeration<['administrator', 'master']> &
       Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{

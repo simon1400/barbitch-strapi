@@ -27,6 +27,9 @@ export default {
     pub('POST', '/engine/bookings', 'booking-engine.createBooking'),
     pub('GET', '/engine/cancel/:token', 'booking-engine.getCancel'),
     pub('POST', '/engine/cancel/:token', 'booking-engine.postCancel'),
+    // сервисные ручки нотификаций (гейт секретом DIGEST_SECRET в контроллере, паттерн digest)
+    admin('GET', '/engine/notify/preview', 'booking-engine.notifyPreview'),
+    admin('POST', '/engine/notify/run-reminders', 'booking-engine.notifyRunReminders'),
     admin('POST', '/engine/admin/bookings', 'booking-engine.adminCreateBooking'),
     admin('PATCH', '/engine/admin/bookings/:id', 'booking-engine.adminPatchBooking'),
     admin('POST', '/engine/admin/blocks', 'booking-engine.adminCreateBlock'),

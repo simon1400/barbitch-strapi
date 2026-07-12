@@ -35,6 +35,23 @@ export default {
       tz: 'Europe/Prague',
     },
   },
+  // Reminder T−24ч по броням ДВИЖКА (own-booking шаг 6). Выключен по умолчанию:
+  // включается ТОЛЬКО env ENGINE_REMINDERS_ENABLED=true (+ RESEND_API_KEY для писем).
+  // Идемпотентен (отметка remindersSent), зеркальные Noona-брони не трогает.
+  engineReminders: {
+    task: async ({ strapi }) => {
+      if (process.env.ENGINE_REMINDERS_ENABLED !== 'true') return;
+      try {
+        await strapi.service('api::booking-engine.booking-notify').sendReminders();
+      } catch (e) {
+        strapi.log.error(`engine reminders cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '*/15 * * * *', // каждые 15 минут
+      tz: 'Europe/Prague',
+    },
+  },
   dailyDigest: {
     task: async ({ strapi }) => {
       try {

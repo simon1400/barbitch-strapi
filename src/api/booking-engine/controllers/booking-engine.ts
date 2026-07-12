@@ -117,6 +117,34 @@ export default {
     await handle(ctx, () => svc().postCancel(ctx.params.token));
   },
 
+  // ── сервисные ручки нотификаций (гейт DIGEST_SECRET, паттерн digest) ──
+
+  // GET /api/engine/notify/preview?secret=&type=confirmation|reminder|cancellation&booking=<docId>
+  async notifyPreview(ctx) {
+    const secret = process.env.DIGEST_SECRET;
+    if (!secret || ctx.query.secret !== secret) {
+      ctx.status = 403;
+      ctx.body = { error: { status: 403, code: 'forbidden', message: 'Bad secret' } };
+      return;
+    }
+    await handle(ctx, () =>
+      strapi
+        .service('api::booking-engine.booking-notify')
+        .preview(ctx.query.type || 'confirmation', ctx.query.booking)
+    );
+  },
+
+  // POST /api/engine/notify/run-reminders?secret= — ручной прогон reminder-крона
+  async notifyRunReminders(ctx) {
+    const secret = process.env.DIGEST_SECRET;
+    if (!secret || ctx.query.secret !== secret) {
+      ctx.status = 403;
+      ctx.body = { error: { status: 403, code: 'forbidden', message: 'Bad secret' } };
+      return;
+    }
+    await handle(ctx, () => strapi.service('api::booking-engine.booking-notify').sendReminders());
+  },
+
   // ── админские (admin-jwt, роли owner/administrator) ──
 
   // POST /api/engine/admin/bookings

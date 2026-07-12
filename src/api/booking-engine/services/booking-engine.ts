@@ -653,6 +653,13 @@ export default {
       throw e;
     }
 
+    // нотификации fire-and-forget: подтверждение клиенту + Telegram салону;
+    // сбой письма НЕ роняет уже созданную бронь
+    strapi
+      .service('api::booking-engine.booking-notify')
+      .notifyBookingCreated(documentId)
+      .catch((e) => strapi.log.error(`booking-notify created failed: ${e.message}`));
+
     return {
       bookingId: documentId,
       cancelToken,
@@ -909,6 +916,13 @@ export default {
       throw new EngineError(409, 'too_late', `Rezervaci lze zrušit nejpozději ${CANCEL_MIN_HOURS} h předem`);
     }
     await strapi.documents(BOOKING_UID).update({ documentId: booking.documentId, data: { status: 'cancelled' } });
+
+    // письмо клиенту + Telegram салону (fire-and-forget — отмена уже применена)
+    strapi
+      .service('api::booking-engine.booking-notify')
+      .notifyBookingCancelled(booking.documentId)
+      .catch((e) => strapi.log.error(`booking-notify cancelled failed: ${e.message}`));
+
     return { cancelled: true, ...info, status: 'cancelled' };
   },
 
