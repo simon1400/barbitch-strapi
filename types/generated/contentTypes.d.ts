@@ -906,6 +906,38 @@ export interface ApiBookingAddonGroupBookingAddonGroup
   };
 }
 
+export interface ApiBookingLabelBookingLabel
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'booking_labels';
+  info: {
+    description: '\u041A\u0430\u0441\u0442\u043E\u043C\u043D\u044B\u0435 \u043B\u0435\u0439\u0431\u043B\u044B \u0431\u0440\u043E\u043D\u0435\u0439 (\u043A\u0430\u043B\u0435\u043D\u0434\u0430\u0440\u044C admin, \u00ABSpravovat \u0161t\u00EDtky\u00BB)';
+    displayName: '\u0160t\u00EDtky rezervac\u00ED';
+    pluralName: 'booking-labels';
+    singularName: 'booking-label';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    color: Schema.Attribute.String & Schema.Attribute.Required;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::booking-label.booking-label'
+    > &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    order: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
   collectionName: 'bookings';
   info: {
@@ -934,6 +966,7 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     employeeNameRaw: Schema.Attribute.String;
     endsAt: Schema.Attribute.DateTime;
     engineEmployeeId: Schema.Attribute.String;
+    label: Schema.Attribute.JSON;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1735,6 +1768,13 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
     >;
     advances: Schema.Attribute.Relation<'oneToMany', 'api::avans.avans'>;
     bookingPriority: Schema.Attribute.Integer &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<0>;
+    calendarOrder: Schema.Attribute.Integer &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
           localized: false;
@@ -3162,6 +3202,7 @@ declare module '@strapi/strapi' {
       'api::blog-topic.blog-topic': ApiBlogTopicBlogTopic;
       'api::blog.blog': ApiBlogBlog;
       'api::booking-addon-group.booking-addon-group': ApiBookingAddonGroupBookingAddonGroup;
+      'api::booking-label.booking-label': ApiBookingLabelBookingLabel;
       'api::booking.booking': ApiBookingBooking;
       'api::card-profit.card-profit': ApiCardProfitCardProfit;
       'api::cash.cash': ApiCashCash;

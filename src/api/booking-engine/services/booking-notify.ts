@@ -332,6 +332,30 @@ export default {
     return { subject, html };
   },
 
+  buildReschedule(v: BookingNotifyView, fromLabel) {
+    const subject = `Změna termínu — nově ${v.dateLabel} v ${v.time} | Bar.Bitch`;
+    const origLine = fromLabel ? `Původní termín: <strong style="color:#ffffff;">${esc(fromLabel)}</strong>. ` : '';
+    const html = renderEmail({
+      heading: 'Změna termínu ✨',
+      intro: `${esc(v.clientName || 'Dobrý den')}, váš termín v ${esc(SALON_NAME)} byl přesunut. Aktuální údaje najdete níže, novou pozvánku do kalendáře přikládáme.`,
+      rows: bookingRows(v),
+      note: `${origLine}${cancelNote(v)}`,
+    });
+    const ics = buildIcs(v);
+    return {
+      subject,
+      html,
+      ics,
+      attachments: [
+        {
+          filename: 'rezervace.ics',
+          content: Buffer.from(ics, 'utf8').toString('base64'),
+          content_type: 'text/calendar',
+        },
+      ],
+    };
+  },
+
   // ── события движка (вызываются fire-and-forget) ──
 
   async notifyBookingCreated(bookingDocId) {
@@ -380,6 +404,43 @@ export default {
         if (r.status === 'rejected') strapi.log.error(`booking-notify cancelled(${bookingDocId}): ${r.reason?.message || r.reason}`);
       }
     });
+  },
+
+  // ── админские действия (чекбокс «уведомить клиента», роадмап §4.2/4.3) ──
+  // Только письмо клиенту, БЕЗ Telegram салону: действие сделал сам админ,
+  // дублировать его в салонный чат не нужно.
+
+  async notifyBookingCreatedByAdmin(bookingDocId) {
+    const booking = await this.loadBooking(bookingDocId);
+    if (!booking) return;
+    const v = viewFromBookingDoc(booking);
+    const { subject, html, attachments } = this.buildConfirmation(v);
+    await this.sendEmail({ to: v.clientEmail, subject, html, attachments });
+  },
+
+  async notifyBookingCancelledByAdmin(bookingDocId) {
+    const booking = await this.loadBooking(bookingDocId);
+    if (!booking) return;
+    const v = viewFromBookingDoc(booking);
+    const { subject, html } = this.buildCancellation(v);
+    await this.sendEmail({ to: v.clientEmail, subject, html });
+  },
+
+  // Перенос брони админом: письмо клиенту с новыми деталями + ICS.
+  // from = снимок старого термина (для строки «Původní termín»).
+  // (Уведомление мастеру — отдельная задача, пока не реализовано.)
+  async notifyBookingRescheduledByAdmin(bookingDocId, from) {
+    const booking = await this.loadBooking(bookingDocId);
+    if (!booking) return;
+    const v = viewFromBookingDoc(booking);
+    if (!v.clientEmail) return;
+    const fromLabel = from
+      ? `${from.startsAt ? czDateLabel(from.startsAt) : from.date || ''} v ${from.time || ''}${
+          from.employeeName ? ` · ${from.employeeName}` : ''
+        }`.trim()
+      : '';
+    const { subject, html, attachments } = this.buildReschedule(v, fromLabel);
+    await this.sendEmail({ to: v.clientEmail, subject, html, attachments });
   },
 
   async loadBooking(bookingDocId) {

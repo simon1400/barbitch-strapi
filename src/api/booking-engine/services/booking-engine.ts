@@ -676,7 +676,7 @@ export default {
 
   // ── админ: прямая бронь (без hold) ──
 
-  async adminCreateBooking({ session, employee, date, time, serviceItems, client, clientDocId, priceOverride, comment, sendMinLead = false }) {
+  async adminCreateBooking({ session, employee, date, time, serviceItems, client, clientDocId, priceOverride, comment, notify = false, sendMinLead = false }) {
     if (!isDateStr(date)) throw new EngineError(400, 'bad_date', 'date должен быть YYYY-MM-DD');
     if (!/^\d{2}:\d{2}$/.test(String(time || ''))) throw new EngineError(400, 'bad_time', 'time должен быть HH:MM');
     if (!Array.isArray(serviceItems) || !serviceItems.length) {
@@ -753,6 +753,16 @@ export default {
       if (e?.code === PG_EXCLUSION_VIOLATION) throw new EngineError(409, 'slot_taken', 'Мастер занят в это время');
       throw e;
     }
+
+    // чекбокс «отправить подтверждение» (роадмап §4.3): только письмо клиенту,
+    // fire-and-forget — сбой письма не роняет уже созданную бронь
+    if (notify) {
+      strapi
+        .service('api::booking-engine.booking-notify')
+        .notifyBookingCreatedByAdmin(documentId)
+        .catch((e) => strapi.log.error(`booking-notify admin-created failed: ${e.message}`));
+    }
+
     return { bookingId: documentId, date, time, startsAt, endsAt, totalPrice, services: snapshot, employee: { documentId: emp.documentId, name: emp.name }, client: { documentId: clientDoc.documentId, name: clientDoc.name } };
   },
 
@@ -761,9 +771,17 @@ export default {
   async adminPatchBooking(bookingDocId, patch, session) {
     const booking = await strapi.documents(BOOKING_UID).findOne({
       documentId: bookingDocId,
-      populate: { employee: { fields: ['documentId'] } },
+      populate: { employee: { fields: ['documentId', 'name'] } },
     });
     if (!booking) throw new EngineError(404, 'booking_not_found', 'Бронь не найдена');
+
+    // снимок старого термина (для письма о переносе «Původní termín: …»)
+    const fromInfo = {
+      startsAt: booking.startsAt,
+      date: String(booking.date),
+      time: booking.startsAt ? minToHHMM(utcToPragueMinClamped(booking.startsAt, String(booking.date))) : '',
+      employeeName: booking.employee?.name || booking.employeeNameRaw || '',
+    };
 
     const knex = strapi.db.connection;
     const upd = { updated_at: new Date() };
@@ -778,6 +796,16 @@ export default {
     if (patch.totalPrice != null) {
       upd.total_price = Number(patch.totalPrice);
       upd.price_override = true;
+    }
+    // кастомный лейбл (снапшот {name, color}); label: null → снять
+    if ('label' in patch) {
+      if (patch.label == null) {
+        upd.label = null;
+      } else if (patch.label.name && patch.label.color) {
+        upd.label = JSON.stringify({ name: String(patch.label.name), color: String(patch.label.color) });
+      } else {
+        throw new EngineError(400, 'bad_label', 'label должен быть {name, color} или null');
+      }
     }
 
     // перенос: новые дата/время и/или мастер
@@ -834,45 +862,137 @@ export default {
       throw e;
     }
     strapi.log.info(`booking-engine: admin ${session?.username || '?'} patched booking ${bookingDocId} ${JSON.stringify(Object.keys(patch))}`);
+
+    // чекбокс «уведомить клиента» при отмене админом (роадмап §4.2):
+    // только письмо клиенту, fire-and-forget — отмена уже применена
+    if (patch.notify && patch.status === 'cancelled') {
+      strapi
+        .service('api::booking-engine.booking-notify')
+        .notifyBookingCancelledByAdmin(bookingDocId)
+        .catch((e) => strapi.log.error(`booking-notify admin-cancelled failed: ${e.message}`));
+    }
+
+    // чекбокс «уведомить клиента» при переносе админом: письмо с новыми деталями + ICS
+    if (moving && patch.notifyClient) {
+      strapi
+        .service('api::booking-engine.booking-notify')
+        .notifyBookingRescheduledByAdmin(bookingDocId, fromInfo)
+        .catch((e) => strapi.log.error(`booking-notify admin-rescheduled failed: ${e.message}`));
+    }
+
     return strapi.documents(BOOKING_UID).findOne({ documentId: bookingDocId, populate: { employee: { fields: ['name'] }, client: { fields: ['name', 'phone'] } } });
   },
 
   // ── админ: блоки времени ──
 
-  async adminCreateBlock({ session, employee, date, startMin, endMin, title }) {
+  // Разворачивает серию блоков в список дат (YYYY-MM-DD).
+  // recurrence: {freq:'daily'|'weekly', until:'YYYY-MM-DD', weekdays?:number[]} (weekday 0=Ne..6=So, как getUTCDay).
+  // Без recurrence → одна дата. Кап — 1 год от старта.
+  _expandBlockDates(startDate, rec) {
+    if (!rec || (rec.freq !== 'daily' && rec.freq !== 'weekly')) return [startDate];
+    const until = isDateStr(rec.until) ? rec.until : startDate;
+    const start = new Date(`${startDate}T00:00:00Z`);
+    const end = new Date(`${until}T00:00:00Z`);
+    if (end < start) return [startDate];
+    const MAX_MS = 366 * 24 * 3600 * 1000;
+    const cappedEnd = end.getTime() - start.getTime() > MAX_MS ? new Date(start.getTime() + MAX_MS) : end;
+    const weekdays =
+      Array.isArray(rec.weekdays) && rec.weekdays.length
+        ? rec.weekdays.map(Number).filter((n) => n >= 0 && n <= 6)
+        : [start.getUTCDay()];
+    const out = [];
+    for (let t = new Date(start); t <= cappedEnd; t.setUTCDate(t.getUTCDate() + 1)) {
+      if (rec.freq === 'daily' || weekdays.includes(t.getUTCDay())) out.push(t.toISOString().slice(0, 10));
+    }
+    return out.length ? out : [startDate];
+  },
+
+  async adminCreateBlock({ session, employee, date, startMin, endMin, title, recurrence }) {
     if (!isDateStr(date)) throw new EngineError(400, 'bad_date', 'date должен быть YYYY-MM-DD');
     if (!(Number.isFinite(startMin) && Number.isFinite(endMin) && endMin > startMin)) {
       throw new EngineError(400, 'bad_interval', 'startMin/endMin некорректны');
     }
     const emp = await this.getEmployee(employee);
+    // общий ключ на всю серию (уникальный uuid) — каждый день = отдельная строка, но одна группа
     const key = `${OWN_BLOCK_PREFIX}${crypto.randomUUID()}`;
-    const created = await strapi.documents(TIME_BLOCK_UID).create({
-      data: {
-        noonaKey: key,
-        noonaBlockedId: '',
-        noonaEmployeeId: emp.noonaEmployeeId || '',
-        employee: emp.documentId,
-        employeeNameRaw: emp.name,
-        date,
-        startsAt: pragueMinToUtcIso(date, startMin),
-        endsAt: pragueMinToUtcIso(date, endMin),
-        title: String(title || '').trim() || 'Blokace',
-        theme: '',
-      },
-    });
-    strapi.log.info(`booking-engine: admin ${session?.username || '?'} created block ${key} (${date} ${minToHHMM(startMin)}–${minToHHMM(endMin)} ${emp.name})`);
-    return created;
+    const titleStr = String(title || '').trim() || 'Blokace';
+    const dates = this._expandBlockDates(date, recurrence);
+
+    const created = [];
+    for (const d of dates) {
+      created.push(
+        await strapi.documents(TIME_BLOCK_UID).create({
+          data: {
+            noonaKey: key,
+            noonaBlockedId: '',
+            noonaEmployeeId: emp.noonaEmployeeId || '',
+            employee: emp.documentId,
+            employeeNameRaw: emp.name,
+            date: d,
+            startsAt: pragueMinToUtcIso(d, startMin),
+            endsAt: pragueMinToUtcIso(d, endMin),
+            title: titleStr,
+            theme: '',
+          },
+        })
+      );
+    }
+    strapi.log.info(
+      `booking-engine: admin ${session?.username || '?'} created ${created.length} block(s) ${key} (${date}${
+        dates.length > 1 ? `..${dates[dates.length - 1]}` : ''
+      } ${minToHHMM(startMin)}–${minToHHMM(endMin)} ${emp.name})`
+    );
+    return { documentId: created[0]?.documentId, count: created.length };
   },
 
-  async adminDeleteBlock(blockDocId) {
+  // Зеркальные (Noona) блоки можно трогать ТОЛЬКО при выключенном синке —
+  // иначе реконсайл их воскресит. Own-блоки управляемы всегда.
+  _assertBlockManageable(block) {
+    if (String(block.noonaKey || '').startsWith(OWN_BLOCK_PREFIX)) return;
+    if (String(process.env.MIRROR_SYNC_ENABLED || '').toLowerCase() === 'true') {
+      throw new EngineError(409, 'mirror_block', 'Блок из зеркала Noona — управляется синком, менять в Noona');
+    }
+  },
+
+  // PATCH блока: время (в рамках его дня) и/или название. Только этот конкретный блок.
+  async adminPatchBlock(blockDocId, { startMin, endMin, title }, session) {
     const block = await strapi.documents(TIME_BLOCK_UID).findOne({ documentId: blockDocId });
     if (!block) throw new EngineError(404, 'block_not_found', 'Блок не найден');
-    // зеркальные (Noona) блоки удалять нельзя — реконсайл синка их воскресит
-    if (!String(block.noonaKey || '').startsWith(OWN_BLOCK_PREFIX)) {
-      throw new EngineError(409, 'mirror_block', 'Блок из зеркала Noona — управляется синком, удалять в Noona');
+    this._assertBlockManageable(block);
+    const data = {};
+    if (startMin != null || endMin != null) {
+      const s = Number(startMin);
+      const e = Number(endMin);
+      if (!(Number.isFinite(s) && Number.isFinite(e) && e > s)) {
+        throw new EngineError(400, 'bad_interval', 'startMin/endMin некорректны');
+      }
+      data.startsAt = pragueMinToUtcIso(String(block.date), s);
+      data.endsAt = pragueMinToUtcIso(String(block.date), e);
     }
-    await strapi.documents(TIME_BLOCK_UID).delete({ documentId: blockDocId });
-    return { deleted: true };
+    if (title != null) data.title = String(title).trim() || 'Blokace';
+    if (!Object.keys(data).length) return block;
+    const updated = await strapi.documents(TIME_BLOCK_UID).update({ documentId: blockDocId, data });
+    strapi.log.info(`booking-engine: admin ${session?.username || '?'} patched block ${block.noonaKey} (${block.date})`);
+    return updated;
+  },
+
+  // series=true → удалить все повторения: own-серия делит noonaKey,
+  // зеркальная rrule-серия делит noonaBlockedId (noonaKey у них per-date `id|date`).
+  async adminDeleteBlock(blockDocId, { series = false } = {}) {
+    const block = await strapi.documents(TIME_BLOCK_UID).findOne({ documentId: blockDocId });
+    if (!block) throw new EngineError(404, 'block_not_found', 'Блок не найден');
+    this._assertBlockManageable(block);
+
+    if (!series) {
+      await strapi.documents(TIME_BLOCK_UID).delete({ documentId: blockDocId });
+      return { deleted: 1 };
+    }
+    const isOwn = String(block.noonaKey || '').startsWith(OWN_BLOCK_PREFIX);
+    const filters = isOwn ? { noonaKey: block.noonaKey } : { noonaBlockedId: block.noonaBlockedId || '__none__' };
+    const all = await strapi.documents(TIME_BLOCK_UID).findMany({ filters, limit: 1000 });
+    for (const b of all) await strapi.documents(TIME_BLOCK_UID).delete({ documentId: b.documentId });
+    strapi.log.info(`booking-engine: deleted block series ${block.noonaKey} (${all.length} rows)`);
+    return { deleted: all.length };
   },
 
   // ── отмена клиентом по токену ──

@@ -92,6 +92,9 @@
     "priceOverride": {
       "type": "boolean",
       "default": false
+    },
+    "label": {
+      "type": "json"
     }
   }
 }

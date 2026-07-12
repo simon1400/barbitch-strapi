@@ -149,7 +149,7 @@ export default {
 
   // POST /api/engine/admin/bookings
   // {employee, date, time, services:[{service, variant?, modifiers?, priceOverride?}],
-  //  clientDocId? | client:{name, phone, email?}, priceOverride?, comment?}
+  //  clientDocId? | client:{name, phone, email?}, priceOverride?, comment?, notify?}
   async adminCreateBooking(ctx) {
     const session = requireAdmin(ctx);
     if (!session) return;
@@ -165,11 +165,12 @@ export default {
         clientDocId: b.clientDocId,
         priceOverride: b.priceOverride,
         comment: b.comment,
+        notify: b.notify === true,
       })
     );
   },
 
-  // PATCH /api/engine/admin/bookings/:id {date?, time?, employee?, status?, comment?, totalPrice?}
+  // PATCH /api/engine/admin/bookings/:id {date?, time?, employee?, status?, comment?, totalPrice?, notify?}
   async adminPatchBooking(ctx) {
     const session = requireAdmin(ctx);
     if (!session) return;
@@ -189,14 +190,26 @@ export default {
         startMin: Number(b.startMin),
         endMin: Number(b.endMin),
         title: b.title,
+        recurrence: b.recurrence,
       })
     );
   },
 
-  // DELETE /api/engine/admin/blocks/:id
+  // PATCH /api/engine/admin/blocks/:id {startMin?, endMin?, title?}
+  async adminPatchBlock(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    const b = ctx.request.body || {};
+    await handle(ctx, () =>
+      svc().adminPatchBlock(ctx.params.id, { startMin: b.startMin, endMin: b.endMin, title: b.title }, session)
+    );
+  },
+
+  // DELETE /api/engine/admin/blocks/:id[?series=1] — series=1 удаляет все повторения
   async adminDeleteBlock(ctx) {
     const session = requireAdmin(ctx);
     if (!session) return;
-    await handle(ctx, () => svc().adminDeleteBlock(ctx.params.id));
+    const series = ctx.query.series === '1' || ctx.query.series === 'true';
+    await handle(ctx, () => svc().adminDeleteBlock(ctx.params.id, { series }));
   },
 };

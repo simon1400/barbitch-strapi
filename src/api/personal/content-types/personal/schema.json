@@ -165,6 +165,15 @@
       },
       "default": 0
     },
+    "calendarOrder": {
+      "type": "integer",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "default": 0
+    },
     "tier": {
       "type": "enumeration",
       "pluginOptions": {

@@ -1,0 +1,28 @@
+{
+  "kind": "collectionType",
+  "collectionName": "booking_labels",
+  "info": {
+    "singularName": "booking-label",
+    "pluralName": "booking-labels",
+    "displayName": "Štítky rezervací",
+    "description": "Кастомные лейблы броней (календарь admin, «Spravovat štítky»)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "color": {
+      "type": "string",
+      "required": true
+    },
+    "order": {
+      "type": "integer",
+      "default": 0
+    }
+  }
+}
