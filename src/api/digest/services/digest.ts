@@ -1,15 +1,16 @@
 // @ts-nocheck
 // Ежедневный Telegram-дайджест администратору. ОТДЕЛЬНЫЙ бот (не чатовый):
 // env TELEGRAM_DIGEST_BOT_TOKEN + TELEGRAM_DIGEST_CHAT_ID.
-// Данные Noona: env NOONA_TOKEN + NOONA_COMPANY_ID.
-// Без какого-либо из env — тихо пропускает (лог + {skipped}).
+// Без telegram-env — тихо пропускает (лог + {skipped}).
+//
+// own-booking фаза 4: данные — НАША БД (booking / client / personal / salon-hour /
+// time-block), Noona API не используется. Формат сообщения не менялся.
 //
 // Дайджест ОПЕРАЦИОННЫЙ (для администратора в начале смены): рабочий день,
 // брони по мастерам, новые клиенты, подозрительные записи, свободные окна для
 // дозаписи, загрузка на неделю. Финансовых метрик владельца здесь НЕТ.
 
 const TELEGRAM_API = 'https://api.telegram.org/bot';
-const NOONA_BASE = 'https://api.noona.is/v1/hq/companies';
 
 const MIN_GAP = 30; // минимальное окно (мин), которое показываем как «свободное» для дозаписи
 const VIP_VISITS = 10; // ≥ стольких успешных визитов → клиент «постоянный»
@@ -87,58 +88,59 @@ const subtractBusy = (
 };
 
 export default {
-  async noonaGet(path: string) {
-    const token = process.env.NOONA_TOKEN;
-    const cid = process.env.NOONA_COMPANY_ID;
-    const res = await fetch(`${NOONA_BASE}/${cid}/${path}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) throw new Error(`Noona ${path} → ${res.status}`);
-    return res.json();
-  },
-
   async buildDigest(): Promise<string> {
     const today = pragueDateStr(0);
     const weekEnd = pragueDateStr(6);
     const dayAfterWeekEnd = pragueDateStr(7);
 
-    // ── Noona: сотрудники + события [год назад .. +7 дней] ──
-    const employeesRaw = await this.noonaGet(
-      'employees?select=id&select=name&select=available_for_bookings'
-    );
+    // ── НАША БД: мастера (personal) + брони [год назад .. +7 дней] ──
+    const personals = await strapi.documents('api::personal.personal').findMany({
+      fields: ['name', 'noonaEmployeeId', 'isActive'],
+      status: 'published',
+      limit: 1000,
+    });
     const empNames = new Map();
     const activeIds = new Set();
-    for (const e of employeesRaw || []) {
-      if (!e.id) continue;
-      empNames.set(e.id, (e.name || e.id).trim());
-      if (e.available_for_bookings === true) activeIds.add(e.id);
+    for (const p of personals || []) {
+      if (!p.noonaEmployeeId) continue;
+      empNames.set(p.noonaEmployeeId, (p.name || p.noonaEmployeeId).trim());
+      if (p.isActive && !String(p.name || '').startsWith('❌')) activeIds.add(p.noonaEmployeeId);
     }
 
     const yearAgo = pragueDateStr(-365);
-    const eventsParams = new URLSearchParams();
-    eventsParams.append(
-      'filter',
-      JSON.stringify({
-        from: `${yearAgo}T00:00:00.000Z`,
-        to: `${dayAfterWeekEnd}T23:59:59.999Z`,
-      })
-    );
-    for (const f of [
-      'customer',
-      'customer_name',
-      'employee',
-      'status',
-      'event_date',
-      'starts_at',
-      'ends_at',
-      'created_at',
-      'event_types.title',
-      'comment',
-      'customer_comment',
-    ]) {
-      eventsParams.append('select', f);
-    }
-    const events = (await this.noonaGet(`events?${eventsParams.toString()}`)) || [];
+    const bookingsRaw = await strapi.documents('api::booking.booking').findMany({
+      filters: { date: { $gte: yearAgo, $lte: dayAfterWeekEnd } },
+      fields: [
+        'clientNameRaw',
+        'noonaEmployeeId',
+        'date',
+        'startsAt',
+        'endsAt',
+        'status',
+        'services',
+        'comment',
+        'customerComment',
+        'noonaCreatedAt',
+        'createdAt',
+      ],
+      populate: { client: { fields: ['name', 'noonaCustomerId', 'phone'] } },
+      limit: 100000,
+    });
+    // Форма событий как у Noona — логика ниже не менялась; имя клиента ТЕКУЩЕЕ (relation)
+    const events = (bookingsRaw || []).map((b) => ({
+      customer: b.client ? b.client.noonaCustomerId || b.client.documentId : '',
+      customer_name: b.client?.name || b.clientNameRaw || '',
+      customer_phone: b.client?.phone || '',
+      employee: b.noonaEmployeeId || '',
+      status: b.status || '',
+      event_date: String(b.date || ''),
+      starts_at: b.startsAt,
+      ends_at: b.endsAt,
+      created_at: b.noonaCreatedAt || b.createdAt,
+      event_types: (b.services || []).map((s) => ({ title: s.title || '' })),
+      comment: b.comment || '',
+      customer_comment: b.customerComment || '',
+    }));
 
     // ── Один проход по событиям ──
     const todayByMaster = new Map();
@@ -255,14 +257,10 @@ export default {
     // ── Подозрительные записи на сегодня ──
     let suspiciousLines = [];
     try {
-      const customersRaw = await this.noonaGet(
-        'customers?select=id&select=phone_country_code&select=phone_number'
-      );
+      // телефоны уже в populated client каждой брони — отдельный fetch не нужен
       const phoneById = new Map();
-      for (const c of customersRaw || []) {
-        if (c.id && c.phone_number) {
-          phoneById.set(c.id, `+${c.phone_country_code || '420'}${c.phone_number}`);
-        }
+      for (const e of events) {
+        if (e.customer && e.customer_phone) phoneById.set(e.customer, e.customer_phone);
       }
 
       const seen = new Set();
@@ -361,10 +359,34 @@ export default {
     let weekCapacityMin = 0;
     const gapLines = [];
     try {
-      const opParams = new URLSearchParams();
-      opParams.append('filter', JSON.stringify({ from: today, to: weekEnd }));
-      const opening = (await this.noonaGet(`opening_hours?${opParams.toString()}`)) || {};
-      const blocked = (await this.noonaGet(`blocked_times?from=${today}&to=${weekEnd}`)) || [];
+      // расписание — из зеркала (salon-hour/time-block), форма как у Noona-ответов
+      const hoursRaw = await strapi.documents('api::salon-hour.salon-hour').findMany({
+        filters: { date: { $gte: today, $lte: weekEnd } },
+        limit: 100,
+      });
+      const opening = {};
+      for (const h of hoursRaw || []) {
+        if (h.windows?.length) opening[String(h.date)] = h.windows;
+        else if (h.openMin != null && h.closeMin != null) {
+          opening[String(h.date)] = [
+            { starts_at: minToHHMM(h.openMin), ends_at: minToHHMM(h.closeMin) },
+          ];
+        }
+      }
+      const blocksRaw = await strapi.documents('api::time-block.time-block').findMany({
+        filters: { date: { $gte: today, $lte: weekEnd } },
+        limit: 5000,
+      });
+      const blocked = (blocksRaw || []).map((b) => ({
+        employee: b.noonaEmployeeId || '',
+        date: String(b.date || ''),
+        starts_at: b.startsAt,
+        ends_at: b.endsAt,
+        duration:
+          b.startsAt && b.endsAt
+            ? Math.max(0, (new Date(b.endsAt).getTime() - new Date(b.startsAt).getTime()) / 60000)
+            : 0,
+      }));
 
       // часы салона + капацита недели (по длительности блоков)
       const openMin = {};
@@ -478,10 +500,6 @@ export default {
     if (!botToken || !chatId) {
       strapi.log.info('digest: TELEGRAM_DIGEST_BOT_TOKEN/CHAT_ID not set — skipping');
       return { skipped: 'telegram env not configured' };
-    }
-    if (!process.env.NOONA_TOKEN || !process.env.NOONA_COMPANY_ID) {
-      strapi.log.info('digest: NOONA_TOKEN/NOONA_COMPANY_ID not set — skipping');
-      return { skipped: 'noona env not configured' };
     }
 
     const text = await this.buildDigest();
