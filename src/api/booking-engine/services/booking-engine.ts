@@ -808,18 +808,57 @@ export default {
       }
     }
 
-    // перенос: новые дата/время и/или мастер
+    // смена услуги (админ-календарь): новый снапшот services + пересчёт цены и
+    // длительности (endsAt пересчитается в блоке переноса ниже, с валидацией пересечений)
+    let newDuration = null;
+    if (patch.serviceItems != null) {
+      if (!Array.isArray(patch.serviceItems) || !patch.serviceItems.length) {
+        throw new EngineError(400, 'services_required', 'Нужна минимум одна услуга');
+      }
+      const empDocIdForPricing = patch.employee || booking.employee?.documentId || booking.engineEmployeeId;
+      if (!empDocIdForPricing) throw new EngineError(400, 'employee_required', 'У брони нет мастера');
+      const empForPricing = await this.getEmployee(empDocIdForPricing);
+      const snapshot = [];
+      let computedPrice = 0;
+      let totalDuration = 0;
+      for (const item of patch.serviceItems) {
+        const svc = await this.resolveService(item.service);
+        const { variant, modifiers } = this.resolveVariantAndModifiers(svc, item.variant, item.modifiers);
+        const pricing = computePricing({
+          basePrice: svc.price,
+          baseDurationMin: svc.durationMin,
+          variant,
+          modifiers,
+          tier: empForPricing.tier === 'junior' ? 'junior' : 'senior',
+        });
+        const price = item.priceOverride != null ? Number(item.priceOverride) : pricing.price;
+        snapshot.push({ ...this.buildServiceSnapshot(svc, variant, modifiers, pricing)[0], price });
+        computedPrice += price;
+        totalDuration += pricing.durationMin;
+      }
+      if (totalDuration <= 0) throw new EngineError(400, 'bad_duration', 'Нулевая длительность');
+      upd.services = JSON.stringify(snapshot);
+      // явный patch.totalPrice (обработан выше) побеждает пересчитанную цену
+      if (patch.totalPrice == null) {
+        upd.total_price = computedPrice;
+        upd.price_override = patch.serviceItems.some((i) => i.priceOverride != null);
+      }
+      newDuration = totalDuration;
+    }
+
+    // перенос: новые дата/время/мастер и/или новая длительность (смена услуги)
     let newPersonalRows = null;
-    const moving = patch.date != null || patch.time != null || patch.employee != null;
+    const moving = patch.date != null || patch.time != null || patch.employee != null || newDuration != null;
     if (moving) {
       const date = patch.date ?? String(booking.date);
       if (!isDateStr(date)) throw new EngineError(400, 'bad_date', 'date должен быть YYYY-MM-DD');
       const curStartMin = booking.startsAt ? utcToPragueMinClamped(booking.startsAt, date) : 0;
       const startMin = patch.time != null ? Number(patch.time.slice(0, 2)) * 60 + Number(patch.time.slice(3, 5)) : curStartMin;
       const durationMin =
-        booking.startsAt && booking.endsAt
+        newDuration ??
+        (booking.startsAt && booking.endsAt
           ? Math.round((new Date(booking.endsAt) - new Date(booking.startsAt)) / 60000)
-          : 0;
+          : 0);
       if (durationMin <= 0) throw new EngineError(400, 'bad_duration', 'У брони нет длительности');
 
       const empDocId = patch.employee || booking.employee?.documentId || booking.engineEmployeeId;
