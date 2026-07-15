@@ -83,6 +83,10 @@
     "remindersSent": {
       "type": "json"
     },
+    "rescheduleCount": {
+      "type": "integer",
+      "default": 0
+    },
     "engineEmployeeId": {
       "type": "string"
     },

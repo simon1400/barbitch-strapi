@@ -60,6 +60,7 @@ export interface BookingNotifyView {
   clientEmail: string;
   clientPhone: string;
   cancelUrl: string;
+  manageUrl: string; // страница «Moje rezervace»: перенос термина + отмена
 }
 
 const viewFromBookingDoc = (booking): BookingNotifyView => {
@@ -79,6 +80,7 @@ const viewFromBookingDoc = (booking): BookingNotifyView => {
     clientEmail: booking.client?.email || '',
     clientPhone: booking.client?.phone || '',
     cancelUrl: booking.cancelToken ? `${SITE_URL}/rezervace/zrusit/${booking.cancelToken}` : '',
+    manageUrl: booking.cancelToken ? `${SITE_URL}/rezervace/${booking.cancelToken}` : '',
   };
 };
 
@@ -108,7 +110,7 @@ export const buildIcs = (v: BookingNotifyView): string =>
     `SUMMARY:${icsEscape(`${v.serviceTitle} — ${SALON_NAME}`)}`,
     `LOCATION:${icsEscape(SALON_ADDRESS)}`,
     `DESCRIPTION:${icsEscape(
-      `Mistrová: ${v.employeeName}${v.price != null ? `\nCena: ${v.price} Kč` : ''}${v.cancelUrl ? `\nZrušení rezervace: ${v.cancelUrl}` : ''}`
+      `Mistrová: ${v.employeeName}${v.price != null ? `\nCena: ${v.price} Kč` : ''}${v.manageUrl ? `\nZměna či zrušení rezervace: ${v.manageUrl}` : ''}`
     )}`,
     'END:VEVENT',
     'END:VCALENDAR',
@@ -222,11 +224,15 @@ const bookingRows = (v: BookingNotifyView) =>
   ].join('');
 
 const cancelNote = (v: BookingNotifyView) =>
-  `Rezervaci lze zrušit nejpozději ${CANCEL_MIN_HOURS} hodiny předem${
-    v.cancelUrl
-      ? ` — <a href="${v.cancelUrl}" style="color:#e71e6e;">zrušit rezervaci zde</a>`
+  `Termín můžete změnit nebo zrušit nejpozději ${CANCEL_MIN_HOURS} hodiny předem${
+    v.manageUrl
+      ? ` — <a href="${v.manageUrl}" style="color:#e71e6e;">spravovat rezervaci zde</a>`
       : ''
   }. Poté prosím volejte do salonu.`;
+
+// Кнопка «SPRAVOVAT REZERVACI» (перенос/отмена) — в подтверждении, reminder-е и письме о переносе.
+const manageCta = (v: BookingNotifyView) =>
+  v.manageUrl ? { ctaLabel: 'SPRAVOVAT REZERVACI', ctaUrl: v.manageUrl } : {};
 
 // ── транспорты ──
 
@@ -293,6 +299,7 @@ export default {
       intro: `${esc(v.clientName || 'Dobrý den')}, těšíme se na vás v ${esc(SALON_NAME)}! Detaily vaší návštěvy najdete níže, pozvánku do kalendáře přikládáme.`,
       rows: bookingRows(v),
       note: cancelNote(v),
+      ...manageCta(v),
     });
     const ics = buildIcs(v);
     return {
@@ -316,6 +323,7 @@ export default {
       intro: `${esc(v.clientName || 'Dobrý den')}, připomínáme vaši rezervaci v ${esc(SALON_NAME)}.`,
       rows: bookingRows(v),
       note: cancelNote(v),
+      ...manageCta(v),
     });
     return { subject, html };
   },
@@ -340,6 +348,7 @@ export default {
       intro: `${esc(v.clientName || 'Dobrý den')}, váš termín v ${esc(SALON_NAME)} byl přesunut. Aktuální údaje najdete níže, novou pozvánku do kalendáře přikládáme.`,
       rows: bookingRows(v),
       note: `${origLine}${cancelNote(v)}`,
+      ...manageCta(v),
     });
     const ics = buildIcs(v);
     return {
@@ -443,6 +452,38 @@ export default {
     await this.sendEmail({ to: v.clientEmail, subject, html, attachments });
   },
 
+  // Перенос брони САМИМ клиентом (страница /rezervace/{token}): письмо клиенту
+  // с новыми деталями + ICS И Telegram салону — салон должен узнать о переносе
+  // (в отличие от админских действий, которые сделал сам салон).
+  async notifyBookingRescheduledByClient(bookingDocId, from) {
+    const booking = await this.loadBooking(bookingDocId);
+    if (!booking) return;
+    const v = viewFromBookingDoc(booking);
+    const fromLabel = from
+      ? `${from.startsAt ? czDateLabel(from.startsAt) : from.date || ''} v ${from.time || ''}${
+          from.employeeName ? ` · ${from.employeeName}` : ''
+        }`.trim()
+      : '';
+
+    const tg =
+      `🔄 <b>Klient si přesunul rezervaci</b>\n` +
+      `${fromLabel ? `${fromLabel} → ` : ''}${v.dateLabel} v <b>${v.time}</b> · ${v.employeeName}\n` +
+      `${v.serviceTitle}${v.price != null ? ` · ${v.price} Kč` : ''}\n` +
+      `Klient: <b>${v.clientName}</b>${v.clientPhone ? ` · <code>${v.clientPhone}</code>` : ''}`;
+
+    await Promise.allSettled([
+      (async () => {
+        const { subject, html, attachments } = this.buildReschedule(v, fromLabel);
+        await this.sendEmail({ to: v.clientEmail, subject, html, attachments });
+      })(),
+      this.sendTelegram(tg),
+    ]).then((results) => {
+      for (const r of results) {
+        if (r.status === 'rejected') strapi.log.error(`booking-notify client-rescheduled(${bookingDocId}): ${r.reason?.message || r.reason}`);
+      }
+    });
+  },
+
   async loadBooking(bookingDocId) {
     try {
       return await strapi.documents(BOOKING_UID).findOne({
@@ -517,6 +558,7 @@ export default {
     const v = viewFromBookingDoc(booking);
     if (type === 'reminder') return { view: v, ...this.buildReminder(v) };
     if (type === 'cancellation') return { view: v, ...this.buildCancellation(v) };
+    if (type === 'reschedule') return { view: v, ...this.buildReschedule(v, '') };
     const { subject, html, ics } = this.buildConfirmation(v);
     return { view: v, subject, html, ics };
   },

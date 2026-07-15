@@ -41,6 +41,7 @@ const TIME_BLOCK_UID = 'api::time-block.time-block';
 const MAX_RANGE_DAYS = 120; // потолок окна availability за один запрос (сайт просит ~3,5 месяца, как в Noona-флоу)
 const PG_EXCLUSION_VIOLATION = '23P01';
 const OWN_BLOCK_PREFIX = 'own|'; // noonaKey engine-блоков — реконсайл зеркала их не трогает
+const RESCHEDULE_LIMIT = 3; // максимум самостоятельных переносов одной брони клиентом
 
 /** Ошибка с HTTP-статусом — контроллер мапит в ответ. */
 export class EngineError extends Error {
@@ -251,7 +252,9 @@ export default {
 
   // ── занятость: часы салона, блоки, брони, холды за окно дат ──
 
-  async loadDayContexts(employees, fromDate, toDate) {
+  // excludeBookingDocId — собственная бронь клиента при переносе: её интервал не считается
+  // занятым (иначе нельзя сдвинуться на соседний слот, пересекающийся со старым).
+  async loadDayContexts(employees, fromDate, toDate, excludeBookingDocId = null) {
     const nowIso = new Date().toISOString();
     const [hours, blocks, bookings, holds] = await Promise.all([
       strapi.documents(SALON_HOUR_UID).findMany({
@@ -307,7 +310,10 @@ export default {
         endMin: utcToPragueMinClamped(endsAt, d),
       });
     };
-    for (const list of [blocks, bookings, holds]) {
+    const bookingsFiltered = excludeBookingDocId
+      ? bookings.filter((b) => b.documentId !== excludeBookingDocId)
+      : bookings;
+    for (const list of [blocks, bookingsFiltered, holds]) {
       for (const item of list) {
         for (const e of employees) {
           if (belongs(e.documentId, item)) push(item.date, e.documentId, item.startsAt, item.endsAt);
@@ -319,7 +325,7 @@ export default {
 
   // ── availability ──
 
-  async getAvailability({ serviceDocId, variantLabel, modifierKeys, employee, fromDate, toDate, publicOnly = true }) {
+  async getAvailability({ serviceDocId, variantLabel, modifierKeys, employee, fromDate, toDate, publicOnly = true, excludeBookingDocId = null }) {
     if (!isDateStr(fromDate) || !isDateStr(toDate) || toDate < fromDate) {
       throw new EngineError(400, 'bad_range', 'from/to должны быть YYYY-MM-DD, from ≤ to');
     }
@@ -345,7 +351,7 @@ export default {
     if (!employees.length) return { durationMin, days: [] };
 
     const dates = listDates(fromDate, toDate);
-    const { hoursByDate, busy } = await this.loadDayContexts(employees, fromDate, toDate);
+    const { hoursByDate, busy } = await this.loadDayContexts(employees, fromDate, toDate, excludeBookingDocId);
 
     const todayPrague = pragueDateOf(new Date());
     const nowMin = pragueMinOf(new Date());
@@ -1099,6 +1105,132 @@ export default {
       .catch((e) => strapi.log.error(`booking-notify cancelled failed: ${e.message}`));
 
     return { cancelled: true, ...info, status: 'cancelled' };
+  },
+
+  // ── управление бронью клиентом по токену: страница /rezervace/{token} ──
+  // Самостоятельный перенос термина (тот же мастер, та же услуга). Ядро переиспользуется
+  // будущим личным кабинетом (CLIENT_CABINET_PLAN.md) — там гейт будет JWT вместо токена.
+
+  // Селекция для availability из снапшота брони. null → перенос онлайн невозможен
+  // (нет serviceDocId у легаси-снапшота / нет мастера) — клиенту «volejte do salonu».
+  _rescheduleSelection(booking) {
+    const item = Array.isArray(booking.services) ? booking.services[0] : null;
+    const employee = booking.employee?.documentId || booking.engineEmployeeId || null;
+    if (!item?.serviceDocId || !employee) return null;
+    return {
+      serviceDocId: item.serviceDocId,
+      variantLabel: item.variant || null,
+      modifierKeys: Array.isArray(item.modifiers) ? item.modifiers : [],
+      employee,
+    };
+  },
+
+  manageInfo(booking) {
+    const info = this.cancelInfo(booking);
+    const rescheduleCount = Number(booking.rescheduleCount) || 0;
+    return {
+      ...info,
+      rescheduleCount,
+      rescheduleLimit: RESCHEDULE_LIMIT,
+      // перенос по тем же правилам, что отмена (3ч) + лимит + техвозможность
+      reschedulable:
+        info.cancellable && rescheduleCount < RESCHEDULE_LIMIT && Boolean(this._rescheduleSelection(booking)),
+    };
+  },
+
+  async getManage(token) {
+    const booking = await this.bookingByCancelToken(token);
+    return this.manageInfo(booking);
+  },
+
+  // Бросает EngineError с точной причиной, почему перенос недоступен.
+  _assertReschedulable(booking) {
+    if (booking.status !== 'active') throw new EngineError(409, 'not_active', 'Rezervace už není aktivní');
+    const startsMs = booking.startsAt ? new Date(booking.startsAt).getTime() : 0;
+    if (startsMs - Date.now() <= CANCEL_MIN_HOURS * 3600000) {
+      throw new EngineError(409, 'too_late', `Termín lze změnit nejpozději ${CANCEL_MIN_HOURS} h předem`);
+    }
+    if ((Number(booking.rescheduleCount) || 0) >= RESCHEDULE_LIMIT) {
+      throw new EngineError(409, 'reschedule_limit', 'Vyčerpán limit online přesunů — volejte do salonu');
+    }
+    const sel = this._rescheduleSelection(booking);
+    if (!sel) throw new EngineError(409, 'reschedule_unavailable', 'Tuto rezervaci nelze přesunout online');
+    return sel;
+  },
+
+  // Слоты для переноса: услуга/вариант/допы/мастер берутся из самой брони,
+  // её собственный интервал исключён из занятости (excludeBookingDocId).
+  async manageAvailability(token, fromDate, toDate) {
+    const booking = await this.bookingByCancelToken(token);
+    const sel = this._assertReschedulable(booking);
+    return this.getAvailability({
+      ...sel,
+      fromDate,
+      toDate,
+      publicOnly: false, // услугу могли снять с онлайн-записи — существующей брони это не касается
+      excludeBookingDocId: booking.documentId,
+    });
+  },
+
+  async postReschedule(token, { date, time }) {
+    const booking = await this.bookingByCancelToken(token);
+    const sel = this._assertReschedulable(booking);
+    if (!isDateStr(date)) throw new EngineError(400, 'bad_date', 'date должен быть YYYY-MM-DD');
+    if (!/^\d{2}:\d{2}$/.test(String(time || ''))) throw new EngineError(400, 'bad_time', 'time должен быть HH:MM');
+    const startMin = Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+
+    // слот валиден ⇔ он есть в той же availability, что видит клиент в календаре
+    const availability = await this.getAvailability({
+      ...sel,
+      fromDate: date,
+      toDate: date,
+      publicOnly: false,
+      excludeBookingDocId: booking.documentId,
+    });
+    const slot = availability.days[0]?.slots.find((s) => s.startMin === startMin);
+    if (!slot) throw new EngineError(409, 'slot_taken', 'Termín je už obsazený nebo nedostupný');
+
+    // снимок старого термина для письма «Původní termín: …» и Telegram
+    const fromInfo = {
+      startsAt: booking.startsAt,
+      date: String(booking.date),
+      time: booking.startsAt ? minToHHMM(utcToPragueMinClamped(booking.startsAt, String(booking.date))) : '',
+      employeeName: booking.employee?.name || booking.employeeNameRaw || '',
+    };
+
+    const startsAt = pragueMinToUtcIso(date, startMin);
+    const endsAt = pragueMinToUtcIso(date, startMin + availability.durationMin);
+    const upd = {
+      date,
+      starts_at: new Date(startsAt),
+      ends_at: new Date(endsAt),
+      reschedule_count: (Number(booking.rescheduleCount) || 0) + 1,
+      updated_at: new Date(),
+    };
+    // бронь переехала → старая отметка reminder недействительна (крон отправит новую к новой дате)
+    if (Array.isArray(booking.remindersSent) && booking.remindersSent.length) {
+      upd.reminders_sent = JSON.stringify([]);
+    }
+
+    const knex = strapi.db.connection;
+    try {
+      await knex('bookings').where('document_id', booking.documentId).update(upd);
+    } catch (e) {
+      if (e?.code === PG_EXCLUSION_VIOLATION) throw new EngineError(409, 'slot_taken', 'Termín právě někdo obsadil');
+      throw e;
+    }
+    strapi.log.info(
+      `booking-engine: client rescheduled booking ${booking.documentId} ${fromInfo.date} ${fromInfo.time} → ${date} ${time}`
+    );
+
+    // письмо клиенту + Telegram салону (fire-and-forget — перенос уже применён)
+    strapi
+      .service('api::booking-engine.booking-notify')
+      .notifyBookingRescheduledByClient(booking.documentId, fromInfo)
+      .catch((e) => strapi.log.error(`booking-notify client-rescheduled failed: ${e.message}`));
+
+    const fresh = await this.bookingByCancelToken(token);
+    return { rescheduled: true, ...this.manageInfo(fresh) };
   },
 
   // ── крон: чистка протухших холдов ──

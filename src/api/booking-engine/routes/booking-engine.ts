@@ -27,6 +27,10 @@ export default {
     pub('POST', '/engine/bookings', 'booking-engine.createBooking'),
     pub('GET', '/engine/cancel/:token', 'booking-engine.getCancel'),
     pub('POST', '/engine/cancel/:token', 'booking-engine.postCancel'),
+    // управление бронью клиентом (страница /rezervace/{token}: перенос термина + отмена)
+    pub('GET', '/engine/manage/:token', 'booking-engine.getManage'),
+    pub('GET', '/engine/manage/:token/availability', 'booking-engine.manageAvailability'),
+    pub('POST', '/engine/manage/:token/reschedule', 'booking-engine.postReschedule'),
     // сервисные ручки нотификаций (гейт секретом DIGEST_SECRET в контроллере, паттерн digest)
     admin('GET', '/engine/notify/preview', 'booking-engine.notifyPreview'),
     admin('POST', '/engine/notify/run-reminders', 'booking-engine.notifyRunReminders'),

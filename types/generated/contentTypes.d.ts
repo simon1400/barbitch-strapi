@@ -981,6 +981,7 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     priceOverride: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     publishedAt: Schema.Attribute.DateTime;
     remindersSent: Schema.Attribute.JSON;
+    rescheduleCount: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
     services: Schema.Attribute.JSON;
     startsAt: Schema.Attribute.DateTime;
     status: Schema.Attribute.Enumeration<

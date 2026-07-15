@@ -117,6 +117,25 @@ export default {
     await handle(ctx, () => svc().postCancel(ctx.params.token));
   },
 
+  // ── управление бронью клиентом по токену (страница /rezervace/{token}) ──
+
+  // GET /api/engine/manage/:token — детали брони + флаги cancellable/reschedulable
+  async getManage(ctx) {
+    await handle(ctx, () => svc().getManage(ctx.params.token));
+  },
+
+  // GET /api/engine/manage/:token/availability?from=&to= — слоты для переноса
+  // (услуга/мастер из самой брони, её интервал исключён из занятости)
+  async manageAvailability(ctx) {
+    await handle(ctx, () => svc().manageAvailability(ctx.params.token, ctx.query.from, ctx.query.to));
+  },
+
+  // POST /api/engine/manage/:token/reschedule {date, time} — самостоятельный перенос термина
+  async postReschedule(ctx) {
+    const b = ctx.request.body || {};
+    await handle(ctx, () => svc().postReschedule(ctx.params.token, { date: b.date, time: b.time }));
+  },
+
   // ── сервисные ручки нотификаций (гейт DIGEST_SECRET, паттерн digest) ──
 
   // GET /api/engine/notify/preview?secret=&type=confirmation|reminder|cancellation&booking=<docId>
