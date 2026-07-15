@@ -2067,6 +2067,7 @@ export interface ApiSalonServiceSalonService
       Schema.Attribute.Private;
     description: Schema.Attribute.Text;
     durationMin: Schema.Attribute.Integer & Schema.Attribute.Required;
+    icon: Schema.Attribute.Media<'images'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',

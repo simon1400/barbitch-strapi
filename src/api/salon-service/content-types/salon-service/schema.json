@@ -34,6 +34,12 @@
     "description": {
       "type": "text"
     },
+    "icon": {
+      "type": "media",
+      "multiple": false,
+      "required": false,
+      "allowedTypes": ["images"]
+    },
     "color": {
       "type": "string"
     },

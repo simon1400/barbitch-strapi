@@ -101,13 +101,13 @@ export default {
     if (!serviceDocId) throw new EngineError(400, 'service_required', 'Параметр service обязателен');
     let svc = await strapi.documents(SALON_SERVICE_UID).findOne({
       documentId: serviceDocId,
-      populate: { variants: true, modifiers: true },
+      populate: { variants: true, modifiers: true, icon: true },
     });
     if (!svc) {
       // легаси-ссылки (/cenik, старые письма) несут Noona event_type id базовой услуги
       const byNoona = await strapi.documents(SALON_SERVICE_UID).findMany({
         filters: { noonaBaseId: serviceDocId },
-        populate: { variants: true, modifiers: true },
+        populate: { variants: true, modifiers: true, icon: true },
         limit: 1,
       });
       svc = byNoona[0] || null;
@@ -126,6 +126,7 @@ export default {
       durationMin: svc.durationMin,
       price: svc.price,
       description: svc.description || '',
+      iconUrl: svc.icon?.formats?.thumbnail?.url || svc.icon?.url || null,
       variants: (svc.variants || []).map((v) => ({
         label: v.label,
         priceDiff: v.priceDiff || 0,
@@ -147,7 +148,7 @@ export default {
     const list = await strapi.documents(SALON_SERVICE_UID).findMany({
       filters: { active: true, onlineBookable: true },
       sort: ['categoryOrder:asc', 'order:asc', 'title:asc'],
-      populate: { variants: true, modifiers: true },
+      populate: { variants: true, modifiers: true, icon: true },
       limit: 500,
     });
     const groups = [];
