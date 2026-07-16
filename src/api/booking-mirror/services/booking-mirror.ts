@@ -87,11 +87,13 @@ const sortKeys = (v) =>
       : v;
 const stableStringify = (v) => JSON.stringify(sortKeys(v ?? null));
 
+// blacklisted в сравнении НЕТ намеренно: блэклист теперь ведётся в НАШЕМ календаре
+// (toggle в drawer брони) — синк Noona не должен его откатывать (та же философия,
+// что create-only для броней, s114). Из Noona blacklisted ставится только при create.
 const clientChanged = (existing, mapped): boolean =>
   existing.name !== mapped.name ||
   (existing.phone ?? '') !== mapped.phone ||
   (existing.email ?? '') !== mapped.email ||
-  Boolean(existing.blacklisted) !== mapped.blacklisted ||
   (existing.notes ?? '') !== mapped.notes ||
   stableStringify(existing.tags) !== stableStringify(mapped.tags);
 
@@ -164,7 +166,11 @@ export default {
           await strapi.documents(CLIENT_UID).create({ data: mapped });
           created += 1;
         } else if (clientChanged(cur, mapped)) {
-          await strapi.documents(CLIENT_UID).update({ documentId: cur.documentId, data: mapped });
+          // локальный blacklisted сохраняем как есть — им управляет наш календарь
+          await strapi.documents(CLIENT_UID).update({
+            documentId: cur.documentId,
+            data: { ...mapped, blacklisted: Boolean(cur.blacklisted) },
+          });
           updated += 1;
         }
       } catch (e) {
