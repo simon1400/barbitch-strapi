@@ -979,6 +979,7 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     noonaEventId: Schema.Attribute.String & Schema.Attribute.Unique;
     noonaStatus: Schema.Attribute.String;
     origin: Schema.Attribute.String;
+    overlapAllowed: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     priceOverride: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     publishedAt: Schema.Attribute.DateTime;
     remindersSent: Schema.Attribute.JSON;

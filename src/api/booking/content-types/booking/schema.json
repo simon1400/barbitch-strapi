@@ -101,6 +101,10 @@
       "type": "boolean",
       "default": false
     },
+    "overlapAllowed": {
+      "type": "boolean",
+      "default": false
+    },
     "label": {
       "type": "json"
     }

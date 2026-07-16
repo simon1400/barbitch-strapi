@@ -598,6 +598,9 @@ export default {
         engine_employee_id: data.employeeDocId,
         created_by_name: data.createdByName || '',
         price_override: Boolean(data.priceOverride),
+        // true только для админских броней поверх занятого времени (см. adminCreateBooking);
+        // брони с сайта всегда false → остаются под защитой EXCLUDE-constraint
+        overlap_allowed: Boolean(data.overlapAllowed),
         created_at: now,
         updated_at: now,
         published_at: now,
@@ -729,12 +732,14 @@ export default {
     const startsAt = pragueMinToUtcIso(date, startMin);
     const endsAt = pragueMinToUtcIso(date, startMin + totalDuration);
 
-    // проверка занятости: админ ставит поверх блоков/холдов (ignoreBlocks/ignoreHolds),
-    // но не поверх другой active-брони (её ловит и app-check, и DB EXCLUDE)
+    // Занятость админа НЕ блокирует: он ставит и поверх блоков/холдов (ignoreBlocks/
+    // ignoreHolds), и поверх другой active-брони — решает человек, который видит календарь
+    // (клиента добивают в занятое время). Пересечение лишь помечаем флагом: он выводит
+    // строку из-под DB EXCLUDE bookings_no_overlap, иначе Postgres физически не даст
+    // записать. Site-брони флаг не ставят → защита от гонки двойной записи с сайта цела.
     const { busy } = await this.loadDayContexts([emp], date, date, null, { ignoreBlocks: true, ignoreHolds: true });
     const busyList = busy.get(date)?.get(emp.documentId) || [];
-    const overlap = busyList.some((b) => b.startMin < startMin + totalDuration && startMin < b.endMin);
-    if (overlap) throw new EngineError(409, 'slot_taken', 'Мастер занят в это время');
+    const overlapAllowed = busyList.some((b) => b.startMin < startMin + totalDuration && startMin < b.endMin);
 
     const clientDoc = clientDocId
       ? await strapi.documents(CLIENT_UID).findOne({ documentId: clientDocId })
@@ -766,6 +771,7 @@ export default {
             employeeDocId: emp.documentId,
             createdByName: session?.username || '',
             priceOverride: priceOverride != null || serviceItems.some((i) => i.priceOverride != null),
+            overlapAllowed,
           },
         });
       });
@@ -898,15 +904,17 @@ export default {
       if (!empDocId) throw new EngineError(400, 'employee_required', 'У брони нет мастера — укажите employee');
       const emp = await this.getEmployee(empDocId);
 
-      // админ-перенос/смена услуги: поверх блоков/холдов можно (ignoreBlocks/ignoreHolds),
-      // поверх чужой active-брони — нет (app-check + DB EXCLUDE)
+      // Админ-перенос/смена услуги ничем не блокируется: поверх блоков/холдов
+      // (ignoreBlocks/ignoreHolds) и поверх чужой active-брони — решает админ.
+      // Пересечение помечаем флагом (выводит строку из-под DB EXCLUDE), см. adminCreateBooking.
       const { busy } = await this.loadDayContexts([emp], date, date, null, { ignoreBlocks: true, ignoreHolds: true });
       const busyList = (busy.get(date)?.get(emp.documentId) || []).filter(
         // свою бронь из занятости исключаем (перенос в пределах своего слота)
         (b) => !(booking.startsAt && b.startMin === utcToPragueMinClamped(booking.startsAt, date) && b.endMin === utcToPragueMinClamped(booking.endsAt, date))
       );
-      const overlap = busyList.some((b) => b.startMin < startMin + durationMin && startMin < b.endMin);
-      if (overlap) throw new EngineError(409, 'slot_taken', 'Мастер занят в это время');
+      // флаг пересчитывается на каждом переносе: уехали на свободное время → снова false
+      // (бронь возвращается под защиту constraint)
+      upd.overlap_allowed = busyList.some((b) => b.startMin < startMin + durationMin && startMin < b.endMin);
 
       upd.date = date;
       upd.starts_at = new Date(pragueMinToUtcIso(date, startMin));
