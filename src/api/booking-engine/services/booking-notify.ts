@@ -56,6 +56,9 @@ export interface BookingNotifyView {
   serviceTitle: string;
   employeeName: string;
   price: number | null;
+  // Заполнена ТОЛЬКО у брони к junior-мастеру со скидкой: сумма senior-цен услуг
+  // (для строки «Sleva: junior mistrová −20 % (běžná cena … Kč)» в письме)
+  seniorPrice: number | null;
   clientName: string;
   clientEmail: string;
   clientPhone: string;
@@ -64,7 +67,14 @@ export interface BookingNotifyView {
 }
 
 const viewFromBookingDoc = (booking): BookingNotifyView => {
-  const svc = Array.isArray(booking.services) ? booking.services[0] : null;
+  const services = Array.isArray(booking.services) ? booking.services : [];
+  const svc = services[0] || null;
+  const price = booking.totalPrice != null ? Number(booking.totalPrice) : null;
+  // Junior-скидка: только у junior-мастера И когда сумма senior-цен реально выше
+  // итога (двойной чек — админский priceOverride у senior не даёт ложной «слевы»)
+  const seniorTotal = services.reduce((sum, s) => sum + Number(s?.seniorPrice ?? s?.price ?? 0), 0);
+  const isJuniorDiscount =
+    booking.employee?.tier === 'junior' && price != null && seniorTotal > price + 0.5;
   return {
     bookingId: booking.documentId,
     dateLabel: booking.startsAt ? czDateLabel(booking.startsAt) : String(booking.date),
@@ -73,9 +83,10 @@ const viewFromBookingDoc = (booking): BookingNotifyView => {
       : '',
     startsAt: booking.startsAt,
     endsAt: booking.endsAt,
-    serviceTitle: svc?.title || '',
+    serviceTitle: services.map((s) => s?.title).filter(Boolean).join(', ') || svc?.title || '',
     employeeName: booking.employee?.name || booking.employeeNameRaw || '',
-    price: booking.totalPrice != null ? Number(booking.totalPrice) : null,
+    price,
+    seniorPrice: isJuniorDiscount ? Math.round(seniorTotal) : null,
     clientName: booking.client?.name || booking.clientNameRaw || '',
     clientEmail: booking.client?.email || '',
     clientPhone: booking.client?.phone || '',
@@ -220,6 +231,12 @@ const bookingRows = (v: BookingNotifyView) =>
     detailRow('Služba', v.serviceTitle),
     detailRow('Mistrová', v.employeeName),
     v.price != null ? detailRow('Cena', `${v.price} Kč (platba na pobočce)`) : '',
+    v.seniorPrice != null && v.price != null
+      ? detailRow(
+          'Sleva',
+          `junior mistrová −${Math.round((1 - v.price / v.seniorPrice) * 100)} % (běžná cena ${v.seniorPrice} Kč)`
+        )
+      : '',
     detailRow('Adresa', SALON_ADDRESS),
   ].join('');
 
@@ -489,7 +506,7 @@ export default {
       return await strapi.documents(BOOKING_UID).findOne({
         documentId: bookingDocId,
         populate: {
-          employee: { fields: ['name'] },
+          employee: { fields: ['name', 'tier'] },
           client: { fields: ['name', 'email', 'phone'] },
         },
       });
