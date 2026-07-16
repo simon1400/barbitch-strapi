@@ -34,6 +34,10 @@ export default {
     // сервисные ручки нотификаций (гейт секретом DIGEST_SECRET в контроллере, паттерн digest)
     admin('GET', '/engine/notify/preview', 'booking-engine.notifyPreview'),
     admin('POST', '/engine/notify/run-reminders', 'booking-engine.notifyRunReminders'),
+    // Web Push (PWA мастеров): публичный VAPID-ключ + подписка/отписка устройства
+    pub('GET', '/engine/push/vapid', 'booking-engine.pushVapid'),
+    admin('POST', '/engine/push/subscribe', 'booking-engine.pushSubscribe'),
+    admin('POST', '/engine/push/unsubscribe', 'booking-engine.pushUnsubscribe'),
     admin('POST', '/engine/admin/bookings', 'booking-engine.adminCreateBooking'),
     admin('PATCH', '/engine/admin/bookings/:id', 'booking-engine.adminPatchBooking'),
     admin('DELETE', '/engine/admin/bookings/:id', 'booking-engine.adminDeleteBooking'),

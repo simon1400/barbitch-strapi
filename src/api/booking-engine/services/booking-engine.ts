@@ -673,6 +673,11 @@ export default {
       .service('api::booking-engine.booking-notify')
       .notifyBookingCreated(documentId)
       .catch((e) => strapi.log.error(`booking-notify created failed: ${e.message}`));
+    // push мастеру: новая бронь к нему (fire-and-forget, гейт VAPID внутри)
+    strapi
+      .service('api::booking-engine.push-notify')
+      .notifyBookingEvent(documentId, 'new')
+      .catch((e) => strapi.log.error(`push new failed: ${e.message}`));
 
     return {
       bookingId: documentId,
@@ -777,6 +782,11 @@ export default {
         .notifyBookingCreatedByAdmin(documentId)
         .catch((e) => strapi.log.error(`booking-notify admin-created failed: ${e.message}`));
     }
+    // push мастеру всегда (независимо от чекбокса «уведомить клиента»)
+    strapi
+      .service('api::booking-engine.push-notify')
+      .notifyBookingEvent(documentId, 'new')
+      .catch((e) => strapi.log.error(`push admin-new failed: ${e.message}`));
 
     return { bookingId: documentId, date, time, startsAt, endsAt, totalPrice, services: snapshot, employee: { documentId: emp.documentId, name: emp.name }, client: { documentId: clientDoc.documentId, name: clientDoc.name } };
   },
@@ -926,6 +936,15 @@ export default {
       throw e;
     }
     strapi.log.info(`booking-engine: admin ${session?.username || '?'} patched booking ${bookingDocId} ${JSON.stringify(Object.keys(patch))}`);
+
+    // push мастеру всегда (независимо от чекбоксов): отмена > перенос
+    const pushKind = patch.status === 'cancelled' ? 'cancel' : moving ? 'reschedule' : null;
+    if (pushKind) {
+      strapi
+        .service('api::booking-engine.push-notify')
+        .notifyBookingEvent(bookingDocId, pushKind)
+        .catch((e) => strapi.log.error(`push admin-${pushKind} failed: ${e.message}`));
+    }
 
     // чекбокс «уведомить клиента» при отмене админом (роадмап §4.2):
     // только письмо клиенту, fire-and-forget — отмена уже применена
@@ -1122,6 +1141,11 @@ export default {
       .service('api::booking-engine.booking-notify')
       .notifyBookingCancelled(booking.documentId)
       .catch((e) => strapi.log.error(`booking-notify cancelled failed: ${e.message}`));
+    // push мастеру: клиент отменил его бронь
+    strapi
+      .service('api::booking-engine.push-notify')
+      .notifyBookingEvent(booking.documentId, 'cancel')
+      .catch((e) => strapi.log.error(`push client-cancel failed: ${e.message}`));
 
     return { cancelled: true, ...info, status: 'cancelled' };
   },
@@ -1247,6 +1271,11 @@ export default {
       .service('api::booking-engine.booking-notify')
       .notifyBookingRescheduledByClient(booking.documentId, fromInfo)
       .catch((e) => strapi.log.error(`booking-notify client-rescheduled failed: ${e.message}`));
+    // push мастеру: клиент перенёс его бронь
+    strapi
+      .service('api::booking-engine.push-notify')
+      .notifyBookingEvent(booking.documentId, 'reschedule')
+      .catch((e) => strapi.log.error(`push client-reschedule failed: ${e.message}`));
 
     const fresh = await this.bookingByCancelToken(token);
     return { rescheduled: true, ...this.manageInfo(fresh) };

@@ -1,0 +1,37 @@
+{
+  "kind": "collectionType",
+  "collectionName": "push_subscriptions",
+  "info": {
+    "singularName": "push-subscription",
+    "pluralName": "push-subscriptions",
+    "displayName": "Push подписки (мастера)",
+    "description": "Web Push подписки устройств мастеров (PWA) — уведомления о бронях"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "endpoint": {
+      "type": "text",
+      "required": true
+    },
+    "p256dh": {
+      "type": "string"
+    },
+    "auth": {
+      "type": "string"
+    },
+    "personal": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::personal.personal"
+    },
+    "employeeName": {
+      "type": "string"
+    },
+    "userAgent": {
+      "type": "string"
+    }
+  }
+}

@@ -1229,6 +1229,41 @@ export interface ApiClientClient extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiPushSubscriptionPushSubscription
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'push_subscriptions';
+  info: {
+    description: '';
+    displayName: 'Push';
+    pluralName: 'push-subscriptions';
+    singularName: 'push-subscription';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    auth: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    employeeName: Schema.Attribute.String;
+    endpoint: Schema.Attribute.Text & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::push-subscription.push-subscription'
+    > &
+      Schema.Attribute.Private;
+    p256dh: Schema.Attribute.String;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    userAgent: Schema.Attribute.String;
+  };
+}
+
 export interface ApiContactContact extends Struct.SingleTypeSchema {
   collectionName: 'contacts';
   info: {
@@ -3226,6 +3261,7 @@ declare module '@strapi/strapi' {
       'api::penalty.penalty': ApiPenaltyPenalty;
       'api::personal.personal': ApiPersonalPersonal;
       'api::pricelist-page.pricelist-page': ApiPricelistPagePricelistPage;
+      'api::push-subscription.push-subscription': ApiPushSubscriptionPushSubscription;
       'api::qr-pay.qr-pay': ApiQrPayQrPay;
       'api::salary.salary': ApiSalarySalary;
       'api::salon-hour.salon-hour': ApiSalonHourSalonHour;

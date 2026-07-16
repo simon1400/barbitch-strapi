@@ -390,7 +390,7 @@ export default {
     const v = viewFromBookingDoc(booking);
 
     const tg =
-      `🆕 <b>Nová rezervace z webu</b>\n` +
+      `🟢 <b>Nová rezervace z webu</b>\n` +
       `${v.dateLabel} v <b>${v.time}</b> · ${v.employeeName}\n` +
       `${v.serviceTitle}${v.price != null ? ` · ${v.price} Kč` : ''}\n` +
       `Klient: <b>${v.clientName}</b>${v.clientPhone ? ` · <code>${v.clientPhone}</code>` : ''}`;
@@ -483,7 +483,7 @@ export default {
       : '';
 
     const tg =
-      `🔄 <b>Klient si přesunul rezervaci</b>\n` +
+      `🟠 <b>Klient si přesunul rezervaci</b>\n` +
       `${fromLabel ? `${fromLabel} → ` : ''}${v.dateLabel} v <b>${v.time}</b> · ${v.employeeName}\n` +
       `${v.serviceTitle}${v.price != null ? ` · ${v.price} Kč` : ''}\n` +
       `Klient: <b>${v.clientName}</b>${v.clientPhone ? ` · <code>${v.clientPhone}</code>` : ''}`;

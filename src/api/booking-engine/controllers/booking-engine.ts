@@ -33,6 +33,30 @@ const requireAdmin = (ctx) => {
   return session;
 };
 
+// любой залогиненный сотрудник (owner/administrator/master) — для push-подписки
+const requireStaff = (ctx) => {
+  const session = verifySession(tokenFromCtx(ctx));
+  if (!session) {
+    ctx.status = 401;
+    ctx.body = { error: { status: 401, code: 'unauthorized', message: 'Vyžadováno přihlášení' } };
+    return null;
+  }
+  return session;
+};
+
+const pushSvc = () => strapi.service('api::booking-engine.push-notify');
+
+// personal.documentId по имени сотрудника (session.username = полное имя = personal.name)
+const resolvePersonalByName = async (name) => {
+  if (!name) return null;
+  const rows = await strapi.documents('api::personal.personal').findMany({
+    filters: { name: { $eqi: String(name).trim() } },
+    fields: ['name'],
+    limit: 1,
+  });
+  return rows[0]?.documentId || null;
+};
+
 const parseModifiers = (raw) => {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw;
@@ -165,6 +189,36 @@ export default {
   },
 
   // ── админские (admin-jwt, роли owner/administrator) ──
+
+  // GET /api/engine/push/vapid — публичный VAPID-ключ для подписки на устройстве
+  async pushVapid(ctx) {
+    await handle(ctx, async () => ({ publicKey: pushSvc().vapidPublicKey() }));
+  },
+
+  // POST /api/engine/push/subscribe {subscription, userAgent?} — подписать устройство
+  // залогиненного сотрудника (personal резолвится по имени из сессии)
+  async pushSubscribe(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    const b = ctx.request.body || {};
+    await handle(ctx, async () => {
+      const personalDocId = await resolvePersonalByName(session.username);
+      return pushSvc().subscribe({
+        personalDocId,
+        employeeName: session.username || '',
+        subscription: b.subscription,
+        userAgent: b.userAgent || ctx.request.headers['user-agent'] || '',
+      });
+    });
+  },
+
+  // POST /api/engine/push/unsubscribe {endpoint}
+  async pushUnsubscribe(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    const b = ctx.request.body || {};
+    await handle(ctx, () => pushSvc().unsubscribe(b.endpoint));
+  },
 
   // POST /api/engine/admin/bookings
   // {employee, date, time, services:[{service, variant?, modifiers?, priceOverride?}],
