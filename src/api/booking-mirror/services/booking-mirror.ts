@@ -87,31 +87,6 @@ const sortKeys = (v) =>
       : v;
 const stableStringify = (v) => JSON.stringify(sortKeys(v ?? null));
 
-const sameTs = (a, b): boolean => {
-  const ta = a ? new Date(a).getTime() : null;
-  const tb = b ? new Date(b).getTime() : null;
-  return ta === tb;
-};
-
-// Изменилась ли зеркальная запись (relations сравниваются отдельно по noona-id)
-const bookingChanged = (existing, mapped): boolean =>
-  existing.clientNameRaw !== mapped.clientNameRaw ||
-  (existing.employeeNameRaw ?? '') !== mapped.employeeNameRaw ||
-  (existing.noonaEmployeeId ?? '') !== mapped.noonaEmployeeId ||
-  String(existing.date || '') !== String(mapped.date || '') ||
-  !sameTs(existing.startsAt, mapped.startsAt) ||
-  !sameTs(existing.endsAt, mapped.endsAt) ||
-  existing.status !== mapped.status ||
-  (existing.noonaStatus ?? '') !== mapped.noonaStatus ||
-  stableStringify(existing.services ?? []) !== stableStringify(mapped.services) ||
-  Number(existing.totalPrice ?? null) !== Number(mapped.totalPrice ?? null) ||
-  (existing.comment ?? '') !== mapped.comment ||
-  (existing.customerComment ?? '') !== mapped.customerComment ||
-  (existing.origin ?? '') !== mapped.origin ||
-  (existing.bsChannel ?? '') !== mapped.bsChannel ||
-  (existing.bsGroup ?? '') !== mapped.bsGroup ||
-  !sameTs(existing.noonaCreatedAt, mapped.noonaCreatedAt);
-
 const clientChanged = (existing, mapped): boolean =>
   existing.name !== mapped.name ||
   (existing.phone ?? '') !== mapped.phone ||
@@ -219,57 +194,41 @@ export default {
       personals.filter((p) => p.noonaEmployeeId).map((p) => [p.noonaEmployeeId, p.documentId])
     );
 
-    // Существующие зеркальные записи окна — по noonaEventId (для change-detect нужны все поля)
+    // Что из окна у нас уже есть — нужен только noonaEventId (синк = create-only,
+    // существующие брони не сравниваем и не трогаем)
     const existing = await strapi.documents(BOOKING_UID).findMany({
       filters: { noonaEventId: { $in: (events || []).map((e) => e.id).filter(Boolean) } },
-      populate: {
-        client: { fields: ['noonaCustomerId'] },
-        employee: { fields: ['noonaEmployeeId'] },
-      },
+      fields: ['noonaEventId'],
       limit: 100000,
     });
-    const byEventId = new Map(existing.map((b) => [b.noonaEventId, b]));
+    const byEventId = new Set(existing.map((b) => b.noonaEventId));
 
+    // ТОЛЬКО ДОЗАПИСЬ: заводим брони, которых у нас ещё нет (чтобы не терять записи,
+    // сделанные через noona.app), и НИЧЕГО не трогаем у уже существующих. После cutover
+    // мастер данных — наш календарь: статус (Dorazila/Proběhla/Nepřišla), цена, услуги,
+    // комментарии и термин правит админ, и синк из Noona их затирал бы каждые 10 минут.
     let created = 0;
-    let updated = 0;
     let skipped = 0;
     const errors = [];
     for (const e of events || []) {
       if (!e?.id) continue;
+      if (byEventId.has(e.id)) {
+        skipped += 1;
+        continue;
+      }
       const mapped = mapEvent(e);
       const clientDocId = e.customer ? clientByNoona.get(e.customer) || null : null;
       const employeeDocId = e.employee ? personalByNoona.get(e.employee) || null : null;
-      const cur = byEventId.get(e.id);
       try {
-        if (!cur) {
-          await strapi.documents(BOOKING_UID).create({
-            data: { ...mapped, client: clientDocId, employee: employeeDocId },
-          });
-          created += 1;
-        } else {
-          // Сравниваем с РЕЗОЛВАБЕЛЬНЫМ значением: мастер без personal-записи
-          // (бывшие сотрудники) даёт employee=null в зеркале — это не «изменение»
-          // (сырой id сохранён в noonaEmployeeId)
-          const expClient = e.customer && clientByNoona.has(e.customer) ? e.customer : null;
-          const expEmployee = e.employee && personalByNoona.has(e.employee) ? e.employee : null;
-          const relChanged =
-            (cur.client?.noonaCustomerId || null) !== expClient ||
-            (cur.employee?.noonaEmployeeId || null) !== expEmployee;
-          if (bookingChanged(cur, mapped) || relChanged) {
-            await strapi.documents(BOOKING_UID).update({
-              documentId: cur.documentId,
-              data: { ...mapped, client: clientDocId, employee: employeeDocId },
-            });
-            updated += 1;
-          } else {
-            skipped += 1;
-          }
-        }
+        await strapi.documents(BOOKING_UID).create({
+          data: { ...mapped, client: clientDocId, employee: employeeDocId },
+        });
+        created += 1;
       } catch (err) {
         errors.push(`event ${e.id}: ${err.message}`);
       }
     }
-    return { total: (events || []).length, created, updated, skipped, errors };
+    return { total: (events || []).length, created, updated: 0, skipped, errors };
   },
 
   // Расписание: opening_hours + blocked_times за окно дат ['YYYY-MM-DD'..].
