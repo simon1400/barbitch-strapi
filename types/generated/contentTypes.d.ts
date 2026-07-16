@@ -950,6 +950,7 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
+    arrived: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     bsChannel: Schema.Attribute.String;
     bsGroup: Schema.Attribute.String;
     cancelToken: Schema.Attribute.String;

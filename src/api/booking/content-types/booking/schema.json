@@ -97,6 +97,10 @@
       "type": "boolean",
       "default": false
     },
+    "arrived": {
+      "type": "boolean",
+      "default": false
+    },
     "label": {
       "type": "json"
     }

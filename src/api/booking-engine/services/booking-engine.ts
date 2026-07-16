@@ -255,7 +255,10 @@ export default {
 
   // excludeBookingDocId — собственная бронь клиента при переносе: её интервал не считается
   // занятым (иначе нельзя сдвинуться на соседний слот, пересекающийся со старым).
-  async loadDayContexts(employees, fromDate, toDate, excludeBookingDocId = null) {
+  // opts.ignoreBlocks / opts.ignoreHolds — админ-операции (create/patch из календаря):
+  // блоки (Nepracovní doba) и site-холды НЕ считаются занятостью, владелец/админ может
+  // ставить бронь поверх них. Реальные active-брони остаются занятостью (+ DB EXCLUDE).
+  async loadDayContexts(employees, fromDate, toDate, excludeBookingDocId = null, opts = {}) {
     const nowIso = new Date().toISOString();
     const [hours, blocks, bookings, holds] = await Promise.all([
       strapi.documents(SALON_HOUR_UID).findMany({
@@ -314,7 +317,11 @@ export default {
     const bookingsFiltered = excludeBookingDocId
       ? bookings.filter((b) => b.documentId !== excludeBookingDocId)
       : bookings;
-    for (const list of [blocks, bookingsFiltered, holds]) {
+    // админ-оверрайд: блоки/холды исключаем из занятости (см. коммент к сигнатуре)
+    const sources = [bookingsFiltered];
+    if (!opts.ignoreBlocks) sources.push(blocks);
+    if (!opts.ignoreHolds) sources.push(holds);
+    for (const list of sources) {
       for (const item of list) {
         for (const e of employees) {
           if (belongs(e.documentId, item)) push(item.date, e.documentId, item.startsAt, item.endsAt);
@@ -717,8 +724,9 @@ export default {
     const startsAt = pragueMinToUtcIso(date, startMin);
     const endsAt = pragueMinToUtcIso(date, startMin + totalDuration);
 
-    // проверка занятости мастера (часы салона админа не ограничивают, пересечения — да)
-    const { busy } = await this.loadDayContexts([emp], date, date);
+    // проверка занятости: админ ставит поверх блоков/холдов (ignoreBlocks/ignoreHolds),
+    // но не поверх другой active-брони (её ловит и app-check, и DB EXCLUDE)
+    const { busy } = await this.loadDayContexts([emp], date, date, null, { ignoreBlocks: true, ignoreHolds: true });
     const busyList = busy.get(date)?.get(emp.documentId) || [];
     const overlap = busyList.some((b) => b.startMin < startMin + totalDuration && startMin < b.endMin);
     if (overlap) throw new EngineError(409, 'slot_taken', 'Мастер занят в это время');
@@ -798,7 +806,15 @@ export default {
         throw new EngineError(400, 'bad_status', 'Недопустимый статус');
       }
       upd.status = patch.status;
+      // «arrived» (клиент dorazil) синхронизируем со статусом, если явно не задан в patch:
+      // checkedOut → точно пришёл; active/cancelled/noshow → сбрасываем (при обнове снова
+      // покажется «Dorazila», отменённый/неявившийся не «пришёл»).
+      if (!('arrived' in patch)) {
+        upd.arrived = patch.status === 'checkedOut';
+      }
     }
+    // отметка «клиент dorazil» — промежуточный шаг перед «Proběhla» (checkedOut)
+    if ('arrived' in patch) upd.arrived = !!patch.arrived;
     if (patch.comment != null) upd.comment = String(patch.comment);
     if (patch.totalPrice != null) {
       upd.total_price = Number(patch.totalPrice);
@@ -872,7 +888,9 @@ export default {
       if (!empDocId) throw new EngineError(400, 'employee_required', 'У брони нет мастера — укажите employee');
       const emp = await this.getEmployee(empDocId);
 
-      const { busy } = await this.loadDayContexts([emp], date, date);
+      // админ-перенос/смена услуги: поверх блоков/холдов можно (ignoreBlocks/ignoreHolds),
+      // поверх чужой active-брони — нет (app-check + DB EXCLUDE)
+      const { busy } = await this.loadDayContexts([emp], date, date, null, { ignoreBlocks: true, ignoreHolds: true });
       const busyList = (busy.get(date)?.get(emp.documentId) || []).filter(
         // свою бронь из занятости исключаем (перенос в пределах своего слота)
         (b) => !(booking.startsAt && b.startMin === utcToPragueMinClamped(booking.startsAt, date) && b.endMin === utcToPragueMinClamped(booking.endsAt, date))
