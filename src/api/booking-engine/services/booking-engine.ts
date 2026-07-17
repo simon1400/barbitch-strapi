@@ -43,6 +43,14 @@ const PG_EXCLUSION_VIOLATION = '23P01';
 const OWN_BLOCK_PREFIX = 'own|'; // noonaKey engine-блоков — реконсайл зеркала их не трогает
 const RESCHEDULE_LIMIT = 3; // максимум самостоятельных переносов одной брони клиентом
 
+// Формат даты для журнала действий: «pá 17.7.» (день недели + D.M., без года).
+const CS_DOW = ['ne', 'po', 'út', 'st', 'čt', 'pá', 'so']; // index = getUTCDay (0=ne)
+const fmtDay = (d) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))) return String(d || '');
+  const dt = new Date(`${d}T00:00:00Z`);
+  return `${CS_DOW[dt.getUTCDay()]} ${dt.getUTCDate()}.${dt.getUTCMonth() + 1}.`;
+};
+
 /** Ошибка с HTTP-статусом — контроллер мапит в ответ. */
 export class EngineError extends Error {
   status: number;
@@ -794,6 +802,21 @@ export default {
       .notifyBookingEvent(documentId, 'new')
       .catch((e) => strapi.log.error(`push admin-new failed: ${e.message}`));
 
+    // журнал действий (owner-only просмотр в календаре) — fire-and-forget
+    strapi
+      .service('api::calendar-log.calendar-log')
+      .write({
+        action: 'booking_create',
+        entityType: 'booking',
+        actorName: session?.username || '',
+        entityDocId: documentId,
+        clientName: clientDoc.name,
+        employeeName: emp.name,
+        summary: `Nová rezervace: ${clientDoc.name} · ${fmtDay(date)} ${time} · ${emp.name}`,
+        details: { date: fmtDay(date), time, employee: emp.name, client: clientDoc.name, services: snapshot.map((s) => s.title), total: totalPrice },
+      })
+      .catch((e) => strapi.log.error(`calendar-log create failed: ${e.message}`));
+
     return { bookingId: documentId, date, time, startsAt, endsAt, totalPrice, services: snapshot, employee: { documentId: emp.documentId, name: emp.name }, client: { documentId: clientDoc.documentId, name: clientDoc.name } };
   },
 
@@ -971,6 +994,70 @@ export default {
         .catch((e) => strapi.log.error(`booking-notify admin-rescheduled failed: ${e.message}`));
     }
 
+    // журнал действий: один PATCH может делать несколько вещей → основной action
+    // по приоритету move > status > service > edit; details несёт всё изменённое
+    {
+      const cn = booking.clientNameRaw || '';
+      const movedTerm = patch.date != null || patch.time != null || patch.employee != null;
+      const statusChanged = patch.status != null && patch.status !== booking.status;
+      const serviceChanged = patch.serviceItems != null;
+      const newDate = upd.date != null ? String(upd.date) : String(booking.date);
+      const newTime = upd.starts_at != null ? minToHHMM(utcToPragueMinClamped(upd.starts_at, newDate)) : fromInfo.time;
+      const newEmp = upd.employee_name_raw != null ? String(upd.employee_name_raw) : fromInfo.employeeName;
+      const STATUS_CS = { active: 'Aktivní', checkedOut: 'Proběhla', cancelled: 'Zrušeno', noshow: 'Nedostavil/a se' };
+      let logAction: string;
+      let logSummary: string;
+      let logDetails: Record<string, unknown>;
+      if (movedTerm) {
+        logAction = 'booking_move';
+        const empPart = newEmp !== fromInfo.employeeName ? ` · ${fromInfo.employeeName} → ${newEmp}` : '';
+        logSummary =
+          fromInfo.date === newDate
+            ? `Přesunuto: ${cn} · ${fmtDay(fromInfo.date)} ${fromInfo.time} → ${newTime}${empPart}`
+            : `Přesunuto: ${cn} · ${fmtDay(fromInfo.date)} ${fromInfo.time} → ${fmtDay(newDate)} ${newTime}${empPart}`;
+        logDetails = {
+          from: { date: fmtDay(fromInfo.date), time: fromInfo.time, employee: fromInfo.employeeName },
+          to: { date: fmtDay(newDate), time: newTime, employee: newEmp },
+        };
+      } else if (statusChanged) {
+        logAction = 'booking_status';
+        logSummary = `${STATUS_CS[patch.status] || patch.status}: ${cn} · ${fmtDay(fromInfo.date)} ${fromInfo.time}`;
+        logDetails = { prevStatus: booking.status, status: patch.status };
+      } else if (serviceChanged) {
+        logAction = 'booking_service';
+        let svcTitles: string[] = [];
+        try {
+          svcTitles = (JSON.parse(String(upd.services)) as Array<{ title?: string }>).map((s) => s.title || '');
+        } catch {
+          svcTitles = [];
+        }
+        logSummary = `Změna služby: ${cn} · ${fmtDay(fromInfo.date)} ${fromInfo.time}`;
+        logDetails = { services: svcTitles, total: upd.total_price };
+      } else {
+        logAction = 'booking_edit';
+        const changed: string[] = [];
+        if (patch.comment != null) changed.push('poznámka');
+        if ('label' in patch) changed.push('štítek');
+        if (patch.totalPrice != null) changed.push('cena');
+        if ('arrived' in patch) changed.push(patch.arrived ? 'dorazila' : 'nedorazila');
+        logSummary = `Úprava: ${cn} · ${changed.join(', ') || 'beze změn'}`;
+        logDetails = { changed, comment: patch.comment ?? null, total: patch.totalPrice ?? null };
+      }
+      strapi
+        .service('api::calendar-log.calendar-log')
+        .write({
+          action: logAction,
+          entityType: 'booking',
+          actorName: session?.username || '',
+          entityDocId: bookingDocId,
+          clientName: cn,
+          employeeName: newEmp,
+          summary: logSummary,
+          details: logDetails,
+        })
+        .catch((e) => strapi.log.error(`calendar-log patch failed: ${e.message}`));
+    }
+
     return strapi.documents(BOOKING_UID).findOne({ documentId: bookingDocId, populate: { employee: { fields: ['name'] }, client: { fields: ['name', 'phone'] } } });
   },
 
@@ -999,6 +1086,23 @@ export default {
     strapi.log.info(
       `booking-engine: admin ${session?.username || '?'} DELETED booking ${bookingDocId} (${booking.clientNameRaw || ''} ${booking.date})`
     );
+    strapi
+      .service('api::calendar-log.calendar-log')
+      .write({
+        action: 'booking_delete',
+        entityType: 'booking',
+        actorName: session?.username || '',
+        entityDocId: bookingDocId,
+        clientName: booking.clientNameRaw || '',
+        employeeName: booking.employeeNameRaw || '',
+        summary: `Smazáno: ${booking.clientNameRaw || ''} · ${fmtDay(String(booking.date))}`,
+        details: {
+          date: fmtDay(String(booking.date)),
+          services: Array.isArray(booking.services) ? booking.services.map((s: any) => s?.title || '') : [],
+          total: booking.totalPrice,
+        },
+      })
+      .catch((e) => strapi.log.error(`calendar-log delete failed: ${e.message}`));
     return { deleted: 1 };
   },
 
@@ -1061,6 +1165,25 @@ export default {
         dates.length > 1 ? `..${dates[dates.length - 1]}` : ''
       } ${minToHHMM(startMin)}–${minToHHMM(endMin)} ${emp.name})`
     );
+    strapi
+      .service('api::calendar-log.calendar-log')
+      .write({
+        action: 'block_create',
+        entityType: 'block',
+        actorName: session?.username || '',
+        entityDocId: created[0]?.documentId || '',
+        employeeName: emp.name,
+        summary: `Nový blok: ${emp.name} · ${fmtDay(date)}${dates.length > 1 ? `..${fmtDay(dates[dates.length - 1])} (${dates.length}×)` : ''} · ${minToHHMM(startMin)}–${minToHHMM(endMin)}${titleStr && titleStr !== 'Blokace' ? ` · ${titleStr}` : ''}`,
+        details: {
+          employee: emp.name,
+          date: fmtDay(date),
+          endDate: fmtDay(dates[dates.length - 1]),
+          count: dates.length,
+          time: `${minToHHMM(startMin)}–${minToHHMM(endMin)}`,
+          title: titleStr,
+        },
+      })
+      .catch((e) => strapi.log.error(`calendar-log block-create failed: ${e.message}`));
     return { documentId: created[0]?.documentId, count: created.length };
   },
 
@@ -1084,17 +1207,60 @@ export default {
     if (!Object.keys(data).length) return block;
     const updated = await strapi.documents(TIME_BLOCK_UID).update({ documentId: blockDocId, data });
     strapi.log.info(`booking-engine: admin ${session?.username || '?'} patched block ${block.noonaKey} (${block.date})`);
+    {
+      const bDate = String(block.date);
+      const fmtRange = (s: string | Date, e: string | Date) =>
+        `${minToHHMM(utcToPragueMinClamped(s, bDate))}–${minToHHMM(utcToPragueMinClamped(e, bDate))}`;
+      const oldTime = block.startsAt ? fmtRange(block.startsAt, block.endsAt) : '';
+      const newTime = data.startsAt ? fmtRange(data.startsAt, data.endsAt) : oldTime;
+      strapi
+        .service('api::calendar-log.calendar-log')
+        .write({
+          action: 'block_edit',
+          entityType: 'block',
+          actorName: session?.username || '',
+          entityDocId: blockDocId,
+          employeeName: block.employeeNameRaw || '',
+          summary: `Úprava bloku: ${block.employeeNameRaw || ''} · ${fmtDay(bDate)}${data.startsAt ? ` · ${oldTime} → ${newTime}` : ''}${data.title != null ? ` · ${data.title}` : ''}`,
+          details: {
+            date: fmtDay(bDate),
+            before: { time: oldTime, title: block.title },
+            after: { time: newTime, title: data.title != null ? data.title : block.title },
+          },
+        })
+        .catch((e) => strapi.log.error(`calendar-log block-edit failed: ${e.message}`));
+    }
     return updated;
   },
 
   // series=true → удалить все повторения: own-серия делит noonaKey,
   // зеркальная rrule-серия делит noonaBlockedId (noonaKey у них per-date `id|date`).
-  async adminDeleteBlock(blockDocId, { series = false } = {}) {
+  async adminDeleteBlock(blockDocId, { series = false } = {}, session) {
     const block = await strapi.documents(TIME_BLOCK_UID).findOne({ documentId: blockDocId });
     if (!block) throw new EngineError(404, 'block_not_found', 'Блок не найден');
 
+    // журнал: имя/время блока фиксируем ДО удаления (пишем один раз, count = 1 или série)
+    const bDate = String(block.date);
+    const bTime = block.startsAt
+      ? `${minToHHMM(utcToPragueMinClamped(block.startsAt, bDate))}–${minToHHMM(utcToPragueMinClamped(block.endsAt, bDate))}`
+      : '';
+    const logBlockDelete = (count) =>
+      strapi
+        .service('api::calendar-log.calendar-log')
+        .write({
+          action: 'block_delete',
+          entityType: 'block',
+          actorName: session?.username || '',
+          entityDocId: blockDocId,
+          employeeName: block.employeeNameRaw || '',
+          summary: `Smazán blok: ${block.employeeNameRaw || ''} · ${fmtDay(bDate)}${bTime ? ` · ${bTime}` : ''}${count > 1 ? ` (série ${count}×)` : ''}`,
+          details: { date: fmtDay(bDate), time: bTime, title: block.title, seriesCount: count },
+        })
+        .catch((e) => strapi.log.error(`calendar-log block-delete failed: ${e.message}`));
+
     if (!series) {
       await strapi.documents(TIME_BLOCK_UID).delete({ documentId: blockDocId });
+      logBlockDelete(1);
       return { deleted: 1 };
     }
     const isOwn = String(block.noonaKey || '').startsWith(OWN_BLOCK_PREFIX);
@@ -1102,6 +1268,7 @@ export default {
     const all = await strapi.documents(TIME_BLOCK_UID).findMany({ filters, limit: 1000 });
     for (const b of all) await strapi.documents(TIME_BLOCK_UID).delete({ documentId: b.documentId });
     strapi.log.info(`booking-engine: deleted block series ${block.noonaKey} (${all.length} rows)`);
+    logBlockDelete(all.length);
     return { deleted: all.length };
   },
 

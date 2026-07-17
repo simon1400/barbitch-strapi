@@ -1,0 +1,41 @@
+{
+  "kind": "collectionType",
+  "collectionName": "calendar_logs",
+  "info": {
+    "singularName": "calendar-log",
+    "pluralName": "calendar-logs",
+    "displayName": "Calendar Log",
+    "description": "Журнал действий админов в календаре (создание/перенос/статус/удаление броней + блоки)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "action": {
+      "type": "string",
+      "required": true
+    },
+    "entityType": {
+      "type": "string"
+    },
+    "actorName": {
+      "type": "string"
+    },
+    "entityDocId": {
+      "type": "string"
+    },
+    "clientName": {
+      "type": "string"
+    },
+    "employeeName": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "text"
+    },
+    "details": {
+      "type": "json"
+    }
+  }
+}

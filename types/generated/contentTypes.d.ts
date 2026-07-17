@@ -937,7 +937,8 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     noonaEventId: Schema.Attribute.String & Schema.Attribute.Unique;
     noonaStatus: Schema.Attribute.String;
     origin: Schema.Attribute.String;
-    overlapAllowed: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    overlapAllowed: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
     priceOverride: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     publishedAt: Schema.Attribute.DateTime;
     remindersSent: Schema.Attribute.JSON;
@@ -949,6 +950,42 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.DefaultTo<'active'>;
     totalPrice: Schema.Attribute.Decimal;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiCalendarLogCalendarLog extends Struct.CollectionTypeSchema {
+  collectionName: 'calendar_logs';
+  info: {
+    description: '\u0416\u0443\u0440\u043D\u0430\u043B \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439 \u0430\u0434\u043C\u0438\u043D\u043E\u0432 \u0432 \u043A\u0430\u043B\u0435\u043D\u0434\u0430\u0440\u0435 (\u0441\u043E\u0437\u0434\u0430\u043D\u0438\u0435/\u043F\u0435\u0440\u0435\u043D\u043E\u0441/\u0441\u0442\u0430\u0442\u0443\u0441/\u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0435 \u0431\u0440\u043E\u043D\u0435\u0439 + \u0431\u043B\u043E\u043A\u0438)';
+    displayName: 'Calendar Log';
+    pluralName: 'calendar-logs';
+    singularName: 'calendar-log';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    action: Schema.Attribute.String & Schema.Attribute.Required;
+    actorName: Schema.Attribute.String;
+    clientName: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    details: Schema.Attribute.JSON;
+    employeeName: Schema.Attribute.String;
+    entityDocId: Schema.Attribute.String;
+    entityType: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::calendar-log.calendar-log'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    summary: Schema.Attribute.Text;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1185,41 +1222,6 @@ export interface ApiClientClient extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-  };
-}
-
-export interface ApiPushSubscriptionPushSubscription
-  extends Struct.CollectionTypeSchema {
-  collectionName: 'push_subscriptions';
-  info: {
-    description: '';
-    displayName: 'Push';
-    pluralName: 'push-subscriptions';
-    singularName: 'push-subscription';
-  };
-  options: {
-    draftAndPublish: false;
-  };
-  attributes: {
-    auth: Schema.Attribute.String;
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    employeeName: Schema.Attribute.String;
-    endpoint: Schema.Attribute.Text & Schema.Attribute.Required;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::push-subscription.push-subscription'
-    > &
-      Schema.Attribute.Private;
-    p256dh: Schema.Attribute.String;
-    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
-    publishedAt: Schema.Attribute.DateTime;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    userAgent: Schema.Attribute.String;
   };
 }
 
@@ -1942,6 +1944,41 @@ export interface ApiPricelistPagePricelistPage extends Struct.SingleTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+  };
+}
+
+export interface ApiPushSubscriptionPushSubscription
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'push_subscriptions';
+  info: {
+    description: 'Web Push \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u043C\u0430\u0441\u0442\u0435\u0440\u043E\u0432 (PWA) \u2014 \u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u044F \u043E \u0431\u0440\u043E\u043D\u044F\u0445';
+    displayName: 'Push \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438 (\u043C\u0430\u0441\u0442\u0435\u0440\u0430)';
+    pluralName: 'push-subscriptions';
+    singularName: 'push-subscription';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    auth: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    employeeName: Schema.Attribute.String;
+    endpoint: Schema.Attribute.Text & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::push-subscription.push-subscription'
+    > &
+      Schema.Attribute.Private;
+    p256dh: Schema.Attribute.String;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    userAgent: Schema.Attribute.String;
   };
 }
 
@@ -3164,6 +3201,7 @@ declare module '@strapi/strapi' {
       'api::blog.blog': ApiBlogBlog;
       'api::booking-label.booking-label': ApiBookingLabelBookingLabel;
       'api::booking.booking': ApiBookingBooking;
+      'api::calendar-log.calendar-log': ApiCalendarLogCalendarLog;
       'api::card-profit.card-profit': ApiCardProfitCardProfit;
       'api::cash.cash': ApiCashCash;
       'api::chat-message.chat-message': ApiChatMessageChatMessage;

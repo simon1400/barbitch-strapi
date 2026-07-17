@@ -290,6 +290,6 @@ export default {
     const session = requireAdmin(ctx);
     if (!session) return;
     const series = ctx.query.series === '1' || ctx.query.series === 'true';
-    await handle(ctx, () => svc().adminDeleteBlock(ctx.params.id, { series }));
+    await handle(ctx, () => svc().adminDeleteBlock(ctx.params.id, { series }, session));
   },
 };
