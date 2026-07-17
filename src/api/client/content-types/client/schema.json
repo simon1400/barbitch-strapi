@@ -44,6 +44,22 @@
       "default": "import",
       "enum": ["import", "site", "admin"]
     },
+    "emailVerifiedAt": {
+      "type": "datetime"
+    },
+    "marketingConsent": {
+      "type": "boolean",
+      "default": false
+    },
+    "marketingConsentAt": {
+      "type": "datetime"
+    },
+    "birthday": {
+      "type": "date"
+    },
+    "cabinetLastLoginAt": {
+      "type": "datetime"
+    },
     "bookings": {
       "type": "relation",
       "relation": "oneToMany",

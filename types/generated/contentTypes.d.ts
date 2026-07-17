@@ -1186,6 +1186,42 @@ export interface ApiClientErrorLogClientErrorLog
   };
 }
 
+export interface ApiClientLoginTokenClientLoginToken
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'client_login_tokens';
+  info: {
+    description: '\u041E\u0434\u043D\u043E\u0440\u0430\u0437\u043E\u0432\u044B\u0435 magic-link \u0442\u043E\u043A\u0435\u043D\u044B \u0432\u0445\u043E\u0434\u0430 \u0432 \u043B\u0438\u0447\u043D\u044B\u0439 \u043A\u0430\u0431\u0438\u043D\u0435\u0442 \u043A\u043B\u0438\u0435\u043D\u0442\u0430 (\u0445\u0440\u0430\u043D\u0438\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E sha256-\u0445\u044D\u0448, TTL 15 \u043C\u0438\u043D)';
+    displayName: 'Login-\u0442\u043E\u043A\u0435\u043D\u044B \u043A\u0430\u0431\u0438\u043D\u0435\u0442\u0430 (\u043A\u043B\u0438\u0435\u043D\u0442\u044B)';
+    pluralName: 'client-login-tokens';
+    singularName: 'client-login-token';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    client: Schema.Attribute.Relation<'manyToOne', 'api::client.client'>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    email: Schema.Attribute.String;
+    expiresAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::client-login-token.client-login-token'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    tokenHash: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    usedAt: Schema.Attribute.DateTime;
+  };
+}
+
 export interface ApiClientClient extends Struct.CollectionTypeSchema {
   collectionName: 'clients';
   info: {
@@ -1198,19 +1234,25 @@ export interface ApiClientClient extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
+    birthday: Schema.Attribute.Date;
     blacklisted: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     blacklistReason: Schema.Attribute.Text;
     bookings: Schema.Attribute.Relation<'oneToMany', 'api::booking.booking'>;
+    cabinetLastLoginAt: Schema.Attribute.DateTime;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     email: Schema.Attribute.String;
+    emailVerifiedAt: Schema.Attribute.DateTime;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
       'api::client.client'
     > &
       Schema.Attribute.Private;
+    marketingConsent: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
+    marketingConsentAt: Schema.Attribute.DateTime;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     noonaCustomerId: Schema.Attribute.String & Schema.Attribute.Unique;
     notes: Schema.Attribute.Text;
@@ -3207,6 +3249,7 @@ declare module '@strapi/strapi' {
       'api::chat-message.chat-message': ApiChatMessageChatMessage;
       'api::chat-session.chat-session': ApiChatSessionChatSession;
       'api::client-error-log.client-error-log': ApiClientErrorLogClientErrorLog;
+      'api::client-login-token.client-login-token': ApiClientLoginTokenClientLoginToken;
       'api::client.client': ApiClientClient;
       'api::contact.contact': ApiContactContact;
       'api::cost.cost': ApiCostCost;

@@ -382,6 +382,26 @@ export default {
     };
   },
 
+  // ── личный кабинет клиента: magic-link вход (К1) ──
+
+  buildCabinetLogin(email, url) {
+    const subject = 'Přihlášení do Bar.Bitch';
+    const html = renderEmail({
+      heading: 'Přihlášení do kabinetu ✨',
+      intro: `Dobrý den, pro přihlášení do vašeho klientského kabinetu ${esc(SALON_NAME)} klikněte na tlačítko níže.`,
+      rows: [detailRow('E-mail', email), detailRow('Platnost odkazu', '15 minut')].join(''),
+      note: 'Odkaz platí 15 minut a lze ho použít jen jednou. Pokud jste o přihlášení nežádali, tento e-mail ignorujte.',
+      ctaLabel: 'PŘIHLÁSIT SE',
+      ctaUrl: url,
+    });
+    return { subject, html };
+  },
+
+  async sendCabinetLogin(email, url) {
+    const { subject, html } = this.buildCabinetLogin(email, url);
+    return this.sendEmail({ to: email, subject, html });
+  },
+
   // ── события движка (вызываются fire-and-forget) ──
 
   async notifyBookingCreated(bookingDocId) {
@@ -570,6 +590,13 @@ export default {
   // ── превью для ручной проверки (гейт секретом в контроллере) ──
 
   async preview(type, bookingDocId) {
+    // cabinet-login не привязан к брони — рендерим с фиктивными данными
+    if (type === 'cabinet-login') {
+      return this.buildCabinetLogin(
+        'preview@example.com',
+        `${SITE_URL}/cabinet/verify?token=preview-token`
+      );
+    }
     const booking = await this.loadBooking(bookingDocId);
     if (!booking) return { error: 'booking_not_found' };
     const v = viewFromBookingDoc(booking);

@@ -1,0 +1,36 @@
+{
+  "kind": "collectionType",
+  "collectionName": "client_login_tokens",
+  "info": {
+    "singularName": "client-login-token",
+    "pluralName": "client-login-tokens",
+    "displayName": "Login-токены кабинета (клиенты)",
+    "description": "Одноразовые magic-link токены входа в личный кабинет клиента (хранится только sha256-хэш, TTL 15 мин)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "tokenHash": {
+      "type": "string",
+      "unique": true,
+      "required": true
+    },
+    "expiresAt": {
+      "type": "datetime",
+      "required": true
+    },
+    "usedAt": {
+      "type": "datetime"
+    },
+    "email": {
+      "type": "string"
+    },
+    "client": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::client.client"
+    }
+  }
+}
