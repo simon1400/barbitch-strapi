@@ -1,7 +1,11 @@
 // @ts-nocheck
-// Синк-зеркало Noona → локальные коллекции client/booking (фаза 1 own-booking).
-// Noona остаётся мастером; здесь ТОЛЬКО read-only GET к Noona + upsert в свою БД.
-// Env: NOONA_TOKEN + NOONA_COMPANY_ID (те же, что у digest). Без них — тихий skip.
+// Синк Noona → наш календарь. ПОСЛЕ CUTOVER мастер данных — НАШ календарь,
+// поэтому весь синк CREATE-ONLY (только дозапись, НИКОГДА не обновляет и не
+// удаляет существующее): новые клиенты (регистрация в noona.app), их новые
+// брони, отсутствующие даты часов салона (нужны движку доступности слотов).
+// Блоки (blocked_times) НЕ синкаются вообще — нерабочее время ведётся только
+// в нашем календаре, админы свободно создают/правят/удаляют любые блоки.
+// Env: NOONA_TOKEN + NOONA_COMPANY_ID. Без них — тихий skip.
 //
 // Маппинг события (полный объект events, без select):
 //   noonaEventId=id, clientNameRaw=customer_name (снимок на момент брони, s97),
@@ -17,7 +21,6 @@ const CLIENT_UID = 'api::client.client';
 const BOOKING_UID = 'api::booking.booking';
 const PERSONAL_UID = 'api::personal.personal';
 const SALON_HOUR_UID = 'api::salon-hour.salon-hour';
-const TIME_BLOCK_UID = 'api::time-block.time-block';
 
 // 'YYYY-MM-DD' в Праге со смещением дней (сервер в UTC)
 const pragueDate = (offsetDays = 0): string =>
@@ -77,26 +80,6 @@ const mapEvent = (e) => ({
   noonaCreatedAt: e.created_at || null,
 });
 
-// jsonb в Postgres пересортировывает ключи объектов → сравнивать json-поля
-// можно только канонично (сортировка ключей рекурсивно)
-const sortKeys = (v) =>
-  Array.isArray(v)
-    ? v.map(sortKeys)
-    : v && typeof v === 'object'
-      ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])]))
-      : v;
-const stableStringify = (v) => JSON.stringify(sortKeys(v ?? null));
-
-// blacklisted в сравнении НЕТ намеренно: блэклист теперь ведётся в НАШЕМ календаре
-// (toggle в drawer брони) — синк Noona не должен его откатывать (та же философия,
-// что create-only для броней, s114). Из Noona blacklisted ставится только при create.
-const clientChanged = (existing, mapped): boolean =>
-  existing.name !== mapped.name ||
-  (existing.phone ?? '') !== mapped.phone ||
-  (existing.email ?? '') !== mapped.email ||
-  (existing.notes ?? '') !== mapped.notes ||
-  stableStringify(existing.tags) !== stableStringify(mapped.tags);
-
 export default {
   hasEnv(): boolean {
     return Boolean(process.env.NOONA_TOKEN && process.env.NOONA_COMPANY_ID);
@@ -118,30 +101,9 @@ export default {
     return this.noonaGet(`events?${params.toString()}`);
   },
 
-  // blocked_times ограничен ≤31 днём на запрос (span 45 → 400) → чанкуем по 30д.
-  // `to` у эндпоинта ИСКЛЮЧАЮЩИЙ → передаём границу+1 день.
-  async fetchBlockedRange(fromDate: string, toDate: string) {
-    const addDays = (d: string, n: number): string => {
-      const [y, m, dd] = d.split('-').map(Number);
-      const x = new Date(Date.UTC(y, m - 1, dd + n));
-      return `${x.getUTCFullYear()}-${String(x.getUTCMonth() + 1).padStart(2, '0')}-${String(x.getUTCDate()).padStart(2, '0')}`;
-    };
-    const out = [];
-    let cursor = fromDate;
-    let guard = 0;
-    while (cursor <= toDate && guard < 40) {
-      guard += 1;
-      let chunkEnd = addDays(cursor, 29);
-      if (chunkEnd > toDate) chunkEnd = toDate;
-      const toExcl = addDays(chunkEnd, 1);
-      const part = await this.noonaGet(`blocked_times?from=${cursor}&to=${toExcl}`);
-      if (Array.isArray(part)) out.push(...part);
-      cursor = addDays(chunkEnd, 1);
-    }
-    return out;
-  },
-
-  // Все customers Noona отдаются одним запросом (~1800), limit/skip игнорируются
+  // Все customers Noona отдаются одним запросом (~1800), limit/skip игнорируются.
+  // CREATE-ONLY: заводим только НОВЫХ клиентов (регистрация в noona.app).
+  // Существующих не трогаем вообще — имя/телефон/email/блэклист правит наш календарь.
   async syncCustomers() {
     const groups = await this.noonaGet('customer_groups');
     const blacklistGroupId =
@@ -149,35 +111,23 @@ export default {
     const customers = await this.noonaGet('customers');
 
     const existing = await strapi.documents(CLIENT_UID).findMany({
-      fields: ['noonaCustomerId', 'name', 'phone', 'email', 'blacklisted', 'notes', 'tags'],
+      fields: ['noonaCustomerId'],
       limit: 100000,
     });
-    const byNoonaId = new Map(existing.filter((c) => c.noonaCustomerId).map((c) => [c.noonaCustomerId, c]));
+    const known = new Set(existing.map((c) => c.noonaCustomerId).filter(Boolean));
 
     let created = 0;
-    let updated = 0;
     const errors = [];
     for (const c of customers || []) {
-      if (!c?.id) continue;
-      const mapped = mapCustomer(c, blacklistGroupId);
-      const cur = byNoonaId.get(c.id);
+      if (!c?.id || known.has(c.id)) continue;
       try {
-        if (!cur) {
-          await strapi.documents(CLIENT_UID).create({ data: mapped });
-          created += 1;
-        } else if (clientChanged(cur, mapped)) {
-          // локальный blacklisted сохраняем как есть — им управляет наш календарь
-          await strapi.documents(CLIENT_UID).update({
-            documentId: cur.documentId,
-            data: { ...mapped, blacklisted: Boolean(cur.blacklisted) },
-          });
-          updated += 1;
-        }
+        await strapi.documents(CLIENT_UID).create({ data: mapCustomer(c, blacklistGroupId) });
+        created += 1;
       } catch (e) {
         errors.push(`customer ${c.id}: ${e.message}`);
       }
     }
-    return { total: (customers || []).length, created, updated, errors };
+    return { total: (customers || []).length, created, updated: 0, errors };
   },
 
   async syncEvents(fromIso: string, toIso: string) {
@@ -209,6 +159,16 @@ export default {
     });
     const byEventId = new Set(existing.map((b) => b.noonaEventId));
 
+    // Tombstones: noonaEventId броней, которые админ УДАЛИЛ из нашего календаря
+    // (adminDeleteBooking пишет их в core store) — их никогда не заводим заново.
+    let deadIds = new Set();
+    try {
+      const dead = await strapi.store({ type: 'api', name: 'booking-mirror' }).get({ key: 'deletedEventIds' });
+      deadIds = new Set(Array.isArray(dead) ? dead : []);
+    } catch (e) {
+      strapi.log.warn(`booking-mirror: tombstone read failed: ${e.message}`);
+    }
+
     // ТОЛЬКО ДОЗАПИСЬ: заводим брони, которых у нас ещё нет (чтобы не терять записи,
     // сделанные через noona.app), и НИЧЕГО не трогаем у уже существующих. После cutover
     // мастер данных — наш календарь: статус (Dorazila/Proběhla/Nepřišla), цена, услуги,
@@ -218,7 +178,7 @@ export default {
     const errors = [];
     for (const e of events || []) {
       if (!e?.id) continue;
-      if (byEventId.has(e.id)) {
+      if (byEventId.has(e.id) || deadIds.has(e.id)) {
         skipped += 1;
         continue;
       }
@@ -237,127 +197,42 @@ export default {
     return { total: (events || []).length, created, updated: 0, skipped, errors };
   },
 
-  // Расписание: opening_hours + blocked_times за окно дат ['YYYY-MM-DD'..].
-  // blocked_times: `to` у эндпоинта ИСКЛЮЧАЮЩИЙ → передаём day+1; повторяющиеся
-  // блоки (rrule) разворачиваются по датам с тем же id → ключ дедупа = `id|date`.
-  async syncSchedule(fromDate: string, toDate: string) {
-    const openingParams = new URLSearchParams();
-    openingParams.append('filter', JSON.stringify({ from: fromDate, to: toDate }));
-    const [opening, blocked] = await Promise.all([
-      this.noonaGet(`opening_hours?${openingParams.toString()}`),
-      this.fetchBlockedRange(fromDate, toDate),
-    ]);
+  // Часы салона: CREATE-ONLY дозапись ОТСУТСТВУЮЩИХ дат (движку доступности нужны
+  // openMin/closeMin будущих дней, иначе на сайте не будет слотов). Существующие
+  // записи НЕ трогаем никогда — правки владельца в Strapi всегда выигрывают.
+  // Блоки (blocked_times) НЕ синкаются: нерабочее время ведётся ТОЛЬКО у нас.
+  async syncSalonHours(fromDate: string, toDate: string) {
+    const params = new URLSearchParams();
+    params.append('filter', JSON.stringify({ from: fromDate, to: toDate }));
+    const opening = await this.noonaGet(`opening_hours?${params.toString()}`);
 
-    // ── salon-hours upsert по дате ──
-    const existingHours = await strapi.documents(SALON_HOUR_UID).findMany({
+    const existing = await strapi.documents(SALON_HOUR_UID).findMany({
       filters: { date: { $gte: fromDate, $lte: toDate } },
+      fields: ['date'],
       limit: 100000,
     });
-    const hoursByDate = new Map(existingHours.map((h) => [h.date, h]));
-    let hoursCreated = 0;
-    let hoursUpdated = 0;
-    const hErrors = [];
+    const known = new Set(existing.map((h) => h.date));
+
+    let created = 0;
+    const errors = [];
     for (const [date, wins] of Object.entries(opening || {})) {
+      if (known.has(date)) continue;
       const windows = (wins as Array<{ starts_at?: string; ends_at?: string }>) || [];
       const starts = windows.map((w) => (w.starts_at ? hhmmToMin(w.starts_at) : null)).filter((v) => v != null);
       const ends = windows.map((w) => (w.ends_at ? hhmmToMin(w.ends_at) : null)).filter((v) => v != null);
       const openMin = starts.length ? Math.min(...starts) : null;
       const closeMin = ends.length ? Math.max(...ends) : null;
-      const data = { date, openMin, closeMin, windows };
-      const cur = hoursByDate.get(date);
       try {
-        if (!cur) {
-          await strapi.documents(SALON_HOUR_UID).create({ data });
-          hoursCreated += 1;
-        } else if (cur.openMin !== openMin || cur.closeMin !== closeMin) {
-          await strapi.documents(SALON_HOUR_UID).update({ documentId: cur.documentId, data });
-          hoursUpdated += 1;
-        }
+        await strapi.documents(SALON_HOUR_UID).create({ data: { date, openMin, closeMin, windows } });
+        created += 1;
       } catch (e) {
-        hErrors.push(`hours ${date}: ${e.message}`);
+        errors.push(`hours ${date}: ${e.message}`);
       }
     }
-
-    // ── time-block upsert + reconcile (удаляем исчезнувшие в окне) ──
-    const personals = await strapi.documents(PERSONAL_UID).findMany({
-      fields: ['noonaEmployeeId'],
-      status: 'published',
-      limit: 1000,
-    });
-    const personalByNoona = new Map(
-      personals.filter((p) => p.noonaEmployeeId).map((p) => [p.noonaEmployeeId, p.documentId])
-    );
-
-    const freshRaw = (Array.isArray(blocked) ? blocked : []).filter(
-      (b) => b?.employee && b?.date && b.date >= fromDate && b.date <= toDate
-    );
-    // dedup по id|date (rrule-инстанс может прийти в двух смежных чанках)
-    const freshBlocks = [...new Map(freshRaw.map((b) => [`${b.id}|${b.date}`, b])).values()];
-    const freshKeys = new Set(freshBlocks.map((b) => `${b.id}|${b.date}`));
-
-    const existingBlocks = await strapi.documents(TIME_BLOCK_UID).findMany({
-      filters: { date: { $gte: fromDate, $lte: toDate } },
-      limit: 100000,
-    });
-    const blockByKey = new Map(existingBlocks.map((b) => [b.noonaKey, b]));
-
-    let blCreated = 0;
-    let blUpdated = 0;
-    let blDeleted = 0;
-    const blErrors = [];
-    for (const b of freshBlocks) {
-      const key = `${b.id}|${b.date}`;
-      const data = {
-        noonaKey: key,
-        noonaBlockedId: b.id,
-        noonaEmployeeId: b.employee,
-        employee: personalByNoona.get(b.employee) || null,
-        date: b.date,
-        startsAt: b.starts_at || null,
-        endsAt: b.ends_at || null,
-        title: b.title || '',
-        theme: b.theme || '',
-      };
-      const cur = blockByKey.get(key);
-      try {
-        if (!cur) {
-          await strapi.documents(TIME_BLOCK_UID).create({ data });
-          blCreated += 1;
-        } else if (
-          cur.startsAt !== data.startsAt ||
-          cur.endsAt !== data.endsAt ||
-          (cur.title ?? '') !== data.title ||
-          (cur.noonaEmployeeId ?? '') !== data.noonaEmployeeId
-        ) {
-          await strapi.documents(TIME_BLOCK_UID).update({ documentId: cur.documentId, data });
-          blUpdated += 1;
-        }
-      } catch (e) {
-        blErrors.push(`block ${key}: ${e.message}`);
-      }
-    }
-    // Reconcile: блоки зеркала в окне, которых больше нет в Noona → удалить.
-    // Блоки нашего движка (noonaKey 'own|…', booking-engine adminCreateBlock)
-    // Noona не знает — их реконсайл НЕ трогает.
-    for (const b of existingBlocks) {
-      if (String(b.noonaKey || '').startsWith('own|')) continue;
-      if (!freshKeys.has(b.noonaKey)) {
-        try {
-          await strapi.documents(TIME_BLOCK_UID).delete({ documentId: b.documentId });
-          blDeleted += 1;
-        } catch (e) {
-          blErrors.push(`block-del ${b.noonaKey}: ${e.message}`);
-        }
-      }
-    }
-
-    return {
-      hours: { created: hoursCreated, updated: hoursUpdated, errors: hErrors },
-      blocks: { total: freshBlocks.length, created: blCreated, updated: blUpdated, deleted: blDeleted, errors: blErrors },
-    };
+    return { created, errors };
   },
 
-  // Инкрементальный синк: окно [сегодня−30д, сегодня+90д] + все customers (дёшево)
+  // Инкрементальный синк (весь CREATE-ONLY): окно [сегодня−30д, сегодня+90д]
   async syncRecent() {
     if (!this.hasEnv()) {
       strapi.log.info('booking-mirror: NOONA env missing, skip');
@@ -369,22 +244,18 @@ export default {
 
     const customers = await this.syncCustomers();
     const events = await this.syncEvents(fromIso, toIso);
-    const schedule = await this.syncSchedule(pragueDate(-30), pragueDate(90));
+    const hours = await this.syncSalonHours(pragueDate(0), pragueDate(90));
 
     const summary = {
       window: { from: fromIso, to: toIso },
-      customers: { created: customers.created, updated: customers.updated, errors: customers.errors.length },
+      customers: { created: customers.created, errors: customers.errors.length },
       events: {
         total: events.total,
         created: events.created,
-        updated: events.updated,
         skipped: events.skipped,
         errors: events.errors.length,
       },
-      schedule: {
-        hours: schedule.hours.created + schedule.hours.updated,
-        blocks: `+${schedule.blocks.created}/~${schedule.blocks.updated}/-${schedule.blocks.deleted}`,
-      },
+      hours: { created: hours.created, errors: hours.errors.length },
     };
     strapi.log.info(`booking-mirror sync: ${JSON.stringify(summary)}`);
     if (customers.errors.length) strapi.log.warn(`booking-mirror customer errors: ${customers.errors.slice(0, 5).join(' | ')}`);

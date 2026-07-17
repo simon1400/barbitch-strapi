@@ -975,13 +975,25 @@ export default {
   },
 
   // Полное удаление брони (корзина в drawer). ЖЁСТКОЕ удаление записи, НЕ отмена:
-  // бронь исчезает из БД (link-строки чистит FK cascade). Зеркальные (Noona) брони
-  // при включённом синке удалять нельзя — реконсайл их воскресит.
+  // бронь исчезает из БД (link-строки чистит FK cascade). Удалять можно ЛЮБУЮ бронь,
+  // включая зеркальные (Noona). Чтобы create-only синк зеркала не завёл удалённую
+  // noona.app-бронь заново (для него её noonaEventId снова «не существует»), id
+  // пишется в tombstone-список (core store booking-mirror/deletedEventIds) —
+  // syncEvents такие id пропускает навсегда.
   async adminDeleteBooking(bookingDocId, session) {
     const booking = await strapi.documents(BOOKING_UID).findOne({ documentId: bookingDocId });
     if (!booking) throw new EngineError(404, 'booking_not_found', 'Бронь не найдена');
-    if (booking.noonaEventId && String(process.env.MIRROR_SYNC_ENABLED || '').toLowerCase() === 'true') {
-      throw new EngineError(409, 'mirror_booking', 'Бронь из зеркала Noona — синк её восстановит, удалять в Noona');
+    if (booking.noonaEventId) {
+      try {
+        const store = strapi.store({ type: 'api', name: 'booking-mirror' });
+        const dead = (await store.get({ key: 'deletedEventIds' })) || [];
+        if (!dead.includes(booking.noonaEventId)) {
+          dead.push(booking.noonaEventId);
+          await store.set({ key: 'deletedEventIds', value: dead });
+        }
+      } catch (e) {
+        strapi.log.warn(`booking-engine: tombstone write failed for ${booking.noonaEventId}: ${e.message}`);
+      }
     }
     await strapi.documents(BOOKING_UID).delete({ documentId: bookingDocId });
     strapi.log.info(
@@ -1052,20 +1064,12 @@ export default {
     return { documentId: created[0]?.documentId, count: created.length };
   },
 
-  // Зеркальные (Noona) блоки можно трогать ТОЛЬКО при выключенном синке —
-  // иначе реконсайл их воскресит. Own-блоки управляемы всегда.
-  _assertBlockManageable(block) {
-    if (String(block.noonaKey || '').startsWith(OWN_BLOCK_PREFIX)) return;
-    if (String(process.env.MIRROR_SYNC_ENABLED || '').toLowerCase() === 'true') {
-      throw new EngineError(409, 'mirror_block', 'Блок из зеркала Noona — управляется синком, менять в Noona');
-    }
-  },
-
   // PATCH блока: время (в рамках его дня) и/или название. Только этот конкретный блок.
+  // Любые блоки (включая исторические зеркальные из Noona) полностью управляемы:
+  // синк блоков больше не существует, ничего их не перезапишет и не воскресит.
   async adminPatchBlock(blockDocId, { startMin, endMin, title }, session) {
     const block = await strapi.documents(TIME_BLOCK_UID).findOne({ documentId: blockDocId });
     if (!block) throw new EngineError(404, 'block_not_found', 'Блок не найден');
-    this._assertBlockManageable(block);
     const data = {};
     if (startMin != null || endMin != null) {
       const s = Number(startMin);
@@ -1088,7 +1092,6 @@ export default {
   async adminDeleteBlock(blockDocId, { series = false } = {}) {
     const block = await strapi.documents(TIME_BLOCK_UID).findOne({ documentId: blockDocId });
     if (!block) throw new EngineError(404, 'block_not_found', 'Блок не найден');
-    this._assertBlockManageable(block);
 
     if (!series) {
       await strapi.documents(TIME_BLOCK_UID).delete({ documentId: blockDocId });
