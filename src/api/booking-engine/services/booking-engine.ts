@@ -950,7 +950,7 @@ export default {
     if (pushKind) {
       strapi
         .service('api::booking-engine.push-notify')
-        .notifyBookingEvent(bookingDocId, pushKind)
+        .notifyBookingEvent(bookingDocId, pushKind, pushKind === 'reschedule' ? { from: fromInfo } : {})
         .catch((e) => strapi.log.error(`push admin-${pushKind} failed: ${e.message}`));
     }
 
@@ -1282,7 +1282,7 @@ export default {
     // push мастеру: клиент перенёс его бронь
     strapi
       .service('api::booking-engine.push-notify')
-      .notifyBookingEvent(booking.documentId, 'reschedule')
+      .notifyBookingEvent(booking.documentId, 'reschedule', { from: fromInfo })
       .catch((e) => strapi.log.error(`push client-reschedule failed: ${e.message}`));
 
     const fresh = await this.bookingByCancelToken(token);

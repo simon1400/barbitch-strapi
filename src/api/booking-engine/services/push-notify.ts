@@ -112,7 +112,9 @@ export default {
   },
 
   // Главная точка входа из движка: уведомить мастера брони о событии (kind).
-  async notifyBookingEvent(bookingDocId, kind) {
+  // extra.from = снимок СТАРОГО термина при переносе ({startsAt, date, time}) —
+  // бронь на момент пуша уже перезаписана, старое время можно получить только снаружи.
+  async notifyBookingEvent(bookingDocId, kind, extra = {}) {
     if (!ensureVapid()) return { skipped: 'no_vapid' };
     const meta = KIND_META[kind];
     if (!meta) return { skipped: 'bad_kind' };
@@ -133,16 +135,25 @@ export default {
     const services = Array.isArray(booking.services) ? booking.services : [];
     const svcTitle = services.map((s) => s?.title).filter(Boolean).join(', ');
     const client = booking.clientNameRaw || booking.client?.name || 'Klient';
-    const bodyLines = [
-      `${czDate(booking.startsAt, booking.date)}${time ? ` v ${time}` : ''}`,
-      client,
-      svcTitle,
-    ].filter(Boolean);
+    // Формат по решению владельца (s118): термин в заголовке, тело = клиент и услуги
+    // отдельными строками — чтобы пуш влезал в ~4 строки закрытого экрана iOS.
+    const when = `${czDate(booking.startsAt, booking.date)}${time ? ` v ${time}` : ''}`;
+    const bodyLines = [client, svcTitle].filter(Boolean);
+    // перенос: первой строкой «откуда → куда»; если день тот же — только времена
+    if (kind === 'reschedule' && extra?.from?.time) {
+      const sameDate = String(extra.from.date) === String(booking.date);
+      const oldPart = sameDate
+        ? extra.from.time
+        : `${czDate(extra.from.startsAt, extra.from.date)} ${extra.from.time}`;
+      const newPart = sameDate ? time : when;
+      bodyLines.unshift(`${oldPart} → ${newPart}`);
+    }
 
     const sent = await this._send(subs, {
-      title: meta.title,
-      body: bodyLines.join(' · '),
-      url: '/calendar',
+      title: `${meta.title} - ${when}`,
+      body: bodyLines.join('\n'),
+      // клик по пушу → календарь сразу на дне брони + подсветка её карточки
+      url: `/calendar?date=${booking.date}&highlight=${bookingDocId}`,
       tag: `booking-${bookingDocId}`,
     });
     return { sent };
