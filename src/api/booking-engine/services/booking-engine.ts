@@ -50,6 +50,7 @@ const fmtDay = (d) => {
   const dt = new Date(`${d}T00:00:00Z`);
   return `${CS_DOW[dt.getUTCDay()]} ${dt.getUTCDate()}.${dt.getUTCMonth() + 1}.`;
 };
+const blokPluralCs = (n) => (n === 1 ? 'blok' : n >= 2 && n <= 4 ? 'bloky' : 'bloků');
 
 /** Ошибка с HTTP-статусом — контроллер мапит в ответ. */
 export class EngineError extends Error {
@@ -1130,6 +1131,23 @@ export default {
     return out.length ? out : [startDate];
   },
 
+  // Человеческое описание повтора для журнала: «každý den» / «Út, So, Ne» (порядок Po..Ne).
+  // Weekly без weekdays — тот же фолбэк на день старта, что в _expandBlockDates.
+  _recurrenceLabel(rec, startDate) {
+    if (!rec || (rec.freq !== 'daily' && rec.freq !== 'weekly')) return '';
+    if (rec.freq === 'daily') return 'každý den';
+    const set = new Set(
+      Array.isArray(rec.weekdays) && rec.weekdays.length
+        ? rec.weekdays.map(Number).filter((n) => n >= 0 && n <= 6)
+        : [new Date(`${startDate}T00:00:00Z`).getUTCDay()]
+    );
+    const order = [1, 2, 3, 4, 5, 6, 0];
+    return order
+      .filter((v) => set.has(v))
+      .map((v) => CS_DOW[v][0].toUpperCase() + CS_DOW[v].slice(1))
+      .join(', ');
+  },
+
   async adminCreateBlock({ session, employee, date, startMin, endMin, title, recurrence }) {
     if (!isDateStr(date)) throw new EngineError(400, 'bad_date', 'date должен быть YYYY-MM-DD');
     if (!(Number.isFinite(startMin) && Number.isFinite(endMin) && endMin > startMin)) {
@@ -1165,6 +1183,8 @@ export default {
         dates.length > 1 ? `..${dates[dates.length - 1]}` : ''
       } ${minToHHMM(startMin)}–${minToHHMM(endMin)} ${emp.name})`
     );
+    const recLabel = this._recurrenceLabel(recurrence, date);
+    const lastDate = dates[dates.length - 1];
     strapi
       .service('api::calendar-log.calendar-log')
       .write({
@@ -1173,14 +1193,20 @@ export default {
         actorName: session?.username || '',
         entityDocId: created[0]?.documentId || '',
         employeeName: emp.name,
-        summary: `Nový blok: ${emp.name} · ${fmtDay(date)}${dates.length > 1 ? `..${fmtDay(dates[dates.length - 1])} (${dates.length}×)` : ''} · ${minToHHMM(startMin)}–${minToHHMM(endMin)}${titleStr && titleStr !== 'Blokace' ? ` · ${titleStr}` : ''}`,
+        summary: `Nový blok: ${emp.name} · ${
+          dates.length > 1
+            ? `${recLabel ? `${recLabel} · ` : ''}${fmtDay(date)} – ${fmtDay(lastDate)} (${dates.length}×)`
+            : fmtDay(date)
+        } · ${minToHHMM(startMin)}–${minToHHMM(endMin)}${titleStr && titleStr !== 'Blokace' ? ` · ${titleStr}` : ''}`,
         details: {
-          employee: emp.name,
-          date: fmtDay(date),
-          endDate: fmtDay(dates[dates.length - 1]),
-          count: dates.length,
-          time: `${minToHHMM(startMin)}–${minToHHMM(endMin)}`,
-          title: titleStr,
+          mistr: emp.name,
+          opakování: recLabel ? (recurrence?.freq === 'daily' ? 'každý den' : `vybrané dny: ${recLabel}`) : null,
+          od: fmtDay(date),
+          do: dates.length > 1 ? fmtDay(lastDate) : null,
+          počet: dates.length > 1 ? `${dates.length} ${blokPluralCs(dates.length)}` : null,
+          čas: `${minToHHMM(startMin)}–${minToHHMM(endMin)}`,
+          název: titleStr,
+          dny: dates.length > 1 && dates.length <= 14 ? dates.map(fmtDay).join(', ') : null,
         },
       })
       .catch((e) => strapi.log.error(`calendar-log block-create failed: ${e.message}`));
