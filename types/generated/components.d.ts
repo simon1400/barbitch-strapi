@@ -1,52 +1,5 @@
 import type { Schema, Struct } from '@strapi/strapi';
 
-export interface BookingAddonItem extends Struct.ComponentSchema {
-  collectionName: 'components_booking_addon_items';
-  info: {
-    displayName: 'addonItem';
-    icon: 'plus';
-  };
-  attributes: {
-    description: Schema.Attribute.Text;
-    duration_diff: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
-    label: Schema.Attribute.String & Schema.Attribute.Required;
-    modifier_results: Schema.Attribute.Component<
-      'booking.modifier-result',
-      true
-    >;
-    price_diff: Schema.Attribute.Integer & Schema.Attribute.Required;
-    result_noona_id: Schema.Attribute.String & Schema.Attribute.Required;
-  };
-}
-
-export interface BookingModifierItem extends Struct.ComponentSchema {
-  collectionName: 'components_booking_modifier_items';
-  info: {
-    displayName: 'modifierItem';
-    icon: 'check';
-  };
-  attributes: {
-    description: Schema.Attribute.Text;
-    duration_diff: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
-    group: Schema.Attribute.String;
-    key: Schema.Attribute.String & Schema.Attribute.Required;
-    label: Schema.Attribute.String & Schema.Attribute.Required;
-    price_diff: Schema.Attribute.Integer & Schema.Attribute.Required;
-  };
-}
-
-export interface BookingModifierResult extends Struct.ComponentSchema {
-  collectionName: 'components_booking_modifier_results';
-  info: {
-    displayName: 'modifierResult';
-    icon: 'link';
-  };
-  attributes: {
-    modifier_keys: Schema.Attribute.String & Schema.Attribute.Required;
-    result_noona_id: Schema.Attribute.String & Schema.Attribute.Required;
-  };
-}
-
 export interface BookingServiceModifier extends Struct.ComponentSchema {
   collectionName: 'components_booking_service_modifiers';
   info: {
@@ -354,9 +307,6 @@ export interface SeoMeta extends Struct.ComponentSchema {
 declare module '@strapi/strapi' {
   export module Public {
     export interface ComponentSchemas {
-      'booking.addon-item': BookingAddonItem;
-      'booking.modifier-item': BookingModifierItem;
-      'booking.modifier-result': BookingModifierResult;
       'booking.service-modifier': BookingServiceModifier;
       'booking.service-variant': BookingServiceVariant;
       'content.ask-answer': ContentAskAnswer;

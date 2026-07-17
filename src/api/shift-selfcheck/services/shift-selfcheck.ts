@@ -5,24 +5,21 @@
 // СЕГОДНЯ — без публикации, без ввода карты, без финметрик владельца (зарплаты/
 // прибыль/оборот). Это «облегчённая» проверка, повторяющая check-часть модуля
 // «Uzavření směny» (admin/.../shiftClose.ts) — но всё считается из сегодняшних
-// черновиков + событий Noona, БЕЗ месячного финансового движка.
+// черновиков + броней НАШЕГО календаря (booking), БЕЗ месячного финансового движка.
 //
 // Что показывает:
 //   1. rozdil  — Σ по сегодняшним услугам (staff+salon − offerPrice×(1−sleva)).
 //                ≥0 → «v pořádku» (показываем 0), <0 → недостача (показываем минус).
 //   2. flagged — записи с неверными суммами (ztrata/salon_up/mistr_up/mistr_down) + Δ Kč.
-//   3. noona   — клиенты, которых не записали в Strapi / лишние-опечатки (Noona↔Strapi).
-//   4. service — услуга в записи ≠ услуга клиента в Noona.
+//   3. calendar — клиенты, которых не записали в Strapi / лишние-опечатки
+//                 (сверка календарь↔services-provided).
+//   4. service — услуга в записи ≠ услуга клиента в календаре.
 //   5. missing — нет записей кассы / часов / услуг за сегодня.
-//
-// Noona-данные: env NOONA_TOKEN + NOONA_COMPANY_ID (те же, что у дайджеста). Без них
-// Noona-проверки (3,4) тихо пропускаются — остальное (1,2,5) работает.
 
 const SP_UID = 'api::service-provided.service-provided';
 const CASH_UID = 'api::cash.cash';
 const WORKTIME_UID = 'api::work-time.work-time';
-
-const NOONA_BASE = 'https://api.noona.is/v1/hq/companies';
+const BOOKING_UID = 'api::booking.booking';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -147,16 +144,16 @@ const normalizeTitle = (t: string) =>
     .replace(/^юниор\s+/, '')
     .replace(/\s*\+\s*/g, ' + ');
 
-// Multiset-разница имён клиентов: кто есть только в Strapi / только в Noona.
-const diffByName = (strapiItems: any[], noonaEvents: any[]) => {
+// Multiset-разница имён клиентов: кто есть только в Strapi / только в календаре.
+const diffByName = (strapiItems: any[], calendarEvents: any[]) => {
   const count = (arr: string[]) => {
     const m = new Map<string, number>();
     arr.forEach((n) => m.set(n, (m.get(n) || 0) + 1));
     return m;
   };
-  const noonaNames = noonaEvents.map((e: any) => normalize(e.customer_name || ''));
+  const calendarNames = calendarEvents.map((e: any) => normalize(e.customer_name || ''));
   const strapiNames = strapiItems.map((i: any) => normalize(i.clientName || ''));
-  const nCount = count(noonaNames);
+  const nCount = count(calendarNames);
   const sCount = count(strapiNames);
 
   const onlyStrapi: string[] = [];
@@ -164,10 +161,10 @@ const diffByName = (strapiItems: any[], noonaEvents: any[]) => {
     const diff = c - (nCount.get(name) || 0);
     for (let i = 0; i < diff; i++) onlyStrapi.push(name);
   });
-  const onlyNoona: string[] = [];
+  const onlyCalendar: string[] = [];
   nCount.forEach((c, name) => {
     const diff = c - (sCount.get(name) || 0);
-    for (let i = 0; i < diff; i++) onlyNoona.push(name);
+    for (let i = 0; i < diff; i++) onlyCalendar.push(name);
   });
 
   // Возвращаем оригинальные (не нормализованные) имена для показа.
@@ -189,11 +186,11 @@ const diffByName = (strapiItems: any[], noonaEvents: any[]) => {
 
   return {
     strapiExtra: pickNames(onlyStrapi, strapiItems, 'clientName'),
-    noonaExtra: pickNames(onlyNoona, noonaEvents, 'customer_name'),
+    calendarExtra: pickNames(onlyCalendar, calendarEvents, 'customer_name'),
   };
 };
 
-// Услуга в записи ≠ услуга клиента в Noona (offer.title vs event_types[0].title).
+// Услуга в записи ≠ услуга клиента в календаре (offer.title vs event_types[0].title).
 const offerMismatches = (items: any[], events: any[]) => {
   const buckets = new Map<string, { title: string; used: boolean }[]>();
   for (const e of events) {
@@ -201,12 +198,12 @@ const offerMismatches = (items: any[], events: any[]) => {
     if (!buckets.has(key)) buckets.set(key, []);
     buckets.get(key).push({ title: e.event_types?.[0]?.title || '', used: false });
   }
-  const out: { client: string; strapi: string; noona: string }[] = [];
+  const out: { client: string; strapi: string; calendar: string }[] = [];
   for (const item of items) {
     const strapiTitle = item?.offer?.title || '';
     if (!strapiTitle) continue;
     const bucket = buckets.get(normalize(item.clientName || '')) || [];
-    if (bucket.length === 0) continue; // «нет в Noona» уже ловится diffByName
+    if (bucket.length === 0) continue; // «нет в календаре» уже ловится diffByName
     const want = normalizeTitle(strapiTitle);
     const hit = bucket.find((b) => !b.used && normalizeTitle(b.title) === want);
     if (hit) {
@@ -218,41 +215,34 @@ const offerMismatches = (items: any[], events: any[]) => {
     out.push({
       client: (item.clientName || '').trim(),
       strapi: strapiTitle,
-      noona: fallback.title,
+      calendar: fallback.title,
     });
   }
   return out;
 };
 
-// --- Noona events ------------------------------------------------------------
+// --- Брони календаря (наша коллекция booking) --------------------------------
+// Форма события историческая ({customer_name, event_types:[{title}]}) — на неё
+// завязаны diffByName/offerMismatches. customer_name = ТЕКУЩЕЕ имя клиента
+// (relation), фолбэк — снимок clientNameRaw.
 
-const fetchNoonaEvents = async (dateStr: string) => {
-  const token = process.env.NOONA_TOKEN;
-  const cid = process.env.NOONA_COMPANY_ID;
-  if (!token || !cid) return { available: false, events: [] };
-
-  const params = new URLSearchParams();
-  params.append(
-    'filter',
-    JSON.stringify({
-      from: `${dateStr}T00:00:00.000Z`,
-      to: `${dateStr}T23:59:59.999Z`,
-    }),
-  );
-  ['id', 'customer_name', 'status', 'event_types'].forEach((s) => params.append('select', s));
-
+const fetchCalendarBookings = async (dateStr: string) => {
   try {
-    const res = await fetch(`${NOONA_BASE}/${cid}/events?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${token}` },
+    const bookings = await strapi.documents(BOOKING_UID).findMany({
+      filters: { date: dateStr, status: { $notIn: ['cancelled', 'noshow'] } },
+      fields: ['clientNameRaw', 'status', 'services'],
+      populate: { client: { fields: ['name'] } },
+      pagination: { pageSize: 200 },
     });
-    if (!res.ok) throw new Error(`Noona events → ${res.status}`);
-    const all = await res.json();
-    const events = (all || []).filter(
-      (e: any) => e.status !== 'cancelled' && e.status !== 'noshow',
-    );
+    const events = (bookings || []).map((b: any) => ({
+      customer_name: b?.client?.name || b?.clientNameRaw || '',
+      event_types: (Array.isArray(b?.services) ? b.services : []).map((s: any) => ({
+        title: s?.title || '',
+      })),
+    }));
     return { available: true, events };
   } catch (e: any) {
-    strapi.log.warn(`shift-selfcheck: Noona fetch failed — ${e.message}`);
+    strapi.log.warn(`shift-selfcheck: bookings fetch failed — ${e.message}`);
     return { available: false, events: [] };
   }
 };
@@ -263,8 +253,8 @@ export default {
   async runSelfCheck(dateRaw?: string) {
     const date = dateRaw && DATE_RE.test(dateRaw) ? dateRaw : pragueToday();
 
-    // Сегодняшние черновики + события Noona параллельно.
-    const [services, cashCount, workCount, noona] = await Promise.all([
+    // Сегодняшние черновики + брони календаря параллельно.
+    const [services, cashCount, workCount, calendar] = await Promise.all([
       strapi.documents(SP_UID).findMany({
         filters: { date },
         status: 'draft',
@@ -277,10 +267,10 @@ export default {
       }),
       strapi.documents(CASH_UID).count({ filters: { date }, status: 'draft' }),
       strapi.documents(WORKTIME_UID).count({ filters: { date }, status: 'draft' }),
-      fetchNoonaEvents(date),
+      fetchCalendarBookings(date),
     ]);
 
-    // Внутренние услуги (мастер↔мастер) в Noona не существуют — исключаем из сверки.
+    // Внутренние услуги (мастер↔мастер) в календаре не существуют — исключаем из сверки.
     const comparable = (services || []).filter((s: any) => !s?.internal);
 
     // 1. Rozdíl за смену: Σ (staff+salon − offerPrice×(1−sleva)) по реальным услугам.
@@ -329,15 +319,15 @@ export default {
       });
     }
 
-    // 3-4. Noona↔Strapi (только если Noona доступна).
-    let noonaOnly: string[] = [];
+    // 3-4. Календарь↔Strapi (только если брони прочитались).
+    let calendarOnly: string[] = [];
     let strapiOnly: string[] = [];
-    let serviceMismatch: { client: string; strapi: string; noona: string }[] = [];
-    if (noona.available) {
-      const diff = diffByName(comparable, noona.events);
+    let serviceMismatch: { client: string; strapi: string; calendar: string }[] = [];
+    if (calendar.available) {
+      const diff = diffByName(comparable, calendar.events);
       strapiOnly = diff.strapiExtra;
-      noonaOnly = diff.noonaExtra;
-      serviceMismatch = offerMismatches(comparable, noona.events);
+      calendarOnly = diff.calendarExtra;
+      serviceMismatch = offerMismatches(comparable, calendar.events);
     }
 
     // 5. Отсутствующие записи.
@@ -352,7 +342,7 @@ export default {
     // в ответе (не используется виджетом) на случай возврата позже.
     const problemCount =
       flagged.length +
-      noonaOnly.length +
+      calendarOnly.length +
       strapiOnly.length +
       serviceMismatch.length +
       (missing.services ? 1 : 0) +
@@ -368,12 +358,12 @@ export default {
         services: (services || []).length,
         cash: cashCount,
         workTime: workCount,
-        noona: noona.events.length,
+        calendar: calendar.events.length,
       },
-      noonaAvailable: noona.available,
+      calendarAvailable: calendar.available,
       flagged,
-      noonaOnly, // клиенты в Noona, без записи в Strapi (не записали)
-      strapiOnly, // записи в Strapi, без брони в Noona (лишняя / опечатка имени)
+      calendarOnly, // клиенты в календаре, без записи в Strapi (не записали)
+      strapiOnly, // записи в Strapi, без брони в календаре (лишняя / опечатка имени)
       serviceMismatch,
       missing,
     };

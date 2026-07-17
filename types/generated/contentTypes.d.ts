@@ -864,48 +864,6 @@ export interface ApiBlogBlog extends Struct.CollectionTypeSchema {
   };
 }
 
-export interface ApiBookingAddonGroupBookingAddonGroup
-  extends Struct.CollectionTypeSchema {
-  collectionName: 'booking_addon_groups';
-  info: {
-    description: '\u0413\u0440\u0443\u043F\u043F\u044B \u0434\u043E\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u0439 \u043A \u0431\u0430\u0437\u043E\u0432\u044B\u043C \u0443\u0441\u043B\u0443\u0433\u0430\u043C Noona';
-    displayName: 'Booking Addon Group';
-    pluralName: 'booking-addon-groups';
-    singularName: 'booking-addon-group';
-  };
-  options: {
-    draftAndPublish: false;
-  };
-  attributes: {
-    addons: Schema.Attribute.Component<'booking.addon-item', true>;
-    base_modifier_results: Schema.Attribute.Component<
-      'booking.modifier-result',
-      true
-    >;
-    base_noona_id: Schema.Attribute.String &
-      Schema.Attribute.Required &
-      Schema.Attribute.Unique;
-    base_price: Schema.Attribute.Integer & Schema.Attribute.Required;
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::booking-addon-group.booking-addon-group'
-    > &
-      Schema.Attribute.Private;
-    modifiers: Schema.Attribute.Component<'booking.modifier-item', true>;
-    publishedAt: Schema.Attribute.DateTime;
-    title: Schema.Attribute.String &
-      Schema.Attribute.Required &
-      Schema.Attribute.Unique;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-  };
-}
-
 export interface ApiBookingLabelBookingLabel
   extends Struct.CollectionTypeSchema {
   collectionName: 'booking_labels';
@@ -2129,42 +2087,6 @@ export interface ApiSalonServiceSalonService
   };
 }
 
-export interface ApiServiceJuniorMapServiceJuniorMap
-  extends Struct.CollectionTypeSchema {
-  collectionName: 'service_junior_maps';
-  info: {
-    description: '\u041C\u0430\u043F\u043F\u0438\u043D\u0433 senior event_type ID \u2192 junior event_type ID \u0432 Noona';
-    displayName: 'Service Junior Map';
-    pluralName: 'service-junior-maps';
-    singularName: 'service-junior-map';
-  };
-  options: {
-    draftAndPublish: false;
-  };
-  attributes: {
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    junior_noona_id: Schema.Attribute.String & Schema.Attribute.Required;
-    junior_price: Schema.Attribute.Integer;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::service-junior-map.service-junior-map'
-    > &
-      Schema.Attribute.Private;
-    publishedAt: Schema.Attribute.DateTime;
-    senior_noona_id: Schema.Attribute.String &
-      Schema.Attribute.Required &
-      Schema.Attribute.Unique;
-    senior_price: Schema.Attribute.Integer;
-    title: Schema.Attribute.String;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-  };
-}
-
 export interface ApiServiceProvidedServiceProvided
   extends Struct.CollectionTypeSchema {
   collectionName: 'services_provided';
@@ -3240,7 +3162,6 @@ declare module '@strapi/strapi' {
       'api::blog-plan.blog-plan': ApiBlogPlanBlogPlan;
       'api::blog-topic.blog-topic': ApiBlogTopicBlogTopic;
       'api::blog.blog': ApiBlogBlog;
-      'api::booking-addon-group.booking-addon-group': ApiBookingAddonGroupBookingAddonGroup;
       'api::booking-label.booking-label': ApiBookingLabelBookingLabel;
       'api::booking.booking': ApiBookingBooking;
       'api::card-profit.card-profit': ApiCardProfitCardProfit;
@@ -3267,7 +3188,6 @@ declare module '@strapi/strapi' {
       'api::salary.salary': ApiSalarySalary;
       'api::salon-hour.salon-hour': ApiSalonHourSalonHour;
       'api::salon-service.salon-service': ApiSalonServiceSalonService;
-      'api::service-junior-map.service-junior-map': ApiServiceJuniorMapServiceJuniorMap;
       'api::service-provided.service-provided': ApiServiceProvidedServiceProvided;
       'api::service.service': ApiServiceService;
       'api::shift.shift': ApiShiftShift;

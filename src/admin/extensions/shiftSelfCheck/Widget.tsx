@@ -6,8 +6,8 @@ import { Box, Flex, Typography, Button, Loader, Divider } from '@strapi/design-s
  * Виджет «Kontrola směny» на дашборде Strapi для администраторов.
  *
  * Read-only самопроверка СЕГОДНЯШНЕЙ смены: показывает только то, что админ может
- * исправить в своих записях (расхождения Noona↔Strapi, записи с неверными суммами,
- * услуга ≠ Noona, отсутствующие записи) + денежную «Rozdíl» (только недостача).
+ * исправить в своих записях (расхождения календарь↔Strapi, записи с неверными
+ * суммами, услуга ≠ календарь, отсутствующие записи) + «Rozdíl» (только недостача).
  * НИЧЕГО не публикует и не показывает финметрик владельца. Данные с серверного
  * эндпоинта /api/shift-selfcheck.
  */
@@ -25,12 +25,12 @@ interface SelfCheck {
   ok: boolean;
   problemCount: number;
   rozdil: number; // ≤ 0 (плюс не показывается)
-  counts: { services: number; cash: number; workTime: number; noona: number };
-  noonaAvailable: boolean;
+  counts: { services: number; cash: number; workTime: number; calendar: number };
+  calendarAvailable: boolean;
   flagged: Flagged[];
-  noonaOnly: string[];
+  calendarOnly: string[];
   strapiOnly: string[];
-  serviceMismatch: { client: string; strapi: string; noona: string }[];
+  serviceMismatch: { client: string; strapi: string; calendar: string }[];
   missing: { services: boolean; cash: boolean; workTime: boolean };
 }
 
@@ -154,9 +154,10 @@ const ShiftSelfCheckWidget = () => {
   if (data.missing.services) summary.push('Provedené služby: chybí');
   if (data.missing.cash) summary.push('Pokladna: chybí');
   if (data.missing.workTime) summary.push('Pracovní doba: chybí');
-  if (data.noonaOnly.length) summary.push(`Nezapsaní klienti: ${data.noonaOnly.length}`);
+  if (data.calendarOnly.length) summary.push(`Nezapsaní klienti: ${data.calendarOnly.length}`);
   if (data.strapiOnly.length) summary.push(`Záznam navíc / překlep: ${data.strapiOnly.length}`);
-  if (data.serviceMismatch.length) summary.push(`Služba ≠ Noona: ${data.serviceMismatch.length}`);
+  if (data.serviceMismatch.length)
+    summary.push(`Služba ≠ kalendář: ${data.serviceMismatch.length}`);
   if (data.flagged.length) summary.push(`Špatně zadané platby: ${data.flagged.length}`);
 
   return (
@@ -199,13 +200,13 @@ const ShiftSelfCheckWidget = () => {
         </Section>
       )}
 
-      {/* Не записанные клиенты (есть в Noona, нет в Strapi) */}
-      {data.noonaOnly.length > 0 && (
+      {/* Не записанные клиенты (есть в календаре, нет в Strapi) */}
+      {data.calendarOnly.length > 0 && (
         <Section
-          title={`Nezapsaní klienti (${data.noonaOnly.length})`}
-          hint="Jsou v Nooně, ale chybí v záznamech — doplňte je."
+          title={`Nezapsaní klienti (${data.calendarOnly.length})`}
+          hint="Jsou v kalendáři, ale chybí v záznamech — doplňte je."
         >
-          {data.noonaOnly.map((n, i) => (
+          {data.calendarOnly.map((n, i) => (
             <Chip key={i} tone="danger">
               {n}
             </Chip>
@@ -213,11 +214,11 @@ const ShiftSelfCheckWidget = () => {
         </Section>
       )}
 
-      {/* Лишние записи / опечатки имён (нет в Noona) */}
+      {/* Лишние записи / опечатки имён (нет в календаре) */}
       {data.strapiOnly.length > 0 && (
         <Section
           title={`Záznam navíc / překlep (${data.strapiOnly.length})`}
-          hint="V záznamech je, v Nooně ne — překlep jména nebo záznam navíc."
+          hint="V záznamech je, v kalendáři ne — překlep jména nebo záznam navíc."
         >
           {data.strapiOnly.map((n, i) => (
             <Chip key={i} tone="warning">
@@ -227,11 +228,11 @@ const ShiftSelfCheckWidget = () => {
         </Section>
       )}
 
-      {/* Услуга ≠ Noona */}
+      {/* Услуга ≠ календарь */}
       {data.serviceMismatch.length > 0 && (
         <Section
-          title={`Služba ≠ Noona (${data.serviceMismatch.length})`}
-          hint="Připojená služba se liší od služby v Nooně."
+          title={`Služba ≠ kalendář (${data.serviceMismatch.length})`}
+          hint="Připojená služba se liší od služby v kalendáři."
         >
           {data.serviceMismatch.map((m, i) => (
             <Box key={i} paddingBottom={1}>
@@ -240,7 +241,7 @@ const ShiftSelfCheckWidget = () => {
               </Typography>
               <Typography variant="pi" textColor="neutral600">
                 {' '}
-                — záznam: {m.strapi} / Noona: {m.noona}
+                — záznam: {m.strapi} / kalendář: {m.calendar}
               </Typography>
             </Box>
           ))}
@@ -277,7 +278,7 @@ const ShiftSelfCheckWidget = () => {
       <Flex justifyContent="space-between" alignItems="center">
         <Typography variant="pi" textColor="neutral500">
           Dnes: {data.date}
-          {!data.noonaAvailable && ' · kontrola Noony nedostupná'}
+          {!data.calendarAvailable && ' · kontrola kalendáře nedostupná'}
         </Typography>
         <Button variant="tertiary" size="S" onClick={load}>
           Zkontrolovat znovu
