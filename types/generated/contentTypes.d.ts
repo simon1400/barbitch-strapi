@@ -2427,7 +2427,7 @@ export interface ApiTimeBlockTimeBlock extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     noonaBlockedId: Schema.Attribute.String;
     noonaEmployeeId: Schema.Attribute.String;
-    noonaKey: Schema.Attribute.String & Schema.Attribute.Unique;
+    noonaKey: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     startsAt: Schema.Attribute.DateTime;
     theme: Schema.Attribute.String;

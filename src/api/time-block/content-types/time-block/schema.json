@@ -39,8 +39,7 @@
       "type": "string"
     },
     "noonaKey": {
-      "type": "string",
-      "unique": true
+      "type": "string"
     },
     "noonaBlockedId": {
       "type": "string"
