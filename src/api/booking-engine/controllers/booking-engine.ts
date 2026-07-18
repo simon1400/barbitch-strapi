@@ -12,7 +12,9 @@ const handle = async (ctx, fn) => {
   try {
     ctx.body = await fn();
   } catch (e) {
-    if (e instanceof EngineError) {
+    // EngineError + LoyaltyError (duck-type: оба несут числовой status и строковый
+    // code — redemption_unavailable/loyalty_disabled/... из сервиса лояльности)
+    if (e instanceof EngineError || (typeof e?.status === 'number' && typeof e?.code === 'string')) {
       ctx.status = e.status;
       ctx.body = { error: { status: e.status, code: e.code, message: e.message } };
       return;
@@ -255,6 +257,60 @@ export default {
     const session = requireAdmin(ctx);
     if (!session) return;
     await handle(ctx, () => svc().adminDeleteBooking(ctx.params.id, session));
+  },
+
+  // ── лояльность bitchcard в календаре (walk-in флоу, К4) ──
+
+  // GET /api/engine/admin/bookings/:id/redemptions — награды клиента брони:
+  // available + применённая к этой брони (карточка в drawer)
+  async adminBookingRedemptions(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const booking = await strapi.documents('api::booking.booking').findOne({
+        documentId: ctx.params.id,
+        populate: { client: { fields: ['name'] } },
+      });
+      if (!booking) throw new EngineError(404, 'booking_not_found', 'Бронь не найдена');
+      const loyalty = strapi.service('api::loyalty.loyalty');
+      if (!loyalty.enabled()) return { enabled: false, redemptions: [] };
+      if (!booking.client?.documentId) return { enabled: true, redemptions: [] };
+      return {
+        enabled: true,
+        redemptions: await loyalty.redemptionsForAdmin(booking.client.documentId, ctx.params.id),
+      };
+    });
+  },
+
+  // POST /api/engine/admin/bookings/:id/redemption {code} — админ вводит код
+  // с карточки клиентки → скидка на totalPrice + redemption used (одна транзакция)
+  async adminApplyRedemption(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const booking = await strapi.documents('api::booking.booking').findOne({
+        documentId: ctx.params.id,
+        populate: { client: { fields: ['name'] } },
+      });
+      if (!booking) throw new EngineError(404, 'booking_not_found', 'Бронь не найдена');
+      const result = await strapi
+        .service('api::loyalty.loyalty')
+        .applyRedemptionToBooking(booking, ctx.request.body?.code, booking.client?.documentId);
+      strapi.log.info(
+        `booking-engine: admin ${session.username || '?'} applied redemption ${result.code} to booking ${ctx.params.id}`
+      );
+      return result;
+    });
+  },
+
+  // DELETE /api/engine/admin/bookings/:id/redemption — снять скидку (ошибочный ввод):
+  // redemption → available, цена брони восстанавливается
+  async adminReleaseRedemption(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      strapi.service('api::loyalty.loyalty').releaseRedemptionForBooking(ctx.params.id)
+    );
   },
 
   // POST /api/engine/admin/blocks {employee, date, startMin, endMin, title?}

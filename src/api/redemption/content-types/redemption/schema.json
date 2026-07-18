@@ -38,6 +38,9 @@
     "usedInBookingDocId": {
       "type": "string"
     },
+    "discountKc": {
+      "type": "integer"
+    },
     "expiresAt": {
       "type": "datetime"
     }

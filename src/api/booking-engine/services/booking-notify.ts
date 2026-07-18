@@ -251,6 +251,32 @@ const cancelNote = (v: BookingNotifyView) =>
 const manageCta = (v: BookingNotifyView) =>
   v.manageUrl ? { ctaLabel: 'SPRAVOVAT REZERVACI', ctaUrl: v.manageUrl } : {};
 
+// CTA věrnostního programu bitchcard (К4) — блок в письме-подтверждении.
+// Только при включённой программе (LOYALTY_ENABLED); без env писем это не касается.
+const loyaltyCtaHtml = () =>
+  process.env.LOYALTY_ENABLED === 'true'
+    ? `<tr>
+      <td class="px" style="padding:18px 24px 4px 24px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#0f0f0f;border:1px dashed #e71e6e;border-radius:8px;">
+          <tr>
+            <td style="padding:14px 16px;text-align:center;">
+              <div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#ffffff;margin:0 0 6px 0;">
+                ✦ Sbírejte nálepky bitchcard ✦
+              </div>
+              <div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:19px;color:#e6e6e6;margin:0 0 10px 0;">
+                Za každých utracených 1&nbsp;000&nbsp;Kč nálepka — odměny až sleva 50&nbsp;%.
+                Sledujte svou kartu v klientském kabinetu.
+              </div>
+              <a href="${SITE_URL}/cabinet" style="display:inline-block;color:#e71e6e;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;text-decoration:none;">
+                Můj účet →
+              </a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>`
+    : '';
+
 // ── транспорты ──
 
 export default {
@@ -316,6 +342,7 @@ export default {
       intro: `${esc(v.clientName || 'Dobrý den')}, těšíme se na vás v ${esc(SALON_NAME)}! Detaily vaší návštěvy najdete níže, pozvánku do kalendáře přikládáme.`,
       rows: bookingRows(v),
       note: cancelNote(v),
+      secondaryHtml: loyaltyCtaHtml(),
       ...manageCta(v),
     });
     const ics = buildIcs(v);

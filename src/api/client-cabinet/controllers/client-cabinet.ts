@@ -120,4 +120,14 @@ export default {
     if (!session) return;
     await handle(ctx, () => svc().loyalty(session));
   },
+
+  // POST /api/cabinet/bookings/:id/redemption {code} (JWT) — уплатнить свою
+  // награду bitchcard на свою бронь (скидка на totalPrice, redemption → used)
+  async applyRedemption(ctx) {
+    const session = requireClient(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      svc().applyRedemption(session, ctx.params.id, ctx.request.body?.code)
+    );
+  },
 };

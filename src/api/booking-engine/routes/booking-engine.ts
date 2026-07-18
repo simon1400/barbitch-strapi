@@ -41,6 +41,10 @@ export default {
     admin('POST', '/engine/admin/bookings', 'booking-engine.adminCreateBooking'),
     admin('PATCH', '/engine/admin/bookings/:id', 'booking-engine.adminPatchBooking'),
     admin('DELETE', '/engine/admin/bookings/:id', 'booking-engine.adminDeleteBooking'),
+    // лояльность bitchcard в календаре: награды клиента брони + применить/снять скидку по коду
+    admin('GET', '/engine/admin/bookings/:id/redemptions', 'booking-engine.adminBookingRedemptions'),
+    admin('POST', '/engine/admin/bookings/:id/redemption', 'booking-engine.adminApplyRedemption'),
+    admin('DELETE', '/engine/admin/bookings/:id/redemption', 'booking-engine.adminReleaseRedemption'),
     admin('POST', '/engine/admin/blocks', 'booking-engine.adminCreateBlock'),
     admin('PATCH', '/engine/admin/blocks/:id', 'booking-engine.adminPatchBlock'),
     admin('DELETE', '/engine/admin/blocks/:id', 'booking-engine.adminDeleteBlock'),

@@ -11,7 +11,19 @@ const PersonalUID = 'api::personal.personal';
 //   mistr_down  🟨↓ master received less than rule
 //   internal    🤝 internal worker-to-worker service: salon profit 0 is normal,
 //               only the master percentage is checked
-type VerifyFlag = 'ok' | 'sleva' | 'ztrata' | 'salon_up' | 'mistr_up' | 'mistr_down' | 'internal'
+//   sleva_bez_karty 🎟 informational (K4): record has a sale, but the client has
+//               no used bitchcard redemption on any booking of that day — the
+//               discount was given outside the loyalty program (check why).
+//               Only added when LOYALTY_ENABLED=true.
+type VerifyFlag =
+  | 'ok'
+  | 'sleva'
+  | 'ztrata'
+  | 'salon_up'
+  | 'mistr_up'
+  | 'mistr_down'
+  | 'internal'
+  | 'sleva_bez_karty'
 
 const FLAG_EMOJI: Record<VerifyFlag, string> = {
   ok: '🟩',
@@ -21,10 +33,11 @@ const FLAG_EMOJI: Record<VerifyFlag, string> = {
   mistr_up: '🟨',
   mistr_down: '🟨',
   internal: '🤝',
+  sleva_bez_karty: '🎟',
 }
 
 // Priority for the legacy single-emoji `verify` field (highest first)
-const FLAG_PRIORITY: VerifyFlag[] = ['ztrata', 'salon_up', 'mistr_down', 'mistr_up', 'internal', 'sleva', 'ok']
+const FLAG_PRIORITY: VerifyFlag[] = ['ztrata', 'salon_up', 'mistr_down', 'mistr_up', 'internal', 'sleva_bez_karty', 'sleva', 'ok']
 
 const dominantEmoji = (flags: VerifyFlag[]): string => {
   for (const f of FLAG_PRIORITY) if (flags.includes(f)) return FLAG_EMOJI[f]
@@ -160,6 +173,36 @@ async function validateOfferMoney(event: any) {
       saleRaw,
       internal,
     )
+
+    // K4 informational flag: sale present, but no used bitchcard redemption on the
+    // client's bookings of that day → the discount was given outside the program.
+    // Matching chain: service-provided (clientName+date) → bookings of the day by
+    // clientNameRaw → redemptions used with usedInBookingDocId among them.
+    if (flags.includes('sleva') && process.env.LOYALTY_ENABLED === 'true') {
+      try {
+        const clientName = String(dataCurrent.clientName ?? current?.clientName ?? '').trim()
+        const date = String(dataCurrent.date ?? current?.date ?? '').slice(0, 10)
+        let hasRedemption = false
+        if (clientName && date) {
+          const bookings = await strapi.documents('api::booking.booking').findMany({
+            filters: { date: { $eq: date }, clientNameRaw: { $eqi: clientName } },
+            fields: ['date'],
+            limit: 20,
+          })
+          const ids = bookings.map((b: any) => b.documentId)
+          if (ids.length) {
+            const used = await strapi.documents('api::redemption.redemption').count({
+              filters: { status: { $eq: 'used' }, usedInBookingDocId: { $in: ids } },
+            })
+            hasRedemption = used > 0
+          }
+        }
+        if (!hasRedemption) flags.push('sleva_bez_karty')
+      } catch (e: any) {
+        // lookup failure must not block saving the record
+        strapi.log.warn(`service-provided sleva_bez_karty check failed: ${e?.message || e}`)
+      }
+    }
 
     event.params.data.verifyFlags = flags
     event.params.data.verify = dominantEmoji(flags)

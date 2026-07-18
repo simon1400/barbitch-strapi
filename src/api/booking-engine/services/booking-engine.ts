@@ -968,6 +968,16 @@ export default {
     }
     strapi.log.info(`booking-engine: admin ${session?.username || '?'} patched booking ${bookingDocId} ${JSON.stringify(Object.keys(patch))}`);
 
+    // отмена админом: применённая скидка bitchcard возвращается клиенту
+    // (fire-and-forget, за гейтом LOYALTY_ENABLED; noshow скидку НЕ возвращает —
+    // спорные случаи админ решает вручную в /global/loyalty)
+    if (patch.status === 'cancelled' && booking.status !== 'cancelled') {
+      strapi
+        .service('api::loyalty.loyalty')
+        .releaseRedemptionForBooking(bookingDocId)
+        .catch((e) => strapi.log.error(`loyalty release on admin-cancel failed: ${e.message}`));
+    }
+
     // push мастеру всегда (независимо от чекбоксов): отмена > перенос
     const pushKind = patch.status === 'cancelled' ? 'cancel' : moving ? 'reschedule' : null;
     if (pushKind) {
@@ -1081,6 +1091,15 @@ export default {
       } catch (e) {
         strapi.log.warn(`booking-engine: tombstone write failed for ${booking.noonaEventId}: ${e.message}`);
       }
+    }
+    // применённая скидка bitchcard возвращается ДО удаления (бронь исчезает —
+    // цену восстанавливать не нужно, только сам redemption used → available)
+    try {
+      await strapi
+        .service('api::loyalty.loyalty')
+        .releaseRedemptionForBooking(bookingDocId, { restorePrice: false });
+    } catch (e) {
+      strapi.log.error(`loyalty release on delete failed: ${e.message}`);
     }
     await strapi.documents(BOOKING_UID).delete({ documentId: bookingDocId });
     strapi.log.info(
@@ -1321,6 +1340,13 @@ export default {
       throw new EngineError(409, 'too_late', `Rezervaci lze zrušit nejpozději ${CANCEL_MIN_HOURS} h předem`);
     }
     await strapi.documents(BOOKING_UID).update({ documentId: booking.documentId, data: { status: 'cancelled' } });
+
+    // применённая скидка bitchcard возвращается клиенту (used → available,
+    // цена брони восстанавливается) — fire-and-forget, за гейтом LOYALTY_ENABLED
+    strapi
+      .service('api::loyalty.loyalty')
+      .releaseRedemptionForBooking(booking.documentId)
+      .catch((e) => strapi.log.error(`loyalty release on cancel failed: ${e.message}`));
 
     // письмо клиенту + Telegram салону (fire-and-forget — отмена уже применена)
     strapi

@@ -127,7 +127,7 @@ export default {
 
     const rows = await strapi.documents(LOGIN_TOKEN_UID).findMany({
       filters: { tokenHash: { $eq: sha256(token) } },
-      populate: { client: { fields: ['name', 'email'] } },
+      populate: { client: { fields: ['name', 'email', 'emailVerifiedAt'] } },
       limit: 1,
     });
     const rec = rows[0];
@@ -143,6 +143,8 @@ export default {
     }
 
     const nowIso = new Date(now).toISOString();
+    // первый вход = e-mail ещё не был подтверждён (для бонуса за регистрацию ниже)
+    const firstLogin = !rec.client.emailVerifiedAt;
     await strapi.documents(LOGIN_TOKEN_UID).update({
       documentId: rec.documentId,
       data: { usedAt: nowIso },
@@ -151,6 +153,18 @@ export default {
       documentId: rec.client.documentId,
       data: { emailVerifiedAt: nowIso, cabinetLastLoginAt: nowIso },
     });
+
+    // Бонус за регистрацию 100 Kč (решение (е), К4): только при ПЕРВОМ входе,
+    // идемпотентно (одна signup-транзакция на клиента навсегда — страховка и от
+    // сброшенного emailVerifiedAt). Гейт LOYALTY_ENABLED внутри grantSignupBonus:
+    // без env тихо не начисляем, вход работает. Сбой бонуса вход НЕ роняет.
+    if (firstLogin) {
+      try {
+        await strapi.service('api::loyalty.loyalty').grantSignupBonus(rec.client.documentId);
+      } catch (e) {
+        strapi.log.error(`client-cabinet signup bonus failed (${rec.client.documentId}): ${e?.message || e}`);
+      }
+    }
 
     const jwt = signClientSession({
       clientDocId: rec.client.documentId,
@@ -353,5 +367,17 @@ export default {
       throw new CabinetError(503, 'loyalty_disabled', 'Věrnostní program není momentálně dostupný');
     }
     return loyaltySvc.loyaltyForClient(session.clientDocId);
+  },
+
+  // Уплатнение награды bitchcard на СВОЮ бронь (К4): анти-BOLA через
+  // resolveOwnBooking (чужая бронь = 404), владельца награды проверяет сервис
+  // лояльности (чужой код = 404 redemption_not_found). LoyaltyError
+  // пробрасывается — контроллер маппит status+code как CabinetError.
+  async applyRedemption(session, bookingDocId, code) {
+    this.assertEnabled();
+    const booking = await this.resolveOwnBooking(session, bookingDocId);
+    return strapi
+      .service('api::loyalty.loyalty')
+      .applyRedemptionToBooking(booking, code, session.clientDocId);
   },
 };

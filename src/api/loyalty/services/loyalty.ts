@@ -255,6 +255,196 @@ export default {
     return created;
   },
 
+  // ── применение награды к брони (К4) ──
+
+  // Скидка К БРОНИ клиента: percent → totalPrice×(1−v/100), fixed/voucher →
+  // max(0, totalPrice−v) — на ВЕСЬ чек визита (решение (г)/(д)). В одной
+  // knex-транзакции: redemption available→used (условный UPDATE по текущему
+  // статусу — защита от гонки/повтора) + totalPrice брони (priceOverride).
+  // clientDocId = ожидаемый владелец награды (кабинет: из JWT-сессии; админ:
+  // клиент брони) — чужой код даёт тот же 404, что несуществующий.
+  async applyRedemptionToBooking(booking, rawCode, clientDocId) {
+    this.assertEnabled();
+    const code = String(rawCode || '').trim().toUpperCase();
+    if (!code) throw new LoyaltyError(400, 'code_required', 'Zadejte kód slevy');
+    if (!clientDocId) throw new LoyaltyError(409, 'no_client', 'Rezervace nemá klienta');
+    if (!['active', 'checkedOut'].includes(booking.status)) {
+      throw new LoyaltyError(409, 'booking_not_active', 'Slevu lze uplatnit jen na aktivní rezervaci');
+    }
+    const totalPrice = booking.totalPrice != null ? Math.round(Number(booking.totalPrice)) : null;
+    if (totalPrice == null) throw new LoyaltyError(409, 'no_price', 'Rezervace nemá cenu');
+
+    const rows = await strapi.documents(REDEMPTION_UID).findMany({
+      filters: {
+        code: { $eq: code },
+        client: { documentId: { $eq: clientDocId } },
+      },
+      populate: { reward: true },
+      limit: 1,
+    });
+    const redemption = rows[0];
+    if (!redemption || !redemption.reward) {
+      throw new LoyaltyError(404, 'redemption_not_found', 'Kód slevy nenalezen');
+    }
+    if (redemption.status !== 'available') {
+      throw new LoyaltyError(409, 'redemption_unavailable', 'Sleva už byla uplatněna nebo vypršela');
+    }
+    if (redemption.expiresAt && new Date(redemption.expiresAt).getTime() < Date.now()) {
+      throw new LoyaltyError(409, 'redemption_unavailable', 'Platnost slevy vypršela');
+    }
+    // одна скидка на бронь
+    const already = await strapi.documents(REDEMPTION_UID).count({
+      filters: { status: { $eq: 'used' }, usedInBookingDocId: { $eq: booking.documentId } },
+    });
+    if (already > 0) {
+      throw new LoyaltyError(409, 'booking_has_redemption', 'Na rezervaci už je uplatněna sleva');
+    }
+
+    const reward = redemption.reward;
+    const value = Number(reward.discountValue) || 0;
+    const newPrice =
+      reward.discountType === 'percent'
+        ? Math.round(totalPrice * (1 - value / 100))
+        : Math.max(0, totalPrice - Math.round(value));
+    const discountKc = totalPrice - newPrice;
+
+    const knex = strapi.db.connection;
+    await knex.transaction(async (trx) => {
+      // идемпотентность/гонки: UPDATE проходит только пока статус available
+      const updated = await trx('redemptions')
+        .where({ document_id: redemption.documentId, status: 'available' })
+        .update({
+          status: 'used',
+          used_in_booking_doc_id: booking.documentId,
+          discount_kc: discountKc,
+          updated_at: new Date(),
+        });
+      if (updated !== 1) {
+        throw new LoyaltyError(409, 'redemption_unavailable', 'Sleva už byla uplatněna nebo vypršela');
+      }
+      await trx('bookings').where('document_id', booking.documentId).update({
+        total_price: newPrice,
+        price_override: true,
+        updated_at: new Date(),
+      });
+    });
+
+    strapi.log.info(
+      `loyalty: redemption ${code} (${reward.title}) applied to booking ${booking.documentId}: ${totalPrice} → ${newPrice} Kč`
+    );
+    return {
+      applied: true,
+      code,
+      reward: { title: reward.title, discountType: reward.discountType, discountValue: value },
+      discountKc,
+      totalPrice: newPrice,
+      originalPrice: totalPrice,
+    };
+  },
+
+  // Возврат награды при отмене/удалении брони (или ручном снятии админом):
+  // used → available + восстановление цены брони на discountKc. Тихий no-op,
+  // если на брони скидки нет. За гейтом LOYALTY_ENABLED (как вся программа).
+  async releaseRedemptionForBooking(bookingDocId, { restorePrice = true } = {}) {
+    if (!this.enabled()) return { released: 0 };
+    const rows = await strapi.documents(REDEMPTION_UID).findMany({
+      filters: { status: { $eq: 'used' }, usedInBookingDocId: { $eq: bookingDocId } },
+      limit: 1,
+    });
+    const redemption = rows[0];
+    if (!redemption) return { released: 0 };
+    const discountKc = Math.round(Number(redemption.discountKc) || 0);
+
+    const knex = strapi.db.connection;
+    await knex.transaction(async (trx) => {
+      const updated = await trx('redemptions')
+        .where({ document_id: redemption.documentId, status: 'used' })
+        .update({
+          status: 'available',
+          used_in_booking_doc_id: null,
+          discount_kc: null,
+          updated_at: new Date(),
+        });
+      if (updated !== 1) return; // кто-то успел раньше — no-op
+      if (restorePrice && discountKc > 0) {
+        // total_price = COALESCE(total_price,0) + discountKc — цена возвращается к до-скидочной
+        await trx('bookings')
+          .where('document_id', bookingDocId)
+          .update({
+            total_price: knex.raw('COALESCE(total_price, 0) + ?', [discountKc]),
+            updated_at: new Date(),
+          });
+      }
+    });
+    strapi.log.info(`loyalty: redemption ${redemption.code} released from booking ${bookingDocId} (+${discountKc} Kč back)`);
+    return { released: 1, code: redemption.code, discountKc };
+  },
+
+  // Награды клиента для админ-флоу (drawer календаря): available + применённая
+  // к конкретной брони (если передана).
+  async redemptionsForAdmin(clientDocId, bookingDocId = null) {
+    this.assertEnabled();
+    const filters = bookingDocId
+      ? {
+          $or: [
+            { status: { $eq: 'available' }, client: { documentId: { $eq: clientDocId } } },
+            { status: { $eq: 'used' }, usedInBookingDocId: { $eq: bookingDocId } },
+          ],
+        }
+      : { status: { $eq: 'available' }, client: { documentId: { $eq: clientDocId } } };
+    const rows = await strapi.documents(REDEMPTION_UID).findMany({
+      filters,
+      populate: { reward: true },
+      sort: 'createdAt:asc',
+      limit: 20,
+    });
+    return rows
+      .filter((r) => r.reward)
+      .map((r) => ({
+        documentId: r.documentId,
+        status: r.status,
+        code: r.code,
+        cardYear: r.cardYear,
+        expiresAt: r.expiresAt || null,
+        usedInBookingDocId: r.usedInBookingDocId || null,
+        discountKc: r.discountKc != null ? Number(r.discountKc) : null,
+        reward: {
+          title: r.reward.title,
+          thresholdKc: Number(r.reward.thresholdKc),
+          discountType: r.reward.discountType,
+          discountValue: Number(r.reward.discountValue),
+        },
+      }));
+  },
+
+  // ── бонус за регистрацию (решение (е): 100 Kč при первом входе в кабинет) ──
+  // Идемпотентно: одна signup-транзакция на клиента НАВСЕГДА (за всю историю,
+  // не per год). Сбой начисления не должен ронять вход — зовущий ловит сам.
+  async grantSignupBonus(clientDocId) {
+    if (!this.enabled() || !clientDocId) return { granted: 0 };
+    const existing = await strapi.documents(TX_UID).count({
+      filters: {
+        client: { documentId: { $eq: clientDocId } },
+        reason: { $eq: 'signup' },
+      },
+    });
+    if (existing > 0) return { granted: 0 };
+    const cardYear = Number(pragueDateOf(new Date()).slice(0, 4));
+    await strapi.documents(TX_UID).create({
+      data: {
+        client: clientDocId,
+        delta: SIGNUP_BONUS_KC,
+        reason: 'signup',
+        cardYear,
+        comment: 'Bonus za registraci do kabinetu',
+        createdByName: 'system',
+      },
+    });
+    // lifecycle afterCreate сам пересчитает награды (не bulk-режим)
+    strapi.log.info(`loyalty: signup bonus +${SIGNUP_BONUS_KC} Kč → client ${clientDocId}`);
+    return { granted: SIGNUP_BONUS_KC, cardYear };
+  },
+
   // Награды сгорают 31.12 карточного года (решение (б)).
   async expirePass() {
     const nowIso = new Date().toISOString();
