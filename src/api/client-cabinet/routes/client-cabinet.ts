@@ -17,5 +17,9 @@ export default {
     route('GET', '/cabinet/me', 'client-cabinet.me'),
     route('PATCH', '/cabinet/me', 'client-cabinet.patchMe'),
     route('GET', '/cabinet/bookings', 'client-cabinet.bookings'),
+    route('POST', '/cabinet/bookings/:id/cancel', 'client-cabinet.cancelBooking'),
+    route('GET', '/cabinet/bookings/:id/availability', 'client-cabinet.bookingAvailability'),
+    route('POST', '/cabinet/bookings/:id/reschedule', 'client-cabinet.rescheduleBooking'),
+    route('GET', '/cabinet/loyalty', 'client-cabinet.loyalty'),
   ],
 };

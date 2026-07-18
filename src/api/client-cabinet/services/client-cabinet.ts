@@ -238,9 +238,15 @@ export default {
       services,
       totalPrice: b.totalPrice != null ? Number(b.totalPrice) : null,
       employeeName: b.employee?.name || b.employeeNameRaw || null,
-      // Управление (отмена/перенос) — только активные НЕзеркальные брони:
-      // у зеркальных Noona-броней cancelToken отсутствует.
-      canManage: b.status === 'active' && Boolean(b.cancelToken),
+      startsAt: b.startsAt || null,
+      // Отмена из кабинета: любая активная бронь, вкл. зеркальные Noona-брони
+      // (cancelToken не нужен — JWT-флоу резолвит по documentId; create-only
+      // синк отменённую не воскресит). Правило 3ч проверяет сервер при действии.
+      canCancel: b.status === 'active',
+      // Перенос: только движковые брони (cancelToken) со снапшотом serviceDocId —
+      // зеркальным нечем пересчитать availability (услуга/вариант неизвестны движку).
+      canReschedule:
+        b.status === 'active' && Boolean(b.cancelToken) && Boolean(services[0]?.serviceDocId),
       // «Записаться znovu» — снапшот несёт serviceDocId (движковые брони).
       canRebook: services.some((s) => Boolean(s?.serviceDocId)),
     };
@@ -289,5 +295,63 @@ export default {
       upcoming: upcoming.map((b) => this.shapeBooking(b)),
       history: history.map((b) => this.shapeBooking(b)),
     };
+  },
+
+  // ── управление бронью из кабинета (К2): JWT-обёртки над manage-ядром движка ──
+  // Правила НЕ дублируются: 3ч/лимит переносов/slot_taken/письма/push — всё в
+  // cancelBookingCore / manageAvailabilityCore / rescheduleBookingCore (те же,
+  // что у токен-флоу /rezervace/{token}). EngineError пробрасывается наружу —
+  // контроллер маппит его так же, как CabinetError (status+code).
+
+  // Анти-BOLA: бронь резолвится СТРОГО с фильтром по клиенту из JWT-сессии.
+  // Чужая или несуществующая → одинаковый 404 (существование чужих не палим).
+  async resolveOwnBooking(session, bookingDocId) {
+    const id = String(bookingDocId || '').trim();
+    if (id) {
+      const rows = await strapi.documents(BOOKING_UID).findMany({
+        filters: {
+          documentId: { $eq: id },
+          client: { documentId: { $eq: session.clientDocId } },
+        },
+        populate: { employee: { fields: ['name'] } },
+        limit: 1,
+      });
+      if (rows.length) return rows[0];
+    }
+    throw new CabinetError(404, 'booking_not_found', 'Rezervace nenalezena');
+  },
+
+  async cancelBooking(session, bookingDocId) {
+    this.assertEnabled();
+    const booking = await this.resolveOwnBooking(session, bookingDocId);
+    return strapi.service('api::booking-engine.booking-engine').cancelBookingCore(booking);
+  },
+
+  async bookingAvailability(session, bookingDocId, fromDate, toDate) {
+    this.assertEnabled();
+    const booking = await this.resolveOwnBooking(session, bookingDocId);
+    return strapi
+      .service('api::booking-engine.booking-engine')
+      .manageAvailabilityCore(booking, fromDate, toDate);
+  },
+
+  async rescheduleBooking(session, bookingDocId, body) {
+    this.assertEnabled();
+    const booking = await this.resolveOwnBooking(session, bookingDocId);
+    return strapi
+      .service('api::booking-engine.booking-engine')
+      .rescheduleBookingCore(booking, { date: body?.date, time: body?.time });
+  },
+
+  // ── лояльность bitchcard (К3): данные цифровой карточки для UI К4 ──
+  // Отдельный env-гейт LOYALTY_ENABLED (независим от кабинета) → 503 loyalty_disabled.
+
+  async loyalty(session) {
+    this.assertEnabled();
+    const loyaltySvc = strapi.service('api::loyalty.loyalty');
+    if (!loyaltySvc.enabled()) {
+      throw new CabinetError(503, 'loyalty_disabled', 'Věrnostní program není momentálně dostupný');
+    }
+    return loyaltySvc.loyaltyForClient(session.clientDocId);
   },
 };

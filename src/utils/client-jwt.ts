@@ -18,7 +18,11 @@ export interface VerifiedClientSession extends ClientSession {
   exp: number
 }
 
+// Скользящая сессия (решение владельца К2): TTL 30 дней, визит в кабинет продлевает
+// срок (/me переподписывает токен старше 7 дней) → пока клиентка заходит хотя бы
+// раз в месяц, magic-link письмо ей больше не нужно.
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30 // 30 дней
+const RENEW_AFTER_SECONDS = 60 * 60 * 24 * 7 // токен старше 7 дней → переподписать
 
 const getSecret = (): string | null => {
   const secret = process.env.CLIENT_JWT_SECRET
@@ -66,6 +70,11 @@ export const verifyClientSession = (token: string | null | undefined): VerifiedC
     return null
   }
 }
+
+/** Скользящее продление: пора ли переподписать валидный токен свежим exp. */
+export const shouldRenewSession = (session: VerifiedClientSession): boolean =>
+  typeof session.iat === 'number' &&
+  Math.floor(Date.now() / 1000) - session.iat > RENEW_AFTER_SECONDS
 
 /** Pull the Bearer token out of a Koa/Strapi request context. */
 export const clientTokenFromCtx = (ctx: any): string | null => {

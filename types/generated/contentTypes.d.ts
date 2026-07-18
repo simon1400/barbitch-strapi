@@ -1594,6 +1594,46 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
   };
 }
 
+export interface ApiLoyaltyTransactionLoyaltyTransaction
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'loyalty_transactions';
+  info: {
+    description: '\u041A\u043E\u043F\u0438\u043B\u043A\u0430 bitchcard: \u00B1K\u010D per \u043A\u043B\u0438\u0435\u043D\u0442. \u0411\u0430\u043B\u0430\u043D\u0441 \u0433\u043E\u0434\u0430 = \u03A3 delta \u043F\u043E cardYear; \u043D\u0430\u043A\u043B\u0435\u0439\u043A\u0438 = floor(\u0431\u0430\u043B\u0430\u043D\u0441/1000)';
+    displayName: '\u041B\u043E\u044F\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u2014 \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438 (bitchcard)';
+    pluralName: 'loyalty-transactions';
+    singularName: 'loyalty-transaction';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    bookingDocId: Schema.Attribute.String & Schema.Attribute.Unique;
+    cardYear: Schema.Attribute.Integer & Schema.Attribute.Required;
+    client: Schema.Attribute.Relation<'manyToOne', 'api::client.client'>;
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    createdByName: Schema.Attribute.String;
+    delta: Schema.Attribute.Integer & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::loyalty-transaction.loyalty-transaction'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    reason: Schema.Attribute.Enumeration<
+      ['visit', 'manual', 'signup', 'referral']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'visit'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiNavigationNavigation extends Struct.SingleTypeSchema {
   collectionName: 'navigations';
   info: {
@@ -2047,6 +2087,80 @@ export interface ApiQrPayQrPay extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiRedemptionRedemption extends Struct.CollectionTypeSchema {
+  collectionName: 'redemptions';
+  info: {
+    description: '\u0414\u043E\u0441\u0442\u0438\u0433\u043D\u0443\u0442\u044B\u0435 \u043D\u0430\u0433\u0440\u0430\u0434\u044B bitchcard: available \u2192 used/expired. \u0423\u043D\u0438\u043A\u0430\u043B\u044C\u043D\u043E\u0441\u0442\u044C client+reward+cardYear (app-level)';
+    displayName: '\u041B\u043E\u044F\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u2014 \u043F\u043E\u0433\u0430\u0448\u0435\u043D\u0438\u044F (redemption)';
+    pluralName: 'redemptions';
+    singularName: 'redemption';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    cardYear: Schema.Attribute.Integer & Schema.Attribute.Required;
+    client: Schema.Attribute.Relation<'manyToOne', 'api::client.client'>;
+    code: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    expiresAt: Schema.Attribute.DateTime;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::redemption.redemption'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    reward: Schema.Attribute.Relation<'manyToOne', 'api::reward.reward'>;
+    status: Schema.Attribute.Enumeration<['available', 'used', 'expired']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'available'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    usedInBookingDocId: Schema.Attribute.String;
+  };
+}
+
+export interface ApiRewardReward extends Struct.CollectionTypeSchema {
+  collectionName: 'rewards';
+  info: {
+    description: '\u0421\u0442\u0443\u043F\u0435\u043D\u0438 \u0442\u0440\u0435\u043A\u0430 bitchcard: \u043F\u043E\u0440\u043E\u0433 K\u010D \u2192 \u0441\u043A\u0438\u0434\u043A\u0430/\u0444\u0438\u043A\u0441. \u0421\u0438\u0434 2026: 3000\u219220%, 5000\u2192400 K\u010D, 8000\u219250%';
+    displayName: '\u041B\u043E\u044F\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u2014 \u043D\u0430\u0433\u0440\u0430\u0434\u044B (\u0442\u0440\u0435\u043A bitchcard)';
+    pluralName: 'rewards';
+    singularName: 'reward';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    active: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    discountType: Schema.Attribute.Enumeration<
+      ['percent', 'fixed', 'voucher']
+    > &
+      Schema.Attribute.Required;
+    discountValue: Schema.Attribute.Integer & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::reward.reward'
+    > &
+      Schema.Attribute.Private;
+    order: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    publishedAt: Schema.Attribute.DateTime;
+    thresholdKc: Schema.Attribute.Integer & Schema.Attribute.Required;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -3257,6 +3371,7 @@ declare module '@strapi/strapi' {
       'api::extra-profit.extra-profit': ApiExtraProfitExtraProfit;
       'api::google-review.google-review': ApiGoogleReviewGoogleReview;
       'api::homepage.homepage': ApiHomepageHomepage;
+      'api::loyalty-transaction.loyalty-transaction': ApiLoyaltyTransactionLoyaltyTransaction;
       'api::navigation.navigation': ApiNavigationNavigation;
       'api::note.note': ApiNoteNote;
       'api::offer.offer': ApiOfferOffer;
@@ -3266,6 +3381,8 @@ declare module '@strapi/strapi' {
       'api::pricelist-page.pricelist-page': ApiPricelistPagePricelistPage;
       'api::push-subscription.push-subscription': ApiPushSubscriptionPushSubscription;
       'api::qr-pay.qr-pay': ApiQrPayQrPay;
+      'api::redemption.redemption': ApiRedemptionRedemption;
+      'api::reward.reward': ApiRewardReward;
       'api::salary.salary': ApiSalarySalary;
       'api::salon-hour.salon-hour': ApiSalonHourSalonHour;
       'api::salon-service.salon-service': ApiSalonServiceSalonService;

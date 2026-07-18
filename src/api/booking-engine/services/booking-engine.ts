@@ -1307,6 +1307,14 @@ export default {
 
   async postCancel(token) {
     const booking = await this.bookingByCancelToken(token);
+    return this.cancelBookingCore(booking);
+  },
+
+  // Ядро отмены клиентом: принимает уже-зарезолвленный booking-документ.
+  // Зовётся токен-флоу (postCancel) и кабинетом (К2, JWT) — правила/нотификации одни.
+  // Работает и для зеркальных Noona-броней (cancelToken не нужен) — create-only
+  // синк отменённую бронь не воскресит.
+  async cancelBookingCore(booking) {
     const info = this.cancelInfo(booking);
     if (booking.status !== 'active') throw new EngineError(409, 'not_active', 'Rezervace už není aktivní');
     if (!info.cancellable) {
@@ -1383,6 +1391,11 @@ export default {
   // её собственный интервал исключён из занятости (excludeBookingDocId).
   async manageAvailability(token, fromDate, toDate) {
     const booking = await this.bookingByCancelToken(token);
+    return this.manageAvailabilityCore(booking, fromDate, toDate);
+  },
+
+  // Ядро availability для переноса по уже-зарезолвленной брони (токен-флоу + кабинет).
+  async manageAvailabilityCore(booking, fromDate, toDate) {
     const sel = this._assertReschedulable(booking);
     return this.getAvailability({
       ...sel,
@@ -1395,6 +1408,13 @@ export default {
 
   async postReschedule(token, { date, time }) {
     const booking = await this.bookingByCancelToken(token);
+    return this.rescheduleBookingCore(booking, { date, time });
+  },
+
+  // Ядро переноса по уже-зарезолвленной брони (токен-флоу + кабинет): валидация слота
+  // через ту же availability, что видит клиент, raw UPDATE под EXCLUDE-constraint,
+  // сброс remindersSent, письмо + Telegram + push — как в токен-флоу.
+  async rescheduleBookingCore(booking, { date, time }) {
     const sel = this._assertReschedulable(booking);
     if (!isDateStr(date)) throw new EngineError(400, 'bad_date', 'date должен быть YYYY-MM-DD');
     if (!/^\d{2}:\d{2}$/.test(String(time || ''))) throw new EngineError(400, 'bad_time', 'time должен быть HH:MM');
@@ -1455,8 +1475,13 @@ export default {
       .notifyBookingEvent(booking.documentId, 'reschedule', { from: fromInfo })
       .catch((e) => strapi.log.error(`push client-reschedule failed: ${e.message}`));
 
-    const fresh = await this.bookingByCancelToken(token);
-    return { rescheduled: true, ...this.manageInfo(fresh) };
+    // рефетч по documentId (не по токену — ядро общее для токен- и JWT-флоу)
+    const freshRows = await strapi.documents(BOOKING_UID).findMany({
+      filters: { documentId: { $eq: booking.documentId } },
+      populate: { employee: { fields: ['name'] } },
+      limit: 1,
+    });
+    return { rescheduled: true, ...this.manageInfo(freshRows[0] || booking) };
   },
 
   // ── крон: чистка протухших холдов ──

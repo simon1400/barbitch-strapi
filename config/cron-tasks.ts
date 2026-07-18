@@ -52,6 +52,26 @@ export default {
       tz: 'Europe/Prague',
     },
   },
+  // Лояльность bitchcard (К3): начисление копилки по checkedOut-броням окна
+  // последних дней (идемпотентно по bookingDocId) + авто-награды при пересечении
+  // порогов + expire-проход. Выключено по умолчанию: ТОЛЬКО env LOYALTY_ENABLED=true.
+  loyaltyDaily: {
+    task: async ({ strapi }) => {
+      if (process.env.LOYALTY_ENABLED !== 'true') return;
+      try {
+        const res = await strapi.service('api::loyalty.loyalty').runDaily();
+        strapi.log.info(
+          `loyalty daily: +${res.created} tx (${res.skipped} skip), redemptions +${res.redemptionsCreated}, expired ${res.expired}`
+        );
+      } catch (e) {
+        strapi.log.error(`loyalty daily cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '30 4 * * *', // каждый день в 04:30 (после закрытия смены, до дайджеста)
+      tz: 'Europe/Prague',
+    },
+  },
   dailyDigest: {
     task: async ({ strapi }) => {
       try {
