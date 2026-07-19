@@ -138,4 +138,13 @@ export default {
     if (!session) return;
     await handle(ctx, () => svc().releaseRedemption(session, ctx.params.id));
   },
+
+  // POST /api/cabinet/loyalty/voucher {recipientName?, recipientEmail?} (JWT) —
+  // обналичить бонусную voucher-награду (награда C). Ответ {idVoucher, sum,
+  // recipientName, email} → клиент дальше шлёт /api/send-mail-voucher.
+  async claimVoucher(ctx) {
+    const session = requireClient(ctx);
+    if (!session) return;
+    await handle(ctx, () => svc().claimVoucher(session, ctx.request.body || {}));
+  },
 };

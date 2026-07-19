@@ -412,4 +412,20 @@ export default {
     }
     return strapi.service('api::loyalty.loyalty').releaseRedemptionForBooking(booking.documentId);
   },
+
+  // Получение бонусного подарочного ваучера (награда C, К4): «обналичить» available
+  // voucher-награду в реальный voucher-запись. Себе или в подарок (recipientName +
+  // recipientEmail). Владелец награды = клиент из JWT-сессии (resolveOwn не нужен —
+  // награда не привязана к брони). Само PDF-письмо шлёт клиент (/api/send-mail-voucher).
+  async claimVoucher(session, body) {
+    this.assertEnabled();
+    const loyaltySvc = strapi.service('api::loyalty.loyalty');
+    if (!loyaltySvc.enabled()) {
+      throw new CabinetError(503, 'loyalty_disabled', 'Věrnostní program není momentálně dostupný');
+    }
+    return loyaltySvc.claimVoucherReward(session.clientDocId, {
+      recipientName: body?.recipientName,
+      recipientEmail: body?.recipientEmail,
+    });
+  },
 };
