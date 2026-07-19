@@ -22,5 +22,6 @@ export default {
     route('POST', '/cabinet/bookings/:id/reschedule', 'client-cabinet.rescheduleBooking'),
     route('GET', '/cabinet/loyalty', 'client-cabinet.loyalty'),
     route('POST', '/cabinet/bookings/:id/redemption', 'client-cabinet.applyRedemption'),
+    route('DELETE', '/cabinet/bookings/:id/redemption', 'client-cabinet.releaseRedemption'),
   ],
 };

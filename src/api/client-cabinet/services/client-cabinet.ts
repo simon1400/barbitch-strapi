@@ -239,7 +239,7 @@ export default {
 
   // ── брони клиента ──
 
-  shapeBooking(b) {
+  shapeBooking(b, discount = null) {
     const dateStr = String(b.date || '');
     const services = Array.isArray(b.services) ? b.services : [];
     return {
@@ -251,6 +251,16 @@ export default {
       arrived: Boolean(b.arrived),
       services,
       totalPrice: b.totalPrice != null ? Number(b.totalPrice) : null,
+      // Применённая скидка bitchcard (used-redemption по этой брони) — чтобы
+      // клиент видел, что цена уже со slevou, сколько скинуто и какая награда.
+      discount:
+        discount && discount.discountKc != null
+          ? {
+              discountKc: discount.discountKc,
+              rewardTitle: discount.rewardTitle || null,
+              code: discount.code || null,
+            }
+          : null,
       employeeName: b.employee?.name || b.employeeNameRaw || null,
       startsAt: b.startsAt || null,
       // Отмена из кабинета: любая активная бронь, вкл. зеркальные Noona-брони
@@ -305,9 +315,18 @@ export default {
       }),
     ]);
 
+    // Применённые скидки bitchcard для всех броней (тихо [] при выкл. программе)
+    let discountMap = {};
+    try {
+      const ids = [...upcoming, ...history].map((b) => b.documentId);
+      discountMap = await strapi.service('api::loyalty.loyalty').usedRedemptionsForBookings(ids);
+    } catch (e) {
+      strapi.log.warn(`cabinet: usedRedemptionsForBookings failed: ${e?.message || e}`);
+    }
+
     return {
-      upcoming: upcoming.map((b) => this.shapeBooking(b)),
-      history: history.map((b) => this.shapeBooking(b)),
+      upcoming: upcoming.map((b) => this.shapeBooking(b, discountMap[b.documentId])),
+      history: history.map((b) => this.shapeBooking(b, discountMap[b.documentId])),
     };
   },
 
@@ -379,5 +398,18 @@ export default {
     return strapi
       .service('api::loyalty.loyalty')
       .applyRedemptionToBooking(booking, code, session.clientDocId);
+  },
+
+  // Снятие применённой награды со СВОЕЙ брони (К4): анти-BOLA через
+  // resolveOwnBooking. Только на активной (будущей) брони — прошедшую/отменённую
+  // трогать нет смысла. Награда возвращается в трек (used → available), цена
+  // восстанавливается на discountKc. Тихий no-op, если скидки на брони нет.
+  async releaseRedemption(session, bookingDocId) {
+    this.assertEnabled();
+    const booking = await this.resolveOwnBooking(session, bookingDocId);
+    if (booking.status !== 'active') {
+      throw new CabinetError(409, 'booking_not_active', 'Slevu lze zrušit jen u aktivní rezervace');
+    }
+    return strapi.service('api::loyalty.loyalty').releaseRedemptionForBooking(booking.documentId);
   },
 };

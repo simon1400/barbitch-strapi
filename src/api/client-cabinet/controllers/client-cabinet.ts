@@ -130,4 +130,12 @@ export default {
       svc().applyRedemption(session, ctx.params.id, ctx.request.body?.code)
     );
   },
+
+  // DELETE /api/cabinet/bookings/:id/redemption (JWT) — снять применённую скидку
+  // со своей активной брони (награда возвращается в трек, цена восстанавливается)
+  async releaseRedemption(ctx) {
+    const session = requireClient(ctx);
+    if (!session) return;
+    await handle(ctx, () => svc().releaseRedemption(session, ctx.params.id));
+  },
 };

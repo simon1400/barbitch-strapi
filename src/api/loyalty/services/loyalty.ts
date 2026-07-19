@@ -382,6 +382,30 @@ export default {
 
   // Награды клиента для админ-флоу (drawer календаря): available + применённая
   // к конкретной брони (если передана).
+  // Карта применённых скидок по броням: bookingDocId → {code, discountKc,
+  // rewardTitle}. Для отображения «✓ Sleva −X Kč» в списке броней кабинета.
+  // Пустая карта, если программа выключена (тихо, вход/список не роняем).
+  async usedRedemptionsForBookings(bookingDocIds) {
+    if (!this.enabled() || !Array.isArray(bookingDocIds) || bookingDocIds.length === 0) {
+      return {};
+    }
+    const rows = await strapi.documents(REDEMPTION_UID).findMany({
+      filters: { status: { $eq: 'used' }, usedInBookingDocId: { $in: bookingDocIds } },
+      populate: { reward: { fields: ['title', 'discountType', 'discountValue'] } },
+      limit: 200,
+    });
+    const map = {};
+    for (const r of rows) {
+      if (!r.usedInBookingDocId) continue;
+      map[r.usedInBookingDocId] = {
+        code: r.code || null,
+        discountKc: r.discountKc != null ? Number(r.discountKc) : null,
+        rewardTitle: r.reward?.title || null,
+      };
+    }
+    return map;
+  },
+
   async redemptionsForAdmin(clientDocId, bookingDocId = null) {
     this.assertEnabled();
     const filters = bookingDocId
