@@ -12,7 +12,9 @@ const handle = async (ctx, fn) => {
   try {
     ctx.body = await fn();
   } catch (e) {
-    if (e instanceof EngineError) {
+    // EngineError + LoyaltyError (duck-type: оба несут числовой status и строковый
+    // code — redemption_unavailable/loyalty_disabled/... из сервиса лояльности)
+    if (e instanceof EngineError || (typeof e?.status === 'number' && typeof e?.code === 'string')) {
       ctx.status = e.status;
       ctx.body = { error: { status: e.status, code: e.code, message: e.message } };
       return;
@@ -141,6 +143,26 @@ export default {
     await handle(ctx, () => svc().postCancel(ctx.params.token));
   },
 
+  // ── дозапись с thank-you (аутентификация cancelToken исходной брони) ──
+
+  // GET /api/engine/rebook/:token/offers — предложения дозаписи (другие категории,
+  // окно мастера сразу после конца визита, −15%, таймер REBOOK_OFFER_TTL_MIN)
+  async rebookOffers(ctx) {
+    await handle(ctx, () => strapi.service('api::booking-engine.rebook').offers(ctx.params.token));
+  },
+
+  // POST /api/engine/rebook/:token {service, employee} — дозапись в 1 клик
+  // (клиент из исходной брони, цена −15% с priceOverride, серверная пере-валидация окна)
+  async rebookCreate(ctx) {
+    const b = ctx.request.body || {};
+    await handle(ctx, () =>
+      strapi.service('api::booking-engine.rebook').create(ctx.params.token, {
+        serviceDocId: b.service,
+        employeeDocId: b.employee,
+      })
+    );
+  },
+
   // ── управление бронью клиентом по токену (страница /rezervace/{token}) ──
 
   // GET /api/engine/manage/:token — детали брони + флаги cancellable/reschedulable
@@ -255,6 +277,87 @@ export default {
     const session = requireAdmin(ctx);
     if (!session) return;
     await handle(ctx, () => svc().adminDeleteBooking(ctx.params.id, session));
+  },
+
+  // ── лояльность bitchcard в календаре (walk-in флоу, К4) ──
+
+  // GET /api/engine/admin/bookings/:id/redemptions — награды клиента брони:
+  // available + применённая к этой брони (карточка в drawer)
+  async adminBookingRedemptions(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const booking = await strapi.documents('api::booking.booking').findOne({
+        documentId: ctx.params.id,
+        populate: { client: { fields: ['name'] } },
+      });
+      if (!booking) throw new EngineError(404, 'booking_not_found', 'Бронь не найдена');
+      const loyalty = strapi.service('api::loyalty.loyalty');
+      if (!loyalty.enabled()) return { enabled: false, redemptions: [] };
+      if (!booking.client?.documentId) return { enabled: true, redemptions: [] };
+      return {
+        enabled: true,
+        redemptions: await loyalty.redemptionsForAdmin(booking.client.documentId, ctx.params.id),
+      };
+    });
+  },
+
+  // POST /api/engine/admin/bookings/:id/redemption {code} — админ вводит код
+  // с карточки клиентки → скидка на totalPrice + redemption used (одна транзакция)
+  async adminApplyRedemption(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const booking = await strapi.documents('api::booking.booking').findOne({
+        documentId: ctx.params.id,
+        populate: { client: { fields: ['name'] } },
+      });
+      if (!booking) throw new EngineError(404, 'booking_not_found', 'Бронь не найдена');
+      const result = await strapi
+        .service('api::loyalty.loyalty')
+        .applyRedemptionToBooking(booking, ctx.request.body?.code, booking.client?.documentId);
+      strapi.log.info(
+        `booking-engine: admin ${session.username || '?'} applied redemption ${result.code} to booking ${ctx.params.id}`
+      );
+      return result;
+    });
+  },
+
+  // DELETE /api/engine/admin/bookings/:id/redemption — снять скидку (ошибочный ввод):
+  // redemption → available, цена брони восстанавливается
+  async adminReleaseRedemption(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      strapi.service('api::loyalty.loyalty').releaseRedemptionForBooking(ctx.params.id)
+    );
+  },
+
+  // DELETE /api/engine/admin/bookings/:id/rebook-discount — снять скидку дозаписи
+  // (цена брони возвращается к полной, скидка помечается applied:false)
+  async adminRemoveRebookDiscount(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const result = await strapi.service('api::booking-engine.rebook').removeDiscount(ctx.params.id);
+      strapi.log.info(
+        `booking-engine: admin ${session.username || '?'} removed rebook discount from booking ${ctx.params.id}`
+      );
+      return result;
+    });
+  },
+
+  // POST /api/engine/admin/bookings/:id/rebook-discount — вернуть снятую скидку дозаписи
+  async adminRestoreRebookDiscount(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const result = await strapi.service('api::booking-engine.rebook').restoreDiscount(ctx.params.id);
+      strapi.log.info(
+        `booking-engine: admin ${session.username || '?'} restored rebook discount on booking ${ctx.params.id}`
+      );
+      return result;
+    });
   },
 
   // POST /api/engine/admin/blocks {employee, date, startMin, endMin, title?}

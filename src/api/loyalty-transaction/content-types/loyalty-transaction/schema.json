@@ -1,0 +1,45 @@
+{
+  "kind": "collectionType",
+  "collectionName": "loyalty_transactions",
+  "info": {
+    "singularName": "loyalty-transaction",
+    "pluralName": "loyalty-transactions",
+    "displayName": "Лояльность — транзакции (bitchcard)",
+    "description": "Копилка bitchcard: ±Kč per клиент. Баланс года = Σ delta по cardYear; наклейки = floor(баланс/1000)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "client": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::client.client"
+    },
+    "delta": {
+      "type": "integer",
+      "required": true
+    },
+    "reason": {
+      "type": "enumeration",
+      "enum": ["visit", "manual", "signup", "referral"],
+      "default": "visit",
+      "required": true
+    },
+    "bookingDocId": {
+      "type": "string",
+      "unique": true
+    },
+    "cardYear": {
+      "type": "integer",
+      "required": true
+    },
+    "comment": {
+      "type": "text"
+    },
+    "createdByName": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "kind": "collectionType",
+  "collectionName": "rewards",
+  "info": {
+    "singularName": "reward",
+    "pluralName": "rewards",
+    "displayName": "Лояльность — награды (трек bitchcard)",
+    "description": "Ступени трека bitchcard: порог Kč → скидка/фикс. Сид 2026: 3000→20%, 5000→400 Kč, 8000→50%"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "thresholdKc": {
+      "type": "integer",
+      "required": true
+    },
+    "discountType": {
+      "type": "enumeration",
+      "enum": ["percent", "fixed", "voucher"],
+      "required": true
+    },
+    "discountValue": {
+      "type": "integer",
+      "required": true
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "order": {
+      "type": "integer",
+      "default": 0
+    }
+  }
+}

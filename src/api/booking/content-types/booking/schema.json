@@ -107,6 +107,9 @@
     },
     "label": {
       "type": "json"
+    },
+    "discount": {
+      "type": "json"
     }
   }
 }

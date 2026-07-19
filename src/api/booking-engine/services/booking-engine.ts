@@ -606,6 +606,8 @@ export default {
         cancel_token: data.cancelToken,
         engine_employee_id: data.employeeDocId,
         created_by_name: data.createdByName || '',
+        // структурированная скидка (rebook −15% и т.п.) — управляется из admin-drawer
+        discount: data.discount ? JSON.stringify(data.discount) : null,
         price_override: Boolean(data.priceOverride),
         // true только для админских броней поверх занятого времени (см. adminCreateBooking);
         // брони с сайта всегда false → остаются под защитой EXCLUDE-constraint
@@ -969,6 +971,22 @@ export default {
     }
     strapi.log.info(`booking-engine: admin ${session?.username || '?'} patched booking ${bookingDocId} ${JSON.stringify(Object.keys(patch))}`);
 
+    // отмена админом: применённая скидка bitchcard возвращается клиенту
+    // (fire-and-forget, за гейтом LOYALTY_ENABLED; noshow скидку НЕ возвращает —
+    // спорные случаи админ решает вручную в /global/loyalty)
+    if (patch.status === 'cancelled' && booking.status !== 'cancelled') {
+      strapi
+        .service('api::loyalty.loyalty')
+        .releaseRedemptionForBooking(bookingDocId)
+        .catch((e) => strapi.log.error(`loyalty release on admin-cancel failed: ${e.message}`));
+      // дозаписи, чьим якорем была эта бронь, теряют rebook-скидку (noshow НЕ трогает —
+      // как и bitchcard, спорное админ решает вручную в drawer)
+      strapi
+        .service('api::booking-engine.rebook')
+        .revokeDiscountsForAnchor(bookingDocId)
+        .catch((e) => strapi.log.error(`rebook revoke on admin-cancel failed: ${e.message}`));
+    }
+
     // push мастеру всегда (независимо от чекбоксов): отмена > перенос
     const pushKind = patch.status === 'cancelled' ? 'cancel' : moving ? 'reschedule' : null;
     if (pushKind) {
@@ -1082,6 +1100,21 @@ export default {
       } catch (e) {
         strapi.log.warn(`booking-engine: tombstone write failed for ${booking.noonaEventId}: ${e.message}`);
       }
+    }
+    // применённая скидка bitchcard возвращается ДО удаления (бронь исчезает —
+    // цену восстанавливать не нужно, только сам redemption used → available)
+    try {
+      await strapi
+        .service('api::loyalty.loyalty')
+        .releaseRedemptionForBooking(bookingDocId, { restorePrice: false });
+    } catch (e) {
+      strapi.log.error(`loyalty release on delete failed: ${e.message}`);
+    }
+    // удаляемая бронь могла быть якорем rebook-скидки — дозаписи на неё теряют −15%
+    try {
+      await strapi.service('api::booking-engine.rebook').revokeDiscountsForAnchor(bookingDocId);
+    } catch (e) {
+      strapi.log.error(`rebook revoke on delete failed: ${e.message}`);
     }
     await strapi.documents(BOOKING_UID).delete({ documentId: bookingDocId });
     strapi.log.info(
@@ -1333,12 +1366,34 @@ export default {
 
   async postCancel(token) {
     const booking = await this.bookingByCancelToken(token);
+    return this.cancelBookingCore(booking);
+  },
+
+  // Ядро отмены клиентом: принимает уже-зарезолвленный booking-документ.
+  // Зовётся токен-флоу (postCancel) и кабинетом (К2, JWT) — правила/нотификации одни.
+  // Работает и для зеркальных Noona-броней (cancelToken не нужен) — create-only
+  // синк отменённую бронь не воскресит.
+  async cancelBookingCore(booking) {
     const info = this.cancelInfo(booking);
     if (booking.status !== 'active') throw new EngineError(409, 'not_active', 'Rezervace už není aktivní');
     if (!info.cancellable) {
       throw new EngineError(409, 'too_late', `Rezervaci lze zrušit nejpozději ${CANCEL_MIN_HOURS} h předem`);
     }
     await strapi.documents(BOOKING_UID).update({ documentId: booking.documentId, data: { status: 'cancelled' } });
+
+    // применённая скидка bitchcard возвращается клиенту (used → available,
+    // цена брони восстанавливается) — fire-and-forget, за гейтом LOYALTY_ENABLED
+    strapi
+      .service('api::loyalty.loyalty')
+      .releaseRedemptionForBooking(booking.documentId)
+      .catch((e) => strapi.log.error(`loyalty release on cancel failed: ${e.message}`));
+
+    // анти-мухлёж дозаписи: отменённая бронь могла быть якорем rebook-скидки —
+    // дозаписи на неё теряют −15% (иначе клиент оставил бы только скидочную бронь)
+    strapi
+      .service('api::booking-engine.rebook')
+      .revokeDiscountsForAnchor(booking.documentId)
+      .catch((e) => strapi.log.error(`rebook revoke on cancel failed: ${e.message}`));
 
     // письмо клиенту + Telegram салону (fire-and-forget — отмена уже применена)
     strapi
@@ -1409,6 +1464,11 @@ export default {
   // её собственный интервал исключён из занятости (excludeBookingDocId).
   async manageAvailability(token, fromDate, toDate) {
     const booking = await this.bookingByCancelToken(token);
+    return this.manageAvailabilityCore(booking, fromDate, toDate);
+  },
+
+  // Ядро availability для переноса по уже-зарезолвленной брони (токен-флоу + кабинет).
+  async manageAvailabilityCore(booking, fromDate, toDate) {
     const sel = this._assertReschedulable(booking);
     return this.getAvailability({
       ...sel,
@@ -1421,6 +1481,13 @@ export default {
 
   async postReschedule(token, { date, time }) {
     const booking = await this.bookingByCancelToken(token);
+    return this.rescheduleBookingCore(booking, { date, time });
+  },
+
+  // Ядро переноса по уже-зарезолвленной брони (токен-флоу + кабинет): валидация слота
+  // через ту же availability, что видит клиент, raw UPDATE под EXCLUDE-constraint,
+  // сброс remindersSent, письмо + Telegram + push — как в токен-флоу.
+  async rescheduleBookingCore(booking, { date, time }) {
     const sel = this._assertReschedulable(booking);
     if (!isDateStr(date)) throw new EngineError(400, 'bad_date', 'date должен быть YYYY-MM-DD');
     if (!/^\d{2}:\d{2}$/.test(String(time || ''))) throw new EngineError(400, 'bad_time', 'time должен быть HH:MM');
@@ -1470,6 +1537,19 @@ export default {
       `booking-engine: client rescheduled booking ${booking.documentId} ${fromInfo.date} ${fromInfo.time} → ${date} ${time}`
     );
 
+    // анти-мухлёж дозаписи (fire-and-forget): перенесённая клиентом бронь перестаёт
+    // быть «hned po vás» — её собственная rebook-скидка снимается; и если она была
+    // якорем чьей-то дозаписи, та тоже теряет −15%. Админский перенос это НЕ трогает
+    // (adminPatchBooking — админ управляет скидкой из drawer сам).
+    strapi
+      .service('api::booking-engine.rebook')
+      .revokeOwnDiscount(booking.documentId)
+      .catch((e) => strapi.log.error(`rebook self-revoke on reschedule failed: ${e.message}`));
+    strapi
+      .service('api::booking-engine.rebook')
+      .revokeDiscountsForAnchor(booking.documentId)
+      .catch((e) => strapi.log.error(`rebook revoke on reschedule failed: ${e.message}`));
+
     // письмо клиенту + Telegram салону (fire-and-forget — перенос уже применён)
     strapi
       .service('api::booking-engine.booking-notify')
@@ -1481,8 +1561,13 @@ export default {
       .notifyBookingEvent(booking.documentId, 'reschedule', { from: fromInfo })
       .catch((e) => strapi.log.error(`push client-reschedule failed: ${e.message}`));
 
-    const fresh = await this.bookingByCancelToken(token);
-    return { rescheduled: true, ...this.manageInfo(fresh) };
+    // рефетч по documentId (не по токену — ядро общее для токен- и JWT-флоу)
+    const freshRows = await strapi.documents(BOOKING_UID).findMany({
+      filters: { documentId: { $eq: booking.documentId } },
+      populate: { employee: { fields: ['name'] } },
+      limit: 1,
+    });
+    return { rescheduled: true, ...this.manageInfo(freshRows[0] || booking) };
   },
 
   // ── крон: чистка протухших холдов ──

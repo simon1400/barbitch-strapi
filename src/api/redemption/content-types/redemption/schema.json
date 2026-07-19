@@ -1,0 +1,48 @@
+{
+  "kind": "collectionType",
+  "collectionName": "redemptions",
+  "info": {
+    "singularName": "redemption",
+    "pluralName": "redemptions",
+    "displayName": "Лояльность — погашения (redemption)",
+    "description": "Достигнутые награды bitchcard: available → used/expired. Уникальность client+reward+cardYear (app-level)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "client": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::client.client"
+    },
+    "reward": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::reward.reward"
+    },
+    "cardYear": {
+      "type": "integer",
+      "required": true
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["available", "used", "expired"],
+      "default": "available",
+      "required": true
+    },
+    "code": {
+      "type": "string"
+    },
+    "usedInBookingDocId": {
+      "type": "string"
+    },
+    "discountKc": {
+      "type": "integer"
+    },
+    "expiresAt": {
+      "type": "datetime"
+    }
+  }
+}
