@@ -978,6 +978,12 @@ export default {
         .service('api::loyalty.loyalty')
         .releaseRedemptionForBooking(bookingDocId)
         .catch((e) => strapi.log.error(`loyalty release on admin-cancel failed: ${e.message}`));
+      // дозаписи, чьим якорем была эта бронь, теряют rebook-скидку (noshow НЕ трогает —
+      // как и bitchcard, спорное админ решает вручную в drawer)
+      strapi
+        .service('api::booking-engine.rebook')
+        .revokeDiscountsForAnchor(bookingDocId)
+        .catch((e) => strapi.log.error(`rebook revoke on admin-cancel failed: ${e.message}`));
     }
 
     // push мастеру всегда (независимо от чекбоксов): отмена > перенос
@@ -1102,6 +1108,12 @@ export default {
         .releaseRedemptionForBooking(bookingDocId, { restorePrice: false });
     } catch (e) {
       strapi.log.error(`loyalty release on delete failed: ${e.message}`);
+    }
+    // удаляемая бронь могла быть якорем rebook-скидки — дозаписи на неё теряют −15%
+    try {
+      await strapi.service('api::booking-engine.rebook').revokeDiscountsForAnchor(bookingDocId);
+    } catch (e) {
+      strapi.log.error(`rebook revoke on delete failed: ${e.message}`);
     }
     await strapi.documents(BOOKING_UID).delete({ documentId: bookingDocId });
     strapi.log.info(
@@ -1350,6 +1362,13 @@ export default {
       .releaseRedemptionForBooking(booking.documentId)
       .catch((e) => strapi.log.error(`loyalty release on cancel failed: ${e.message}`));
 
+    // анти-мухлёж дозаписи: отменённая бронь могла быть якорем rebook-скидки —
+    // дозаписи на неё теряют −15% (иначе клиент оставил бы только скидочную бронь)
+    strapi
+      .service('api::booking-engine.rebook')
+      .revokeDiscountsForAnchor(booking.documentId)
+      .catch((e) => strapi.log.error(`rebook revoke on cancel failed: ${e.message}`));
+
     // письмо клиенту + Telegram салону (fire-and-forget — отмена уже применена)
     strapi
       .service('api::booking-engine.booking-notify')
@@ -1491,6 +1510,19 @@ export default {
     strapi.log.info(
       `booking-engine: client rescheduled booking ${booking.documentId} ${fromInfo.date} ${fromInfo.time} → ${date} ${time}`
     );
+
+    // анти-мухлёж дозаписи (fire-and-forget): перенесённая клиентом бронь перестаёт
+    // быть «hned po vás» — её собственная rebook-скидка снимается; и если она была
+    // якорем чьей-то дозаписи, та тоже теряет −15%. Админский перенос это НЕ трогает
+    // (adminPatchBooking — админ управляет скидкой из drawer сам).
+    strapi
+      .service('api::booking-engine.rebook')
+      .revokeOwnDiscount(booking.documentId)
+      .catch((e) => strapi.log.error(`rebook self-revoke on reschedule failed: ${e.message}`));
+    strapi
+      .service('api::booking-engine.rebook')
+      .revokeDiscountsForAnchor(booking.documentId)
+      .catch((e) => strapi.log.error(`rebook revoke on reschedule failed: ${e.message}`));
 
     // письмо клиенту + Telegram салону (fire-and-forget — перенос уже применён)
     strapi

@@ -33,9 +33,11 @@ export const REBOOK_DISCOUNT_PERCENT = 15;
 export const REBOOK_OFFER_TTL_MIN = 15;
 // окно мастера должно начинаться не позже, чем через N минут после конца брони клиента
 const REBOOK_GAP_TOLERANCE_MIN = 15;
-// суммарный лимит предлагаемых услуг и лимит на одну карточку мастера
-const MAX_OFFER_SERVICES = 5;
-const MAX_SERVICES_PER_MASTER = 3;
+// суммарный лимит предлагаемых услуг, лимит карточек мастеров и услуг на карточку
+// (при 2 карточках × 6 услуг суммарный потолок практически не режет — страховка)
+const MAX_OFFER_SERVICES = 12;
+const MAX_MASTER_CARDS = 2;
+const MAX_SERVICES_PER_MASTER = 6;
 
 // ── классификация категорий (порт classifyTitle из admin windowCrossSell) ──
 
@@ -121,10 +123,18 @@ export default {
         status: 'active',
         client: { documentId: { $eq: base.client.documentId } },
       },
-      fields: ['date', 'startsAt', 'endsAt', 'services'],
+      fields: ['date', 'startsAt', 'endsAt', 'services', 'engineEmployeeId', 'discount'],
+      populate: { employee: { fields: ['name'] } },
       limit: 50,
     });
     const all = dayBookings.length ? dayBookings : [base];
+
+    // дозапись — ОДНА: если среди активных броней дня уже есть rebook-бронь,
+    // повторные предложения не выдаём (reload страницы не даёт каскад; создание
+    // тоже режется — create проверяет ctx.available)
+    if (all.some((b) => b.discount?.type === 'rebook')) {
+      return { base, baseInfo, expiresAtMs, available: false, reason: 'already_rebooked' };
+    }
 
     // якорь — бронь с самым поздним концом; исключённые бакеты — со ВСЕХ броней дня
     let anchor = all[0];
@@ -132,16 +142,30 @@ export default {
       if (new Date(b.endsAt).getTime() > new Date(anchor.endsAt).getTime()) anchor = b;
     }
     const excludedBuckets = new Set();
+    // мастеров, у которых клиент уже записан в этот день, не предлагаем повторно —
+    // дозапись = «vedlejší křeslo», а не продление у той же мастерицы
+    const excludedEmployees = new Set();
     for (const b of all) {
       const items = Array.isArray(b.services) ? b.services : [];
       for (const it of items) {
         const bucket = classifyTitle(it?.title || it?.base || '');
         if (bucket) excludedBuckets.add(bucket);
       }
+      const empDocId = b.employee?.documentId || b.engineEmployeeId;
+      if (empDocId) excludedEmployees.add(empDocId);
     }
 
     const anchorEndMin = utcToPragueMinClamped(anchor.endsAt, String(base.date));
-    return { base, baseInfo, expiresAtMs, available: true, anchorEndMin, excludedBuckets };
+    return {
+      base,
+      baseInfo,
+      expiresAtMs,
+      available: true,
+      anchorDocId: anchor.documentId,
+      anchorEndMin,
+      excludedBuckets,
+      excludedEmployees,
+    };
   },
 
   // Свободное окно мастера, начинающееся сразу после конца якоря.
@@ -213,6 +237,7 @@ export default {
         photoUrl: p.photo?.formats?.thumbnail?.url || p.photo?.url || null,
         serviceIds: new Set((p.services || []).map((s) => s.documentId)),
       }))
+      .filter((m) => !ctx.excludedEmployees.has(m.documentId))
       .filter((m) => [...m.serviceIds].some((id) => offerable.has(id)));
     if (!masters.length) return { ...shell, available: false, reason: 'no_offers' };
 
@@ -262,12 +287,14 @@ export default {
     if (!cards.length) return { ...shell, available: false, reason: 'no_offers' };
 
     // отбор: раньше старт — выше; первым проходом покрываем разные категории,
-    // затем добираем остальных; суммарно ≤MAX_OFFER_SERVICES услуг, ≤3 на карточку
+    // затем добираем остальных; ≤MAX_MASTER_CARDS карточек, суммарно
+    // ≤MAX_OFFER_SERVICES услуг, ≤MAX_SERVICES_PER_MASTER на карточку
     cards.sort((a, b) => a.startMin - b.startMin);
     const picked = [];
     const pickedIds = new Set();
     let total = 0;
     const take = (card) => {
+      if (picked.length >= MAX_MASTER_CARDS) return;
       if (pickedIds.has(card.employeeDocId) || total >= MAX_OFFER_SERVICES) return;
       const room = Math.min(MAX_SERVICES_PER_MASTER, MAX_OFFER_SERVICES - total);
       const services = card.services.slice(0, room);
@@ -304,7 +331,10 @@ export default {
       throw new EngineError(409, 'rebook_unavailable', 'Tuto službu nelze dozarezervovat');
     }
 
-    // мастер: активен и делает услугу
+    // мастер: активен, делает услугу и клиент к нему сегодня ещё не записан
+    if (ctx.excludedEmployees.has(employeeDocId)) {
+      throw new EngineError(409, 'rebook_unavailable', 'K této mistrové už dnes rezervaci máte');
+    }
     const assigned = await engine().listEmployeesForService(svc.documentId);
     const emp = assigned.find((p) => p.documentId === employeeDocId);
     if (!emp) throw new EngineError(400, 'employee_service_mismatch', 'Mistrová tuto službu nedělá');
@@ -334,12 +364,15 @@ export default {
     // Скидка структурированная (booking.discount) — админ управляет ей из drawer
     // календаря (снять/вернуть), кабинет показывает бейдж; паттерн bitchcard.
     const snapshot = engine().buildServiceSnapshot(svc, null, [], pricing);
+    // anchorBookingDocId = бронь, «сразу после» которой сделана дозапись: если клиент
+    // её отменит/перенесёт, скидка автоматически снимается (revokeDiscountsForAnchor)
     const discount = {
       type: 'rebook',
       percent: REBOOK_DISCOUNT_PERCENT,
       discountKc: pricing.price - discounted,
       originalPrice: pricing.price,
       applied: true,
+      anchorBookingDocId: ctx.anchorDocId,
     };
 
     const startsAt = pragueMinToUtcIso(date, win.startMin);
@@ -365,7 +398,7 @@ export default {
             endsAt,
             services: snapshot,
             totalPrice: discounted,
-            comment: 'Dozápis z thank-you',
+            comment: '',
             origin: 'site',
             cancelToken,
             employeeDocId: emp.documentId,
@@ -459,5 +492,44 @@ export default {
   // POST /engine/admin/bookings/:id/rebook-discount — вернуть ошибочно снятую скидку
   async restoreDiscount(bookingDocId) {
     return this._toggleDiscount(bookingDocId, true);
+  },
+
+  // ── анти-мухлёж: скидка действует, только пока жива якорная бронь ──
+  // Клиент мог бы отменить/перенести первую (полную) бронь и оставить только дозапись
+  // со скидкой — тогда это уже не дозапись. Хуки движка (отмена клиентом/админом,
+  // удаление, перенос клиентом) зовут revokeDiscountsForAnchor(докId якоря) —
+  // у всех активных дозаписей с applied-скидкой на этот якорь цена возвращается
+  // к полной (та же механика, что «Zrušit slevu» в drawer — админ может вернуть).
+  async revokeDiscountsForAnchor(anchorDocId) {
+    if (!anchorDocId) return 0;
+    const knex = strapi.db.connection;
+    const rows = await knex('bookings')
+      .select('document_id')
+      .where('status', 'active')
+      .whereRaw(`discount->>'type' = 'rebook'`)
+      .whereRaw(`discount->>'applied' = 'true'`)
+      .whereRaw(`discount->>'anchorBookingDocId' = ?`, [anchorDocId]);
+    for (const r of rows) {
+      try {
+        await this._toggleDiscount(r.document_id, false);
+        strapi.log.info(`booking-engine: rebook discount revoked on ${r.document_id} (anchor ${anchorDocId} gone)`);
+      } catch (e) {
+        strapi.log.error(`rebook revoke for ${r.document_id} failed: ${e.message}`);
+      }
+    }
+    return rows.length;
+  },
+
+  // Перенос клиентом самой дозаписи: она перестаёт быть «hned po vás» → снять её скидку.
+  async revokeOwnDiscount(bookingDocId) {
+    const booking = await strapi.documents(BOOKING_UID).findOne({
+      documentId: bookingDocId,
+      fields: ['status', 'discount'],
+    });
+    const d = booking?.discount;
+    if (!d || d.type !== 'rebook' || !d.applied || booking.status !== 'active') return false;
+    await this._toggleDiscount(bookingDocId, false);
+    strapi.log.info(`booking-engine: rebook discount revoked on ${bookingDocId} (booking rescheduled by client)`);
+    return true;
   },
 };
