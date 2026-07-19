@@ -47,18 +47,35 @@ const czDateLabel = (iso) =>
     year: 'numeric',
   }).format(new Date(iso));
 
+// Короткая дата для Telegram: «út 21. 7.» (сокр. день недели + D. M., без года).
+const czDateShort = (iso) =>
+  new Intl.DateTimeFormat('cs-CZ', {
+    timeZone: 'Europe/Prague',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'numeric',
+  }).format(new Date(iso));
+
+// Цена с разделением тысяч: «1 190 Kč», «935 Kč».
+const fmtKc = (n) => `${Number(n).toLocaleString('cs-CZ')} Kč`;
+
 export interface BookingNotifyView {
   bookingId: string;
   dateLabel: string; // «neděle 12. 7. 2026»
+  dateShort: string; // «ne 12. 7.» (для Telegram)
   time: string; // «14:00»
   startsAt: string;
   endsAt: string;
   serviceTitle: string;
+  serviceTitles: string[]; // каждая услуга отдельно (мульти-бронь → построчно в Telegram)
   employeeName: string;
   price: number | null;
   // Заполнена ТОЛЬКО у брони к junior-мастеру со скидкой: сумма senior-цен услуг
   // (для строки «Sleva: junior mistrová −20 % (běžná cena … Kč)» в письме)
   seniorPrice: number | null;
+  // Дозапись (rebook, s133): бронь со скидкой −15 % сразу после визита.
+  isRebook: boolean; // discount.type==='rebook' — штамп «Dozápis»
+  rebookDiscount: { percent: number; discountKc: number; originalPrice: number } | null; // только пока скидка applied
   clientName: string;
   clientEmail: string;
   clientPhone: string;
@@ -75,18 +92,35 @@ const viewFromBookingDoc = (booking): BookingNotifyView => {
   const seniorTotal = services.reduce((sum, s) => sum + Number(s?.seniorPrice ?? s?.price ?? 0), 0);
   const isJuniorDiscount =
     booking.employee?.tier === 'junior' && price != null && seniorTotal > price + 0.5;
+  // Дозапись: скидка живёт в booking.discount (json). Штамп «Dozápis» — по type;
+  // строка со скидкой — только пока applied (админ мог её снять из drawer календаря).
+  const disc = booking.discount;
+  const isRebook = disc?.type === 'rebook';
+  const rebookDiscount =
+    isRebook && disc.applied && Number(disc.discountKc) > 0
+      ? {
+          percent: Number(disc.percent) || 15,
+          discountKc: Number(disc.discountKc),
+          originalPrice: Number(disc.originalPrice),
+        }
+      : null;
+  const serviceTitles = services.map((s) => s?.title).filter(Boolean);
   return {
     bookingId: booking.documentId,
     dateLabel: booking.startsAt ? czDateLabel(booking.startsAt) : String(booking.date),
+    dateShort: booking.startsAt ? czDateShort(booking.startsAt) : String(booking.date),
     time: booking.startsAt
       ? minToHHMM(utcToPragueMinClamped(booking.startsAt, String(booking.date)))
       : '',
     startsAt: booking.startsAt,
     endsAt: booking.endsAt,
-    serviceTitle: services.map((s) => s?.title).filter(Boolean).join(', ') || svc?.title || '',
+    serviceTitle: serviceTitles.join(', ') || svc?.title || '',
+    serviceTitles,
     employeeName: booking.employee?.name || booking.employeeNameRaw || '',
     price,
     seniorPrice: isJuniorDiscount ? Math.round(seniorTotal) : null,
+    isRebook,
+    rebookDiscount,
     clientName: booking.client?.name || booking.clientNameRaw || '',
     clientEmail: booking.client?.email || '',
     clientPhone: booking.client?.phone || '',
@@ -333,6 +367,42 @@ export default {
     return res.json();
   },
 
+  // Структурированное тело сообщения о брони для Telegram (каждый údaj на своей
+  // строке): термин · мастер · услуги · цена (+ скидка) · клиент. Заголовок
+  // (🟢 Nová rezervace / ❌ / 🟠) добавляет вызывающая функция.
+  // opts.fromShort — старый термин «дд · чч:мм» для строки переноса (from → to).
+  buildBookingTgBody(v: BookingNotifyView, opts: { fromShort?: string } = {}) {
+    const L: string[] = [];
+    // термин
+    if (opts.fromShort) {
+      L.push(`🗓 <s>${esc(opts.fromShort)}</s> → <b>${esc(v.dateShort)} · ${esc(v.time)}</b>`);
+    } else {
+      L.push(`🗓 <b>${esc(v.dateShort)} · ${esc(v.time)}</b>`);
+    }
+    // мастер
+    if (v.employeeName) L.push(`💇 <b>${esc(v.employeeName)}</b>`);
+    // услуги (каждая отдельной строкой; для доп. строк лёгкий отступ под текст)
+    const titles = v.serviceTitles.length ? v.serviceTitles : v.serviceTitle ? [v.serviceTitle] : [];
+    titles.forEach((t, i) => L.push(i === 0 ? `💅 ${esc(t)}` : `       ${esc(t)}`));
+    // цена (+ скидка)
+    if (v.price != null) {
+      const rd = v.rebookDiscount;
+      if (rd && rd.originalPrice > v.price) {
+        L.push(`💰 <b>${fmtKc(v.price)}</b>  <s>${fmtKc(rd.originalPrice)}</s>`);
+        L.push(`🏷 Sleva za dozápis ${rd.percent} % (−${fmtKc(rd.discountKc)})`);
+      } else if (!rd && v.seniorPrice != null && v.seniorPrice > v.price) {
+        const pct = Math.round((1 - v.price / v.seniorPrice) * 100);
+        L.push(`💰 <b>${fmtKc(v.price)}</b>  <s>${fmtKc(v.seniorPrice)}</s>`);
+        L.push(`🎓 Junior mistrová −${pct} %`);
+      } else {
+        L.push(`💰 <b>${fmtKc(v.price)}</b>`);
+      }
+    }
+    // клиент (без телефона)
+    if (v.clientName) L.push(`👤 ${esc(v.clientName)}`);
+    return L.join('\n');
+  },
+
   // ── сборка писем (используется и превью-ручкой) ──
 
   buildConfirmation(v: BookingNotifyView) {
@@ -437,10 +507,8 @@ export default {
     const v = viewFromBookingDoc(booking);
 
     const tg =
-      `🟢 <b>Nová rezervace z webu</b>\n` +
-      `${v.dateLabel} v <b>${v.time}</b> · ${v.employeeName}\n` +
-      `${v.serviceTitle}${v.price != null ? ` · ${v.price} Kč` : ''}\n` +
-      `Klient: <b>${v.clientName}</b>${v.clientPhone ? ` · <code>${v.clientPhone}</code>` : ''}`;
+      `🟢 <b>Nová rezervace</b>${v.isRebook ? ' · 🔁 <b>Dozápis</b>' : ''}\n` +
+      this.buildBookingTgBody(v);
 
     await Promise.allSettled([
       (async () => {
@@ -461,10 +529,8 @@ export default {
     const v = viewFromBookingDoc(booking);
 
     const tg =
-      `❌ <b>Klient zrušil rezervaci</b>\n` +
-      `${v.dateLabel} v <b>${v.time}</b> · ${v.employeeName}\n` +
-      `${v.serviceTitle}${v.price != null ? ` · ${v.price} Kč` : ''}\n` +
-      `Klient: <b>${v.clientName}</b>${v.clientPhone ? ` · <code>${v.clientPhone}</code>` : ''}`;
+      `❌ <b>Klient zrušil rezervaci</b>${v.isRebook ? ' · 🔁 <b>Dozápis</b>' : ''}\n` +
+      this.buildBookingTgBody(v);
 
     await Promise.allSettled([
       (async () => {
@@ -528,12 +594,14 @@ export default {
           from.employeeName ? ` · ${from.employeeName}` : ''
         }`.trim()
       : '';
+    // Короткий старый термин «дд · чч:мм» для строки переноса в Telegram.
+    const fromShort = from
+      ? `${from.startsAt ? czDateShort(from.startsAt) : from.date || ''} · ${from.time || ''}`.trim()
+      : '';
 
     const tg =
-      `🟠 <b>Klient si přesunul rezervaci</b>\n` +
-      `${fromLabel ? `${fromLabel} → ` : ''}${v.dateLabel} v <b>${v.time}</b> · ${v.employeeName}\n` +
-      `${v.serviceTitle}${v.price != null ? ` · ${v.price} Kč` : ''}\n` +
-      `Klient: <b>${v.clientName}</b>${v.clientPhone ? ` · <code>${v.clientPhone}</code>` : ''}`;
+      `🟠 <b>Klient si přesunul rezervaci</b>${v.isRebook ? ' · 🔁 <b>Dozápis</b>' : ''}\n` +
+      this.buildBookingTgBody(v, { fromShort });
 
     await Promise.allSettled([
       (async () => {
