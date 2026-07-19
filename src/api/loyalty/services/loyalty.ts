@@ -235,7 +235,12 @@ export default {
     return rows.reduce((s, r) => s + (Number(r.delta) || 0), 0);
   },
 
-  // Пересечение порога → авто-создать redemption available («заклеенный кружок»).
+  // Приводит награды клиента в соответствие с ТЕКУЩИМ балансом карточного года:
+  //  • порог достигнут (balance ≥ threshold) и награды ещё нет → создать available;
+  //  • порог НЕ достигнут (balance < threshold) → снять ещё НЕиспользованную
+  //    награду (status='available'), если она осталась с момента, когда баланс был
+  //    выше (ручная −Kč корректировка / пере-бэкфил после скидки). used/expired
+  //    НЕ трогаем — скидка уже применена к брони / награда сгорела 31.12.
   // Уникальность client+reward+cardYear — каждая ступень раз в карточный год.
   async recomputeClientRewards(clientDocId: string, cardYear: number) {
     const balance = await this.balanceOf(clientDocId, cardYear);
@@ -245,27 +250,43 @@ export default {
       limit: 50,
     });
     let created = 0;
+    let revoked = 0;
     for (const reward of rewards) {
-      if (balance < Number(reward.thresholdKc)) continue;
-      const dup = await strapi.documents(REDEMPTION_UID).count({
+      const existing = await strapi.documents(REDEMPTION_UID).findMany({
         filters: {
           client: { documentId: { $eq: clientDocId } },
           reward: { documentId: { $eq: reward.documentId } },
           cardYear: { $eq: cardYear },
         },
+        fields: ['status'],
+        limit: 5,
       });
-      if (dup > 0) continue;
-      await strapi.documents(REDEMPTION_UID).create({
-        data: {
-          client: clientDocId,
-          reward: reward.documentId,
-          cardYear,
-          status: 'available',
-          code: genCode(),
-          expiresAt: endOfCardYearIso(cardYear),
-        },
-      });
-      created++;
+      if (balance >= Number(reward.thresholdKc)) {
+        if (existing.length > 0) continue; // награда любого статуса уже есть
+        await strapi.documents(REDEMPTION_UID).create({
+          data: {
+            client: clientDocId,
+            reward: reward.documentId,
+            cardYear,
+            status: 'available',
+            code: genCode(),
+            expiresAt: endOfCardYearIso(cardYear),
+          },
+        });
+        created++;
+      } else {
+        // баланс упал ниже порога → снять невыданные (available) награды
+        for (const r of existing) {
+          if (r.status !== 'available') continue;
+          await strapi.documents(REDEMPTION_UID).delete({ documentId: r.documentId });
+          revoked++;
+        }
+      }
+    }
+    if (revoked) {
+      strapi.log.info(
+        `loyalty: revoked ${revoked} unearned redemption(s) for client ${clientDocId} (${cardYear}, balance ${balance})`
+      );
     }
     return created;
   },
@@ -311,6 +332,17 @@ export default {
     }
     if (redemption.expiresAt && new Date(redemption.expiresAt).getTime() < Date.now()) {
       throw new LoyaltyError(409, 'redemption_unavailable', 'Platnost slevy vypršela');
+    }
+    // «Награду нельзя применить, пока порог не достигнут» — проверка на момент
+    // применения (баланс мог упасть ниже порога после выдачи награды: ручная
+    // −Kč корректировка / пере-бэкфил). Единый барьер для кабинета/админа/кода.
+    const balanceNow = await this.balanceOf(clientDocId, Number(redemption.cardYear));
+    if (balanceNow < Number(redemption.reward.thresholdKc)) {
+      throw new LoyaltyError(
+        409,
+        'reward_not_earned',
+        'Na tuto slevu zatím nemáte nárok — chybí ještě body do dalšího prahu'
+      );
     }
     // одна скидка на бронь
     const already = await strapi.documents(REDEMPTION_UID).count({
@@ -653,13 +685,19 @@ export default {
       stamps: Math.floor(balanceKc / 1000),
       track: trackRewards.map((reward) => {
         const redemption = redemptionByReward.get(reward.documentId) || null;
+        const reached = balanceKc >= Number(reward.thresholdKc);
+        // Защита от рассинхрона (баланс упал ниже порога, а recompute ещё не
+        // снял награду): available-награду показываем ТОЛЬКО при достигнутом
+        // пороге; used/expired — всегда (скидка уже применена / сгорела).
+        const showRedemption =
+          redemption && (redemption.status !== 'available' || reached);
         return {
           title: reward.title,
           thresholdKc: Number(reward.thresholdKc),
           discountType: reward.discountType,
           discountValue: Number(reward.discountValue),
-          reached: balanceKc >= Number(reward.thresholdKc),
-          redemption: redemption
+          reached,
+          redemption: showRedemption
             ? {
                 status: redemption.status,
                 code: redemption.code || null,
@@ -670,11 +708,14 @@ export default {
       }),
       // Бонус-ваучер 1000 Kč: available = награда заработана и ещё не обналичена;
       // claimed = уже получен (voucher создан); expired = сгорел 31.12.
+      // available гейтим и балансом (баланс мог упасть ниже порога до recompute).
       bonusReward: voucherReward
         ? {
             thresholdKc: Number(voucherReward.thresholdKc),
             value: Number(voucherReward.discountValue),
-            available: voucherRedemption?.status === 'available',
+            available:
+              voucherRedemption?.status === 'available' &&
+              balanceKc >= Number(voucherReward.thresholdKc),
             claimed: voucherRedemption?.status === 'used',
             expired: voucherRedemption?.status === 'expired',
             expiresAt: voucherRedemption?.expiresAt || null,
