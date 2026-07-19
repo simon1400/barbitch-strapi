@@ -605,6 +605,8 @@ export default {
         cancel_token: data.cancelToken,
         engine_employee_id: data.employeeDocId,
         created_by_name: data.createdByName || '',
+        // структурированная скидка (rebook −15% и т.п.) — управляется из admin-drawer
+        discount: data.discount ? JSON.stringify(data.discount) : null,
         price_override: Boolean(data.priceOverride),
         // true только для админских броней поверх занятого времени (см. adminCreateBooking);
         // брони с сайта всегда false → остаются под защитой EXCLUDE-constraint

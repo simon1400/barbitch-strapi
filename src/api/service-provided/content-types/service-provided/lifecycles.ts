@@ -186,16 +186,22 @@ async function validateOfferMoney(event: any) {
         if (clientName && date) {
           const bookings = await strapi.documents('api::booking.booking').findMany({
             filters: { date: { $eq: date }, clientNameRaw: { $eqi: clientName } },
-            fields: ['date'],
+            fields: ['date', 'discount'],
             limit: 20,
           })
+          // применённая скидка дозаписи (rebook, thank-you) — тоже легитимная
+          // системная скидка: флаг «мимо программы» не ставим
+          const hasRebookDiscount = bookings.some(
+            (b: any) => b.discount?.type === 'rebook' && b.discount?.applied,
+          )
           const ids = bookings.map((b: any) => b.documentId)
-          if (ids.length) {
+          if (ids.length && !hasRebookDiscount) {
             const used = await strapi.documents('api::redemption.redemption').count({
               filters: { status: { $eq: 'used' }, usedInBookingDocId: { $in: ids } },
             })
             hasRedemption = used > 0
           }
+          hasRedemption = hasRedemption || hasRebookDiscount
         }
         if (!hasRedemption) flags.push('sleva_bez_karty')
       } catch (e: any) {

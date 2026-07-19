@@ -921,6 +921,7 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     createdByName: Schema.Attribute.String;
     customerComment: Schema.Attribute.Text;
     date: Schema.Attribute.Date;
+    discount: Schema.Attribute.JSON;
     employee: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     employeeNameRaw: Schema.Attribute.String;
     endsAt: Schema.Attribute.DateTime;

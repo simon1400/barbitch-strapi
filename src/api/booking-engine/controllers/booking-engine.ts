@@ -143,6 +143,26 @@ export default {
     await handle(ctx, () => svc().postCancel(ctx.params.token));
   },
 
+  // ── дозапись с thank-you (аутентификация cancelToken исходной брони) ──
+
+  // GET /api/engine/rebook/:token/offers — предложения дозаписи (другие категории,
+  // окно мастера сразу после конца визита, −15%, таймер REBOOK_OFFER_TTL_MIN)
+  async rebookOffers(ctx) {
+    await handle(ctx, () => strapi.service('api::booking-engine.rebook').offers(ctx.params.token));
+  },
+
+  // POST /api/engine/rebook/:token {service, employee} — дозапись в 1 клик
+  // (клиент из исходной брони, цена −15% с priceOverride, серверная пере-валидация окна)
+  async rebookCreate(ctx) {
+    const b = ctx.request.body || {};
+    await handle(ctx, () =>
+      strapi.service('api::booking-engine.rebook').create(ctx.params.token, {
+        serviceDocId: b.service,
+        employeeDocId: b.employee,
+      })
+    );
+  },
+
   // ── управление бронью клиентом по токену (страница /rezervace/{token}) ──
 
   // GET /api/engine/manage/:token — детали брони + флаги cancellable/reschedulable
@@ -311,6 +331,33 @@ export default {
     await handle(ctx, () =>
       strapi.service('api::loyalty.loyalty').releaseRedemptionForBooking(ctx.params.id)
     );
+  },
+
+  // DELETE /api/engine/admin/bookings/:id/rebook-discount — снять скидку дозаписи
+  // (цена брони возвращается к полной, скидка помечается applied:false)
+  async adminRemoveRebookDiscount(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const result = await strapi.service('api::booking-engine.rebook').removeDiscount(ctx.params.id);
+      strapi.log.info(
+        `booking-engine: admin ${session.username || '?'} removed rebook discount from booking ${ctx.params.id}`
+      );
+      return result;
+    });
+  },
+
+  // POST /api/engine/admin/bookings/:id/rebook-discount — вернуть снятую скидку дозаписи
+  async adminRestoreRebookDiscount(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const result = await strapi.service('api::booking-engine.rebook').restoreDiscount(ctx.params.id);
+      strapi.log.info(
+        `booking-engine: admin ${session.username || '?'} restored rebook discount on booking ${ctx.params.id}`
+      );
+      return result;
+    });
   },
 
   // POST /api/engine/admin/blocks {employee, date, startMin, endMin, title?}

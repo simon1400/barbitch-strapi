@@ -239,6 +239,29 @@ export default {
 
   // ── брони клиента ──
 
+  // Скидка для карточки брони кабинета: приоритет bitchcard-redemption (loyalty),
+  // иначе структурированная скидка дозаписи из самой брони (rebook, applied).
+  shapeDiscount(b, loyaltyDiscount) {
+    if (loyaltyDiscount && loyaltyDiscount.discountKc != null) {
+      return {
+        type: 'bitchcard',
+        discountKc: loyaltyDiscount.discountKc,
+        rewardTitle: loyaltyDiscount.rewardTitle || null,
+        code: loyaltyDiscount.code || null,
+      };
+    }
+    const rd = b.discount;
+    if (rd && rd.type === 'rebook' && rd.applied && Number(rd.discountKc) > 0) {
+      return {
+        type: 'rebook',
+        discountKc: Number(rd.discountKc),
+        rewardTitle: null,
+        code: null,
+      };
+    }
+    return null;
+  },
+
   shapeBooking(b, discount = null) {
     const dateStr = String(b.date || '');
     const services = Array.isArray(b.services) ? b.services : [];
@@ -251,16 +274,11 @@ export default {
       arrived: Boolean(b.arrived),
       services,
       totalPrice: b.totalPrice != null ? Number(b.totalPrice) : null,
-      // Применённая скидка bitchcard (used-redemption по этой брони) — чтобы
-      // клиент видел, что цена уже со slevou, сколько скинуто и какая награда.
-      discount:
-        discount && discount.discountKc != null
-          ? {
-              discountKc: discount.discountKc,
-              rewardTitle: discount.rewardTitle || null,
-              code: discount.code || null,
-            }
-          : null,
+      // Применённая скидка: bitchcard (used-redemption) либо структурированная
+      // скидка дозаписи (booking.discount type='rebook', пишет движок rebook) —
+      // клиент видит, что цена уже со slevou. type различает бейдж и право снятия
+      // (rebook клиент снять не может — только админ из календаря).
+      discount: this.shapeDiscount(b, discount),
       employeeName: b.employee?.name || b.employeeNameRaw || null,
       startsAt: b.startsAt || null,
       // Отмена из кабинета: любая активная бронь, вкл. зеркальные Noona-брони
@@ -289,6 +307,7 @@ export default {
         'totalPrice',
         'employeeNameRaw',
         'cancelToken',
+        'discount',
       ],
       populate: { employee: { fields: ['name'] } },
     };

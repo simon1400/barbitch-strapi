@@ -27,6 +27,9 @@ export default {
     pub('POST', '/engine/bookings', 'booking-engine.createBooking'),
     pub('GET', '/engine/cancel/:token', 'booking-engine.getCancel'),
     pub('POST', '/engine/cancel/:token', 'booking-engine.postCancel'),
+    // дозапись с thank-you: предложения услуг других категорий в окно сразу после брони (−15%)
+    pub('GET', '/engine/rebook/:token/offers', 'booking-engine.rebookOffers'),
+    pub('POST', '/engine/rebook/:token', 'booking-engine.rebookCreate'),
     // управление бронью клиентом (страница /rezervace/{token}: перенос термина + отмена)
     pub('GET', '/engine/manage/:token', 'booking-engine.getManage'),
     pub('GET', '/engine/manage/:token/availability', 'booking-engine.manageAvailability'),
@@ -45,6 +48,9 @@ export default {
     admin('GET', '/engine/admin/bookings/:id/redemptions', 'booking-engine.adminBookingRedemptions'),
     admin('POST', '/engine/admin/bookings/:id/redemption', 'booking-engine.adminApplyRedemption'),
     admin('DELETE', '/engine/admin/bookings/:id/redemption', 'booking-engine.adminReleaseRedemption'),
+    // скидка дозаписи (rebook −15%): снять / вернуть из drawer календаря
+    admin('POST', '/engine/admin/bookings/:id/rebook-discount', 'booking-engine.adminRestoreRebookDiscount'),
+    admin('DELETE', '/engine/admin/bookings/:id/rebook-discount', 'booking-engine.adminRemoveRebookDiscount'),
     admin('POST', '/engine/admin/blocks', 'booking-engine.adminCreateBlock'),
     admin('PATCH', '/engine/admin/blocks/:id', 'booking-engine.adminPatchBlock'),
     admin('DELETE', '/engine/admin/blocks/:id', 'booking-engine.adminDeleteBlock'),
