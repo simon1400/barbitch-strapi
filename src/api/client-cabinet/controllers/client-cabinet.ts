@@ -92,10 +92,11 @@ export default {
   },
 
   // POST /api/cabinet/bookings/:id/cancel (JWT) — отмена своей брони (анти-BOLA 404)
+  // body { reason? } — необязательная причина отмены (→ comment брони + Telegram)
   async cancelBooking(ctx) {
     const session = requireClient(ctx);
     if (!session) return;
-    await handle(ctx, () => svc().cancelBooking(session, ctx.params.id));
+    await handle(ctx, () => svc().cancelBooking(session, ctx.params.id, ctx.request.body?.reason));
   },
 
   // GET /api/cabinet/bookings/:id/availability?from&to (JWT) — слоты для переноса

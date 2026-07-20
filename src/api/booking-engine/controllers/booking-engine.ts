@@ -138,9 +138,9 @@ export default {
     await handle(ctx, () => svc().getCancel(ctx.params.token));
   },
 
-  // POST /api/engine/cancel/:token
+  // POST /api/engine/cancel/:token — body { reason? } (необязательная причина отмены)
   async postCancel(ctx) {
-    await handle(ctx, () => svc().postCancel(ctx.params.token));
+    await handle(ctx, () => svc().postCancel(ctx.params.token, ctx.request.body?.reason));
   },
 
   // ── дозапись с thank-you (аутентификация cancelToken исходной брони) ──

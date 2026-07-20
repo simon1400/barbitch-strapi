@@ -1364,22 +1364,31 @@ export default {
     return this.cancelInfo(booking);
   },
 
-  async postCancel(token) {
+  async postCancel(token, reason) {
     const booking = await this.bookingByCancelToken(token);
-    return this.cancelBookingCore(booking);
+    return this.cancelBookingCore(booking, reason);
   },
 
   // Ядро отмены клиентом: принимает уже-зарезолвленный booking-документ.
   // Зовётся токен-флоу (postCancel) и кабинетом (К2, JWT) — правила/нотификации одни.
   // Работает и для зеркальных Noona-броней (cancelToken не нужен) — create-only
   // синк отменённую бронь не воскресит.
-  async cancelBookingCore(booking) {
+  // reason — необязательная причина отмены от клиента (страница /rezervace/{token}
+  // и кабинет): дописывается к comment брони (видно в drawer календаря — карточка
+  // «Poznámka», у мастера — статичный блок) + уходит в Telegram салону. Обрез 500 симв.
+  async cancelBookingCore(booking, reason) {
     const info = this.cancelInfo(booking);
     if (booking.status !== 'active') throw new EngineError(409, 'not_active', 'Rezervace už není aktivní');
     if (!info.cancellable) {
       throw new EngineError(409, 'too_late', `Rezervaci lze zrušit nejpozději ${CANCEL_MIN_HOURS} h předem`);
     }
-    await strapi.documents(BOOKING_UID).update({ documentId: booking.documentId, data: { status: 'cancelled' } });
+    const cleanReason = typeof reason === 'string' ? reason.trim().slice(0, 500) : '';
+    const data: { status: string; comment?: string } = { status: 'cancelled' };
+    if (cleanReason) {
+      const line = `Důvod zrušení (klient): ${cleanReason}`;
+      data.comment = booking.comment ? `${booking.comment}\n${line}` : line;
+    }
+    await strapi.documents(BOOKING_UID).update({ documentId: booking.documentId, data });
 
     // применённая скидка bitchcard возвращается клиенту (used → available,
     // цена брони восстанавливается) — fire-and-forget, за гейтом LOYALTY_ENABLED
@@ -1398,7 +1407,7 @@ export default {
     // письмо клиенту + Telegram салону (fire-and-forget — отмена уже применена)
     strapi
       .service('api::booking-engine.booking-notify')
-      .notifyBookingCancelled(booking.documentId)
+      .notifyBookingCancelled(booking.documentId, cleanReason)
       .catch((e) => strapi.log.error(`booking-notify cancelled failed: ${e.message}`));
     // push мастеру: клиент отменил его бронь
     strapi

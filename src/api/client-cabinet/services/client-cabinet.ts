@@ -373,10 +373,10 @@ export default {
     throw new CabinetError(404, 'booking_not_found', 'Rezervace nenalezena');
   },
 
-  async cancelBooking(session, bookingDocId) {
+  async cancelBooking(session, bookingDocId, reason) {
     this.assertEnabled();
     const booking = await this.resolveOwnBooking(session, bookingDocId);
-    return strapi.service('api::booking-engine.booking-engine').cancelBookingCore(booking);
+    return strapi.service('api::booking-engine.booking-engine').cancelBookingCore(booking, reason);
   },
 
   async bookingAvailability(session, bookingDocId, fromDate, toDate) {

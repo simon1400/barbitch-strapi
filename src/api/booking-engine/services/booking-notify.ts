@@ -523,14 +523,16 @@ export default {
     });
   },
 
-  async notifyBookingCancelled(bookingDocId) {
+  async notifyBookingCancelled(bookingDocId, reason) {
     const booking = await this.loadBooking(bookingDocId);
     if (!booking) return;
     const v = viewFromBookingDoc(booking);
 
+    const cleanReason = typeof reason === 'string' ? reason.trim().slice(0, 500) : '';
     const tg =
       `❌ <b>Klient zrušil rezervaci</b>${v.isRebook ? ' · 🔁 <b>Dozápis</b>' : ''}\n` +
-      this.buildBookingTgBody(v);
+      this.buildBookingTgBody(v) +
+      (cleanReason ? `\n📝 <b>Důvod:</b> ${esc(cleanReason)}` : '');
 
     await Promise.allSettled([
       (async () => {
