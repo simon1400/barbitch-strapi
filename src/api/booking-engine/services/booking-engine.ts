@@ -1027,6 +1027,9 @@ export default {
       let logAction: string;
       let logSummary: string;
       let logDetails: Record<string, unknown>;
+      // «Proběhla» (status=checkedOut) и «Dorazila» (arrived) в деньке НЕ логируем —
+      // отметки «клиент пришёл / návštěva proběhla» не нужны (решение владельца).
+      let shouldLog = true;
       if (movedTerm) {
         logAction = 'booking_move';
         const empPart = newEmp !== fromInfo.employeeName ? ` · ${fromInfo.employeeName} → ${newEmp}` : '';
@@ -1039,9 +1042,13 @@ export default {
           to: { date: fmtDay(newDate), time: newTime, employee: newEmp },
         };
       } else if (statusChanged) {
-        logAction = 'booking_status';
-        logSummary = `${STATUS_CS[patch.status] || patch.status}: ${cn} · ${fmtDay(fromInfo.date)} ${fromInfo.time}`;
-        logDetails = { prevStatus: booking.status, status: patch.status };
+        if (patch.status === 'checkedOut') {
+          shouldLog = false; // «Proběhla» — не пишем
+        } else {
+          logAction = 'booking_status';
+          logSummary = `${STATUS_CS[patch.status] || patch.status}: ${cn} · ${fmtDay(fromInfo.date)} ${fromInfo.time}`;
+          logDetails = { prevStatus: booking.status, status: patch.status };
+        }
       } else if (serviceChanged) {
         logAction = 'booking_service';
         let svcTitles: string[] = [];
@@ -1053,28 +1060,35 @@ export default {
         logSummary = `Změna služby: ${cn} · ${fmtDay(fromInfo.date)} ${fromInfo.time}`;
         logDetails = { services: svcTitles, total: upd.total_price };
       } else {
-        logAction = 'booking_edit';
+        // «Dorazila» (arrived) не логируем; если в PATCH менялся ТОЛЬКО arrived —
+        // не пишем вообще (иначе получилась бы пустая «Úprava»).
         const changed: string[] = [];
         if (patch.comment != null) changed.push('poznámka');
         if ('label' in patch) changed.push('štítek');
         if (patch.totalPrice != null) changed.push('cena');
-        if ('arrived' in patch) changed.push(patch.arrived ? 'dorazila' : 'nedorazila');
-        logSummary = `Úprava: ${cn} · ${changed.join(', ') || 'beze změn'}`;
-        logDetails = { changed, comment: patch.comment ?? null, total: patch.totalPrice ?? null };
+        if (changed.length === 0) {
+          shouldLog = false;
+        } else {
+          logAction = 'booking_edit';
+          logSummary = `Úprava: ${cn} · ${changed.join(', ')}`;
+          logDetails = { changed, comment: patch.comment ?? null, total: patch.totalPrice ?? null };
+        }
       }
-      strapi
-        .service('api::calendar-log.calendar-log')
-        .write({
-          action: logAction,
-          entityType: 'booking',
-          actorName: session?.username || '',
-          entityDocId: bookingDocId,
-          clientName: cn,
-          employeeName: newEmp,
-          summary: logSummary,
-          details: logDetails,
-        })
-        .catch((e) => strapi.log.error(`calendar-log patch failed: ${e.message}`));
+      if (shouldLog) {
+        strapi
+          .service('api::calendar-log.calendar-log')
+          .write({
+            action: logAction,
+            entityType: 'booking',
+            actorName: session?.username || '',
+            entityDocId: bookingDocId,
+            clientName: cn,
+            employeeName: newEmp,
+            summary: logSummary,
+            details: logDetails,
+          })
+          .catch((e) => strapi.log.error(`calendar-log patch failed: ${e.message}`));
+      }
     }
 
     return strapi.documents(BOOKING_UID).findOne({ documentId: bookingDocId, populate: { employee: { fields: ['name'] }, client: { fields: ['name', 'phone'] } } });
