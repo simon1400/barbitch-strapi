@@ -462,14 +462,34 @@ export default {
 
   async redemptionsForAdmin(clientDocId, bookingDocId = null) {
     this.assertEnabled();
-    const filters = bookingDocId
-      ? {
-          $or: [
-            { status: { $eq: 'available' }, client: { documentId: { $eq: clientDocId } } },
-            { status: { $eq: 'used' }, usedInBookingDocId: { $eq: bookingDocId } },
-          ],
-        }
-      : { status: { $eq: 'available' }, client: { documentId: { $eq: clientDocId } } };
+    // Гейт (решение владельца 2026-07-21): available-скидки bitchcard в календаре
+    // показываем ТОЛЬКО клиентам с цифровым аккаунтом кабинета (emailVerifiedAt).
+    // Бумажные карты не действуют — чтобы получить скидку, клиент регистрируется
+    // в кабинете, тогда его накопленные награды становятся видны. Уже ПРИМЕНЁННУЮ
+    // к этой брони скидку (used) показываем всегда — факт брони, админ может снять.
+    const client = clientDocId
+      ? await strapi.documents(CLIENT_UID).findOne({
+          documentId: clientDocId,
+          fields: ['emailVerifiedAt'],
+        })
+      : null;
+    const registered = !!client?.emailVerifiedAt;
+
+    const availFilter = {
+      status: { $eq: 'available' },
+      client: { documentId: { $eq: clientDocId } },
+    };
+    const usedFilter = { status: { $eq: 'used' }, usedInBookingDocId: { $eq: bookingDocId } };
+
+    let filters;
+    if (bookingDocId) {
+      // used всегда; available — только зарегистрированным
+      filters = registered ? { $or: [availFilter, usedFilter] } : usedFilter;
+    } else {
+      if (!registered) return [];
+      filters = availFilter;
+    }
+
     const rows = await strapi.documents(REDEMPTION_UID).findMany({
       filters,
       populate: { reward: true },
