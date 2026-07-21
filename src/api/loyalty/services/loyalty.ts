@@ -33,7 +33,9 @@ const VOUCHER_UID = 'api::voucher.voucher';
 // Окно ежедневного начисления: брони за последние N дней (не только «вчера») —
 // ловит поздние чекауты (смену закрыли/перезакрыли через день-два). Идемпотентно.
 const ACCRUE_WINDOW_DAYS = 7;
-const SIGNUP_BONUS_KC = 100; // решение (е); начисление — К4
+// Бонус за регистрацию в кабинете. По умолчанию ВЫКЛЮЧЕН (0).
+// Включить = задать env SIGNUP_BONUS_KC (напр. 100). ≤0 → бонус не начисляется.
+const SIGNUP_BONUS_KC = Number(process.env.SIGNUP_BONUS_KC) || 0;
 
 export class LoyaltyError extends Error {
   status: number;
@@ -585,11 +587,11 @@ export default {
     return { idVoucher, sum, recipientName: forName, email };
   },
 
-  // ── бонус за регистрацию (решение (е): 100 Kč при первом входе в кабинет) ──
+  // ── бонус за регистрацию (SIGNUP_BONUS_KC при первом входе; по умолч. 0 = выкл) ──
   // Идемпотентно: одна signup-транзакция на клиента НАВСЕГДА (за всю историю,
   // не per год). Сбой начисления не должен ронять вход — зовущий ловит сам.
   async grantSignupBonus(clientDocId) {
-    if (!this.enabled() || !clientDocId) return { granted: 0 };
+    if (!this.enabled() || !clientDocId || SIGNUP_BONUS_KC <= 0) return { granted: 0 };
     const existing = await strapi.documents(TX_UID).count({
       filters: {
         client: { documentId: { $eq: clientDocId } },
