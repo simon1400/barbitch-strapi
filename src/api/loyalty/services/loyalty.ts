@@ -515,6 +515,39 @@ export default {
       }));
   },
 
+  // Прогресс копилки для админ-флоу (drawer календаря): сколько клиент накопил
+  // за текущий карточный год и сколько осталось до следующей награды. Гейта по
+  // emailVerifiedAt тут нет намеренно — это информация для админа («до скидки
+  // 400 Kč вам не хватает 400 — зарегистрируйтесь в кабинете»), сами available-
+  // награды незарегистрированным по-прежнему не отдаются (redemptionsForAdmin).
+  // Voucher-ступень (бонус-сюрприз 10000) следующей наградой НЕ считается —
+  // как в треке кабинета (loyaltyForClient), чтобы не спойлерить сюрприз.
+  async clientProgress(clientDocId) {
+    const cardYear = Number(pragueDateOf(new Date()).slice(0, 4));
+    const [balanceKc, rewards] = await Promise.all([
+      this.balanceOf(clientDocId, cardYear),
+      strapi.documents(REWARD_UID).findMany({
+        filters: { active: { $eq: true } },
+        sort: 'thresholdKc:asc',
+        limit: 50,
+      }),
+    ]);
+    const next =
+      rewards.find((r) => r.discountType !== 'voucher' && Number(r.thresholdKc) > balanceKc) ||
+      null;
+    return {
+      cardYear,
+      balanceKc,
+      nextReward: next
+        ? {
+            title: next.title,
+            thresholdKc: Number(next.thresholdKc),
+            remainingKc: Number(next.thresholdKc) - balanceKc,
+          }
+        : null,
+    };
+  },
+
   // ── награда C: получение бонусного подарочного ваучера (решение 2026-07-19) ──
   // Клиент с available voucher-наградой «обналичивает» её в реальный voucher-запись
   // (сразу оплаченную/активную, бесплатную — заработана). Себе (email из client)

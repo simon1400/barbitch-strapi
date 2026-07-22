@@ -295,10 +295,11 @@ export default {
       const loyalty = strapi.service('api::loyalty.loyalty');
       if (!loyalty.enabled()) return { enabled: false, redemptions: [] };
       if (!booking.client?.documentId) return { enabled: true, redemptions: [] };
-      return {
-        enabled: true,
-        redemptions: await loyalty.redemptionsForAdmin(booking.client.documentId, ctx.params.id),
-      };
+      const [redemptions, progress] = await Promise.all([
+        loyalty.redemptionsForAdmin(booking.client.documentId, ctx.params.id),
+        loyalty.clientProgress(booking.client.documentId),
+      ]);
+      return { enabled: true, redemptions, progress };
     });
   },
 
