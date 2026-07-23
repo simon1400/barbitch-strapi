@@ -243,6 +243,8 @@ export default {
   //    награду (status='available'), если она осталась с момента, когда баланс был
   //    выше (ручная −Kč корректировка / пере-бэкфил после скидки). used/expired
   //    НЕ трогаем — скидка уже применена к брони / награда сгорела 31.12.
+  //  • каскад «всегда только последняя»: нижние available-ступени под высшей
+  //    достигнутой гасятся в used (блок в конце метода).
   // Уникальность client+reward+cardYear — каждая ступень раз в карточный год.
   async recomputeClientRewards(clientDocId: string, cardYear: number) {
     const balance = await this.balanceOf(clientDocId, cardYear);
@@ -288,6 +290,46 @@ export default {
     if (revoked) {
       strapi.log.info(
         `loyalty: revoked ${revoked} unearned redemption(s) for client ${clientDocId} (${cardYear}, balance ${balance})`
+      );
+    }
+
+    // «Всегда только последняя» (решение владельца 2026-07-23): у клиента доступна
+    // максимум ОДНА награда трека — высшая достигнутая ступень; при пересечении
+    // нового порога нижние available гасятся. Именно status='used', НЕ delete —
+    // удалённую этот же recompute тут же пересоздал бы (порог достигнут, награды
+    // нет), а used считается существующей и в кабинете показывается «✓ Uplatněno»
+    // (та же механика, что разовый каскад s139 от 2026-07-22). Voucher-бонус
+    // (10000) в каскаде не участвует ни триггером, ни целью — сюрприз не трогаем.
+    const track = rewards.filter((r) => r.discountType !== 'voucher');
+    const reachedTiers = track.filter((r) => balance >= Number(r.thresholdKc));
+    let cascaded = 0;
+    if (reachedTiers.length > 0) {
+      const maxTier = Math.max(...reachedTiers.map((r) => Number(r.thresholdKc)));
+      const lowerIds = track
+        .filter((r) => Number(r.thresholdKc) < maxTier)
+        .map((r) => r.documentId);
+      if (lowerIds.length > 0) {
+        const lowerAvail = await strapi.documents(REDEMPTION_UID).findMany({
+          filters: {
+            client: { documentId: { $eq: clientDocId } },
+            cardYear: { $eq: cardYear },
+            status: { $eq: 'available' },
+            reward: { documentId: { $in: lowerIds } },
+          },
+          limit: 20,
+        });
+        for (const r of lowerAvail) {
+          await strapi.documents(REDEMPTION_UID).update({
+            documentId: r.documentId,
+            data: { status: 'used', discountKc: 0, usedInBookingDocId: null },
+          });
+          cascaded++;
+        }
+      }
+    }
+    if (cascaded) {
+      strapi.log.info(
+        `loyalty: cascaded ${cascaded} lower-tier redemption(s) to used for client ${clientDocId} (${cardYear}, balance ${balance})`
       );
     }
     return created;
