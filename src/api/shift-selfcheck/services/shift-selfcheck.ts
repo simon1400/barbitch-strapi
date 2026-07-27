@@ -270,8 +270,11 @@ export default {
       fetchCalendarBookings(date),
     ]);
 
-    // Внутренние услуги (мастер↔мастер) в календаре не существуют — исключаем из сверки.
-    const comparable = (services || []).filter((s: any) => !s?.internal);
+    // Внутренние услуги (мастер↔мастер) теперь тоже бронируются через календарь →
+    // в ИМЕННУЮ сверку с календарём входят все записи. Из ДЕНЕЖНОГО rozdíl интерни
+    // по-прежнему исключены — салон у них легитимно ничего не получает.
+    const allServices = services || [];
+    const comparable = allServices.filter((s: any) => !s?.internal);
 
     // 1. Rozdíl за смену: Σ (staff+salon − offerPrice×(1−sleva)) по реальным услугам.
     //    Положительное (переплата/салон получил больше) → не показываем; отрицательное
@@ -324,10 +327,10 @@ export default {
     let strapiOnly: string[] = [];
     let serviceMismatch: { client: string; strapi: string; calendar: string }[] = [];
     if (calendar.available) {
-      const diff = diffByName(comparable, calendar.events);
+      const diff = diffByName(allServices, calendar.events);
       strapiOnly = diff.strapiExtra;
       calendarOnly = diff.calendarExtra;
-      serviceMismatch = offerMismatches(comparable, calendar.events);
+      serviceMismatch = offerMismatches(allServices, calendar.events);
     }
 
     // 5. Отсутствующие записи.
