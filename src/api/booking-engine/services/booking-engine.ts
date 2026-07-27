@@ -1260,11 +1260,30 @@ export default {
     return { documentId: created[0]?.documentId, count: created.length };
   },
 
+  // Имя мастера для журнала: зеркальные блоки из Noona-импорта создавались БЕЗ
+  // employeeNameRaw (только relation employee + noonaEmployeeId) → фолбэки.
+  async _blockEmployeeName(block) {
+    if (block.employeeNameRaw) return block.employeeNameRaw;
+    if (block.employee?.name) return block.employee.name;
+    if (block.noonaEmployeeId) {
+      const found = await strapi.documents(PERSONAL_UID).findMany({
+        filters: { noonaEmployeeId: block.noonaEmployeeId },
+        fields: ['name'],
+        limit: 1,
+      });
+      if (found.length && found[0].name) return found[0].name;
+    }
+    return '';
+  },
+
   // PATCH блока: время (в рамках его дня) и/или название. Только этот конкретный блок.
   // Любые блоки (включая исторические зеркальные из Noona) полностью управляемы:
   // синк блоков больше не существует, ничего их не перезапишет и не воскресит.
   async adminPatchBlock(blockDocId, { startMin, endMin, title }, session) {
-    const block = await strapi.documents(TIME_BLOCK_UID).findOne({ documentId: blockDocId });
+    const block = await strapi.documents(TIME_BLOCK_UID).findOne({
+      documentId: blockDocId,
+      populate: { employee: { fields: ['name'] } },
+    });
     if (!block) throw new EngineError(404, 'block_not_found', 'Блок не найден');
     const data = {};
     if (startMin != null || endMin != null) {
@@ -1286,21 +1305,23 @@ export default {
         `${minToHHMM(utcToPragueMinClamped(s, bDate))}–${minToHHMM(utcToPragueMinClamped(e, bDate))}`;
       const oldTime = block.startsAt ? fmtRange(block.startsAt, block.endsAt) : '';
       const newTime = data.startsAt ? fmtRange(data.startsAt, data.endsAt) : oldTime;
-      strapi
-        .service('api::calendar-log.calendar-log')
-        .write({
-          action: 'block_edit',
-          entityType: 'block',
-          actorName: session?.username || '',
-          entityDocId: blockDocId,
-          employeeName: block.employeeNameRaw || '',
-          summary: `Úprava bloku: ${block.employeeNameRaw || ''} · ${fmtDay(bDate)}${data.startsAt ? ` · ${oldTime} → ${newTime}` : ''}${data.title != null ? ` · ${data.title}` : ''}`,
-          details: {
-            date: fmtDay(bDate),
-            before: { time: oldTime, title: block.title },
-            after: { time: newTime, title: data.title != null ? data.title : block.title },
-          },
-        })
+      this._blockEmployeeName(block)
+        .then((empName) =>
+          strapi.service('api::calendar-log.calendar-log').write({
+            action: 'block_edit',
+            entityType: 'block',
+            actorName: session?.username || '',
+            entityDocId: blockDocId,
+            employeeName: empName,
+            summary: `Úprava bloku: ${empName ? `${empName} · ` : ''}${fmtDay(bDate)}${data.startsAt ? ` · ${oldTime} → ${newTime}` : ''}${data.title != null ? ` · ${data.title}` : ''}`,
+            details: {
+              mistr: empName || null,
+              date: fmtDay(bDate),
+              before: { time: oldTime, title: block.title },
+              after: { time: newTime, title: data.title != null ? data.title : block.title },
+            },
+          })
+        )
         .catch((e) => strapi.log.error(`calendar-log block-edit failed: ${e.message}`));
     }
     return updated;
@@ -1309,10 +1330,15 @@ export default {
   // series=true → удалить все повторения: own-серия делит noonaKey,
   // зеркальная rrule-серия делит noonaBlockedId (noonaKey у них per-date `id|date`).
   async adminDeleteBlock(blockDocId, { series = false } = {}, session) {
-    const block = await strapi.documents(TIME_BLOCK_UID).findOne({ documentId: blockDocId });
+    const block = await strapi.documents(TIME_BLOCK_UID).findOne({
+      documentId: blockDocId,
+      populate: { employee: { fields: ['name'] } },
+    });
     if (!block) throw new EngineError(404, 'block_not_found', 'Блок не найден');
 
-    // журнал: имя/время блока фиксируем ДО удаления (пишем один раз, count = 1 или série)
+    // журнал: имя/время блока фиксируем ДО удаления (пишем один раз, count = 1 или série);
+    // имя резолвим тоже ДО delete — после удаления relation уже не прочитать
+    const empName = await this._blockEmployeeName(block);
     const bDate = String(block.date);
     const bTime = block.startsAt
       ? `${minToHHMM(utcToPragueMinClamped(block.startsAt, bDate))}–${minToHHMM(utcToPragueMinClamped(block.endsAt, bDate))}`
@@ -1325,9 +1351,9 @@ export default {
           entityType: 'block',
           actorName: session?.username || '',
           entityDocId: blockDocId,
-          employeeName: block.employeeNameRaw || '',
-          summary: `Smazán blok: ${block.employeeNameRaw || ''} · ${fmtDay(bDate)}${bTime ? ` · ${bTime}` : ''}${count > 1 ? ` (série ${count}×)` : ''}`,
-          details: { date: fmtDay(bDate), time: bTime, title: block.title, seriesCount: count },
+          employeeName: empName,
+          summary: `Smazán blok: ${empName ? `${empName} · ` : ''}${fmtDay(bDate)}${bTime ? ` · ${bTime}` : ''}${count > 1 ? ` (série ${count}×)` : ''}`,
+          details: { mistr: empName || null, date: fmtDay(bDate), time: bTime, title: block.title, seriesCount: count },
         })
         .catch((e) => strapi.log.error(`calendar-log block-delete failed: ${e.message}`));
 
