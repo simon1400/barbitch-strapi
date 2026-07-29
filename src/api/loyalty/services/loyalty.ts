@@ -395,6 +395,18 @@ export default {
     if (already > 0) {
       throw new LoyaltyError(409, 'booking_has_redemption', 'Na rezervaci už je uplatněna sleva');
     }
+    // Правило салона: скидки НЕ суммируются — на одну услугу только одна.
+    // Если на брони уже висит применённая скидка за дозапис (rebook −15 %),
+    // награду bitchcard применить нельзя (зеркальный барьер — в rebook-сервисе,
+    // где «Vrátit slevu» блокируется при уже применённой награде bitchcard).
+    const rebook = booking.discount;
+    if (rebook && rebook.type === 'rebook' && rebook.applied && Number(rebook.discountKc) > 0) {
+      throw new LoyaltyError(
+        409,
+        'booking_has_discount',
+        'Na rezervaci už je sleva za dozápis — slevy nelze kombinovat'
+      );
+    }
 
     const reward = redemption.reward;
     const value = Number(reward.discountValue) || 0;

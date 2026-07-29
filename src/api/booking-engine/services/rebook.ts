@@ -460,6 +460,21 @@ export default {
       throw new EngineError(409, apply ? 'discount_already_applied' : 'discount_not_applied',
         apply ? 'Скидка уже применена' : 'Скидка уже снята');
     }
+    // Правило салона: одна скидка на услугу. Вернуть скидку за дозапис нельзя,
+    // пока на брони висит применённая награда bitchcard (зеркало барьера в
+    // loyalty.applyRedemptionToBooking). Снятие (apply=false) не ограничиваем.
+    if (apply) {
+      const used = await strapi
+        .service('api::loyalty.loyalty')
+        .usedRedemptionsForBookings([bookingDocId]);
+      if (used[bookingDocId]) {
+        throw new EngineError(
+          409,
+          'booking_has_redemption',
+          'Na rezervaci už je sleva bitchcard — slevy nelze kombinovat'
+        );
+      }
+    }
     const delta = apply ? -Number(discount.discountKc) : Number(discount.discountKc);
     const next = { ...discount, applied: apply };
     const knex = strapi.db.connection;
