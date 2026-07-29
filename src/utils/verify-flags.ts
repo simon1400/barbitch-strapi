@@ -7,7 +7,8 @@
 //
 // Семантика флагов (зеркалится в admin/src/pages/global/fetch/shiftClose.ts):
 //   ok          🟩 всё сходится с правилом
-//   sleva       🟦 недоплата объясняется явной скидкой (поле sale)
+//   sleva       🟦 визит со скидкой: ручной (поле sale) или — на booking-пути —
+//               системной (bitchcard-redemption / дозапись −15 %). Информационный.
 //   ztrata      🟥 салон получил меньше правила без скидки → утечка денег
 //   salon_up    🟪 салон получил больше правила (подозрительно)
 //   mistr_up    🟨↑ мастер получил больше правила
@@ -69,6 +70,22 @@ export const parseMoney = (v: unknown): number => {
  * процент не может быть больше 100, поэтому значения >100 трактуются как кроны.
  * Значения 1..100 остаются процентами («50» = 50 %, не 50 Kč) — гоча s81.
  */
+/**
+ * Введена ли РУЧНАЯ скидка в поле `sale` (любой формат: «20%», «0.2», «400»).
+ * Отдельно от parseSaleRate: не зависит от fullPrice (кроны >100 при неизвестной
+ * полной цене всё равно означают «скидка есть»). Используется гейтом 🎟
+ * sleva_bez_karty — тот должен реагировать ТОЛЬКО на ручную скидку, а не на
+ * системную (иначе легитимное bitchcard-погашение выглядело бы «мимо программы»).
+ */
+export const hasManualSale = (raw: unknown): boolean => {
+  if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0;
+  if (typeof raw === 'string') {
+    const m = raw.match(/(-?\d+(?:[.,]\d+)?)/);
+    return m ? parseFloat(m[1].replace(',', '.')) > 0 : false;
+  }
+  return false;
+};
+
 export const parseSaleRate = (raw: unknown, fullPrice: number): number => {
   let n = 0;
   if (typeof raw === 'number') n = Number.isFinite(raw) ? raw : 0;
@@ -241,7 +258,9 @@ export const computeBookingFlags = ({
   /** Σ discountKc погашенных bitchcard-наград этой брони (async-lookup вызывающего). */
   redemptionKc?: number;
 }): VerifyFlag[] => {
-  const { fullPrice, paidExpected, hasSale } = bookingPricing(booking, sale, { redemptionKc });
+  const { fullPrice, paidExpected, hasSale, systemDiscountKc } = bookingPricing(booking, sale, {
+    redemptionKc,
+  });
   return computeFlagsCore({
     fullPrice,
     paidExpected,
@@ -249,6 +268,9 @@ export const computeBookingFlags = ({
     staffSalaries,
     salonSalaries,
     internal,
-    hasSale,
+    // 🟦 и для системных скидок (bitchcard/rebook уже в totalPrice брони) — иначе
+    // визит со скидкой по программе выглядел бы как обычный 🟩 без пометки.
+    // Гейт 🎟 у вызывающих завязан на hasManualSale(sale), НЕ на этот флаг.
+    hasSale: hasSale || systemDiscountKc > 0,
   });
 };

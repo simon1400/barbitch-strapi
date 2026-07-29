@@ -14,6 +14,7 @@ import {
   computeBookingFlags,
   computeOfferFlags,
   dominantEmoji,
+  hasManualSale,
   parseMoney,
   type VerifyFlag,
 } from '../../../../utils/verify-flags';
@@ -109,7 +110,9 @@ async function validateOfferMoney(event: any) {
     // Booking-linked запись матчится структурно (по documentId брони); legacy-запись —
     // по цепочке service-provided (clientName+date) → bookings по clientNameRaw →
     // redemptions used с usedInBookingDocId среди них.
-    if (flags.includes('sleva') && process.env.LOYALTY_ENABLED === 'true') {
+    // Гейт по РУЧНОЙ скидке, не по флагу 🟦: sleva теперь ставится и системными
+    // скидками booking-пути (bitchcard/rebook), а они «по программе» — 🎟 не про них.
+    if (hasManualSale(saleRaw) && process.env.LOYALTY_ENABLED === 'true') {
       try {
         let hasRedemption = false
         if (booking?.documentId) {

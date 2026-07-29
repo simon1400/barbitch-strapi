@@ -22,6 +22,7 @@ import {
   bookingPricing,
   computeBookingFlags,
   dominantEmoji,
+  hasManualSale,
   parseMoney,
 } from '../../../utils/verify-flags';
 
@@ -195,7 +196,9 @@ export default {
       redemptionKc,
     });
 
-    if (flags.includes('sleva') && process.env.LOYALTY_ENABLED === 'true') {
+    // 🎟 только при РУЧНОЙ скидке (hasManualSale, не flags.includes('sleva') —
+    // 🟦 теперь ставится и системными скидками, а те по определению «по программе»).
+    if (hasManualSale(sale) && process.env.LOYALTY_ENABLED === 'true') {
       const hasRebook = booking.discount?.type === 'rebook' && booking.discount?.applied;
       if (!hasRebook && redemptionKc <= 0) flags.push('sleva_bez_karty');
     }
