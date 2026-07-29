@@ -187,7 +187,12 @@ export default {
       const employeeDocId = e.employee ? personalByNoona.get(e.employee) || null : null;
       try {
         await strapi.documents(BOOKING_UID).create({
-          data: { ...mapped, client: clientDocId, employee: employeeDocId },
+          data: {
+            ...mapped,
+            // объектная форма обязательна: documentId с ведущей цифрой иначе читается как id
+            client: clientDocId ? { documentId: clientDocId } : null,
+            employee: employeeDocId ? { documentId: employeeDocId } : null,
+          },
         });
         created += 1;
       } catch (err) {

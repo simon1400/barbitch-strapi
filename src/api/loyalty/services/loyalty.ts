@@ -143,7 +143,7 @@ export default {
       }
       await strapi.documents(TX_UID).create({
         data: {
-          client: clientDocId,
+          client: { documentId: clientDocId },
           delta,
           reason: 'visit',
           bookingDocId: b.documentId,
@@ -269,8 +269,8 @@ export default {
         if (existing.length > 0) continue; // награда любого статуса уже есть
         await strapi.documents(REDEMPTION_UID).create({
           data: {
-            client: clientDocId,
-            reward: reward.documentId,
+            client: { documentId: clientDocId },
+            reward: { documentId: reward.documentId },
             cardYear,
             status: 'available',
             code: genCode(),
@@ -709,7 +709,7 @@ export default {
     const cardYear = Number(pragueDateOf(new Date()).slice(0, 4));
     await strapi.documents(TX_UID).create({
       data: {
-        client: clientDocId,
+        client: { documentId: clientDocId },
         delta: SIGNUP_BONUS_KC,
         reason: 'signup',
         cardYear,

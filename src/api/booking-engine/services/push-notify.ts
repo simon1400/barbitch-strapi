@@ -58,7 +58,7 @@ export default {
       auth: subscription.keys?.auth || '',
       employeeName: employeeName || '',
       userAgent: userAgent || '',
-      ...(personalDocId ? { personal: personalDocId } : {}),
+      ...(personalDocId ? { personal: { documentId: personalDocId } } : {}),
     };
     if (existing[0]) {
       await strapi.documents(SUB_UID).update({ documentId: existing[0].documentId, data });

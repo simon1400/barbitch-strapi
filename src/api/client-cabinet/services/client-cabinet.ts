@@ -95,7 +95,7 @@ export default {
         tokenHash: sha256(token),
         expiresAt,
         email,
-        client: client.documentId,
+        client: { documentId: client.documentId },
       },
     });
 

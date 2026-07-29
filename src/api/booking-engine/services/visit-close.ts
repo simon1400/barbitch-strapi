@@ -53,6 +53,15 @@ const orNull = (v) => {
 // поэтому храним канонический вид с точкой (запятая дала бы NaN).
 const moneyStr = (v) => String(parseMoney(v));
 
+/**
+ * 🟥 Связь ВСЕГДА передаём объектом `{ documentId }`, а не голой строкой.
+ * Strapi 5 определяет «строка — это id или documentId?» через `parseInt(value)`
+ * (mapRelation в document-service): documentId, НАЧИНАЮЩИЙСЯ С ЦИФРЫ
+ * («2p1jqoyz…» → parseInt = 2), принимается за числовой entity id, связь не
+ * резолвится → 500 «Invalid relations». Объектная форма однозначна.
+ */
+const rel = (documentId) => (documentId ? { documentId } : null);
+
 export default {
   // ── чтение ──
 
@@ -254,9 +263,9 @@ export default {
         clientName,
         date,
         time,
-        personal: employeeDocId,
-        booking: bookingDocId,
-        ...(voucherDocId ? { voucher: voucherDocId } : {}),
+        personal: rel(employeeDocId),
+        booking: rel(bookingDocId),
+        ...(voucherDocId ? { voucher: rel(voucherDocId) } : {}),
         staffSalaries: moneyStr(body.staffSalaries),
         salonSalaries: moneyStr(body.salonSalaries),
         tip: orNull(body.tip) ? moneyStr(body.tip) : null,
@@ -322,7 +331,7 @@ export default {
     if ('cash' in body) data.cash = body.cash !== false;
     if ('comment' in body) data.comment = orNull(body.comment);
     if ('voucherDocId' in body) {
-      data.voucher = body.voucherDocId ? await this._resolveVoucher(body.voucherDocId) : null;
+      data.voucher = body.voucherDocId ? rel(await this._resolveVoucher(body.voucherDocId)) : null;
     }
 
     await strapi.documents(SP_UID).update({ documentId: spDocId, status: 'draft', data });

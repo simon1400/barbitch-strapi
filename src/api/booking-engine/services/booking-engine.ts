@@ -1223,7 +1223,8 @@ export default {
             noonaKey: key,
             noonaBlockedId: '',
             noonaEmployeeId: emp.noonaEmployeeId || '',
-            employee: emp.documentId,
+            // связь объектом — documentId с ведущей цифрой Strapi принял бы за id (см. visit-close.rel)
+            employee: { documentId: emp.documentId },
             employeeNameRaw: emp.name,
             date: d,
             startsAt: pragueMinToUtcIso(d, startMin),
