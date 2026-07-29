@@ -31,8 +31,12 @@
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::offer.offer",
-      "inversedBy": "offerRendered",
-      "required": true
+      "inversedBy": "offerRendered"
+    },
+    "booking": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::booking.booking"
     },
     "time": {
       "type": "string"

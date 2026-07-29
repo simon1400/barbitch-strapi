@@ -1130,6 +1130,15 @@ export default {
     } catch (e) {
       strapi.log.error(`rebook revoke on delete failed: ${e.message}`);
     }
+    // НЕопубликованная запись о закрытии визита уходит вместе с бронью: осиротевший
+    // черновик без связи не прошёл бы pre-flight закрытия смены и заблокировал
+    // публикацию. Опубликованную НЕ трогаем — смена уже посчитана, а все нужные
+    // данные (клиент/дата/деньги) лежат на самой записи.
+    try {
+      await strapi.service('api::booking-engine.visit-close').removeDraftForBooking(bookingDocId);
+    } catch (e) {
+      strapi.log.error(`visit-close cleanup on delete failed: ${e.message}`);
+    }
     await strapi.documents(BOOKING_UID).delete({ documentId: bookingDocId });
     strapi.log.info(
       `booking-engine: admin ${session?.username || '?'} DELETED booking ${bookingDocId} (${booking.clientNameRaw || ''} ${booking.date})`

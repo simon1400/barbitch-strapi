@@ -47,6 +47,7 @@ const requireStaff = (ctx) => {
 };
 
 const pushSvc = () => strapi.service('api::booking-engine.push-notify');
+const visitCloseSvc = () => strapi.service('api::booking-engine.visit-close');
 
 // personal.documentId по имени сотрудника (session.username = полное имя = personal.name)
 const resolvePersonalByName = async (name) => {
@@ -277,6 +278,37 @@ export default {
     const session = requireAdmin(ctx);
     if (!session) return;
     await handle(ctx, () => svc().adminDeleteBooking(ctx.params.id, session));
+  },
+
+  // ── закрытие визита из календаря («Uzavřít návštěvu», вариант D2) ──
+
+  // GET /api/engine/admin/bookings/:id/checkout — запись чекаута (или null) + подсказка расчёта
+  async adminCheckoutGet(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => visitCloseSvc().getForBooking(ctx.params.id));
+  },
+
+  // POST /api/engine/admin/bookings/:id/checkout
+  // {staffSalaries, salonSalaries, tip?, sale?, cash?, internal?, voucherDocId?, comment?}
+  async adminCheckoutCreate(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => visitCloseSvc().createForBooking(ctx.params.id, ctx.request.body || {}, session));
+  },
+
+  // PATCH /api/engine/admin/checkout/:id — правка сумм/галок (только черновик)
+  async adminCheckoutPatch(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => visitCloseSvc().patch(ctx.params.id, ctx.request.body || {}, session));
+  },
+
+  // DELETE /api/engine/admin/checkout/:id — отменить закрытие визита (бронь → active)
+  async adminCheckoutDelete(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => visitCloseSvc().remove(ctx.params.id, session));
   },
 
   // ── лояльность bitchcard в календаре (walk-in флоу, К4) ──

@@ -2295,6 +2295,7 @@ export interface ApiServiceProvidedServiceProvided
     draftAndPublish: true;
   };
   attributes: {
+    booking: Schema.Attribute.Relation<'oneToOne', 'api::booking.booking'>;
     cash: Schema.Attribute.Boolean &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<true>;
@@ -2317,8 +2318,7 @@ export interface ApiServiceProvidedServiceProvided
       'api::service-provided.service-provided'
     > &
       Schema.Attribute.Private;
-    offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'> &
-      Schema.Attribute.Required;
+    offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'>;
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'> &
       Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;

@@ -44,6 +44,11 @@ export default {
     admin('POST', '/engine/admin/bookings', 'booking-engine.adminCreateBooking'),
     admin('PATCH', '/engine/admin/bookings/:id', 'booking-engine.adminPatchBooking'),
     admin('DELETE', '/engine/admin/bookings/:id', 'booking-engine.adminDeleteBooking'),
+    // закрытие визита из календаря (D2): запись «Оказанная услуга» по брони
+    admin('GET', '/engine/admin/bookings/:id/checkout', 'booking-engine.adminCheckoutGet'),
+    admin('POST', '/engine/admin/bookings/:id/checkout', 'booking-engine.adminCheckoutCreate'),
+    admin('PATCH', '/engine/admin/checkout/:id', 'booking-engine.adminCheckoutPatch'),
+    admin('DELETE', '/engine/admin/checkout/:id', 'booking-engine.adminCheckoutDelete'),
     // лояльность bitchcard в календаре: награды клиента брони + применить/снять скидку по коду
     admin('GET', '/engine/admin/bookings/:id/redemptions', 'booking-engine.adminBookingRedemptions'),
     admin('POST', '/engine/admin/bookings/:id/redemption', 'booking-engine.adminApplyRedemption'),

@@ -52,14 +52,46 @@ const parseSaleRate = (raw: unknown, offerPrice: number): number => {
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-const computeMustValues = (offerPrice: number, ratePercent: number, sale: unknown) => {
-  const discountRate = parseSaleRate(sale, offerPrice);
-  const hasSale = discountRate > 0;
-  const mustStaff = offerPrice * (ratePercent / 100);
-  const mustSalonNow = hasSale
-    ? offerPrice * (1 - discountRate) - mustStaff
-    : offerPrice - mustStaff;
-  return { mustStaff, mustSalonNow, hasSale, discountRate };
+/**
+ * Цены визита. ДВА пути (зеркало utils/verify-flags.ts):
+ *   • booking-путь (записи чекаута из календаря, D2): fullPrice = Σ services[].price
+ *     (у юниора это уже юниор-цена), paidExpected = totalPrice минус ручная скидка —
+ *     системные скидки (дозапись/bitchcard) уже сидят в totalPrice;
+ *   • legacy-путь: полная цена = offer.price, скидка вычитается из неё же.
+ * null — цену взять неоткуда (нет ни брони, ни оффера) → сравнивать нечего.
+ */
+const pricingOf = (item: any): { fullPrice: number; paidExpected: number; hasSale: boolean } | null => {
+  const b = item?.booking;
+  if (b) {
+    const list = Array.isArray(b?.services) ? b.services : [];
+    const total = toNum(b?.totalPrice);
+    const sum = list.reduce((acc: number, s: any) => acc + toNum(s?.price), 0);
+    const fullPrice = b?.priceOverride ? total : sum > 0 ? sum : total;
+    if (!(fullPrice > 0)) return null;
+    const discountRate = parseSaleRate(item?.sale, fullPrice);
+    return {
+      fullPrice,
+      paidExpected: Math.max(0, total - fullPrice * discountRate),
+      hasSale: discountRate > 0,
+    };
+  }
+  const offerPrice = Number(item?.offer?.price);
+  if (!Number.isFinite(offerPrice) || offerPrice <= 0) return null;
+  const discountRate = parseSaleRate(item?.sale, offerPrice);
+  return {
+    fullPrice: offerPrice,
+    paidExpected: offerPrice * (1 - discountRate),
+    hasSale: discountRate > 0,
+  };
+};
+
+// Мастер ВСЕГДА получает свой процент от ПОЛНОЙ цены — скидку съедает салон (s47).
+const computeMustValues = (
+  pricing: { fullPrice: number; paidExpected: number },
+  ratePercent: number,
+) => {
+  const mustStaff = pricing.fullPrice * (ratePercent / 100);
+  return { mustStaff, mustSalonNow: pricing.paidExpected - mustStaff };
 };
 
 type VerifyFlag = 'ok' | 'sleva' | 'ztrata' | 'salon_up' | 'mistr_up' | 'mistr_down' | 'internal';
@@ -78,14 +110,14 @@ const FLAG_META: Record<VerifyFlag, { emoji: string; label: string }> = {
 };
 
 const computeFlags = (
-  offerPrice: number,
+  pricing: { fullPrice: number; paidExpected: number; hasSale: boolean },
   ratePercent: number,
   staffSalaries: number,
   salonSalaries: number,
-  sale: unknown,
   internal: boolean,
 ): VerifyFlag[] => {
-  const { mustStaff, mustSalonNow, hasSale } = computeMustValues(offerPrice, ratePercent, sale);
+  const { mustStaff, mustSalonNow } = computeMustValues(pricing, ratePercent);
+  const hasSale = pricing.hasSale;
   const rStaff = r2(staffSalaries);
   const rMustStaff = r2(mustStaff);
   if (internal) {
@@ -114,15 +146,14 @@ const flagsOf = (item: any): VerifyFlag[] => {
       typeof x === 'string' && x in FLAG_META,
     );
   }
-  const offerPrice = Number(item?.offer?.price);
+  const pricing = pricingOf(item);
   const ratePercent = Number(item?.personal?.ratePercent);
-  if (Number.isFinite(offerPrice) && Number.isFinite(ratePercent) && offerPrice > 0) {
+  if (pricing && Number.isFinite(ratePercent)) {
     return computeFlags(
-      offerPrice,
+      pricing,
       ratePercent,
       toNum(item?.staffSalaries),
       toNum(item?.salonSalaries),
-      item?.sale,
       Boolean(item?.internal),
     );
   }
@@ -143,6 +174,52 @@ const normalizeTitle = (t: string) =>
   normalize(t)
     .replace(/^юниор\s+/, '')
     .replace(/\s*\+\s*/g, ' + ');
+
+// --- Структурный матч записи ↔ брони (зеркало helpers.ts admin-модуля, V3) ---
+// Записи чекаута из календаря («Uzavřít návštěvu») несут линк service-provided.booking
+// → матчатся по documentId брони, а не по имени клиента. Имя-матчинг остаётся
+// fallback'ом для legacy-записей, заведённых вручную в CM.
+
+const bookingDocIdOf = (item: any): string | null => {
+  const id = item?.booking?.documentId;
+  return typeof id === 'string' && id ? id : null;
+};
+
+const matchByBooking = (items: any[], events: any[]) => {
+  const byId = new Map<string, any[]>();
+  for (const e of events) {
+    const id = e?.id ? String(e.id) : '';
+    if (!id) continue;
+    if (!byId.has(id)) byId.set(id, []);
+    byId.get(id).push(e);
+  }
+  const usedEvents = new Set<any>();
+  const linked: any[] = [];
+  const unmatchedLinked: any[] = [];
+  const restItems: any[] = [];
+  for (const item of items) {
+    const id = bookingDocIdOf(item);
+    if (!id) {
+      restItems.push(item);
+      continue;
+    }
+    const hit = (byId.get(id) || []).find((e) => !usedEvents.has(e));
+    if (hit) {
+      usedEvents.add(hit);
+      linked.push(item);
+    } else {
+      // Визит закрыли, бронь потом отменили → в имя-матчинг не отдаём (линк
+      // авторитетнее), запись показываем как «есть в Strapi, нет в календаři».
+      unmatchedLinked.push(item);
+    }
+  }
+  return {
+    linked,
+    unmatchedLinked,
+    restItems,
+    restEvents: events.filter((e) => !usedEvents.has(e)),
+  };
+};
 
 // Multiset-разница имён клиентов: кто есть только в Strapi / только в календаре.
 const diffByName = (strapiItems: any[], calendarEvents: any[]) => {
@@ -191,6 +268,8 @@ const diffByName = (strapiItems: any[], calendarEvents: any[]) => {
 };
 
 // Услуга в записи ≠ услуга клиента в календаре (offer.title vs event_types[0].title).
+// Вызывается ТОЛЬКО на остатке без линка: у booking-linked записей услуга взята из
+// самой брони → расхождения быть не может.
 const offerMismatches = (items: any[], events: any[]) => {
   const buckets = new Map<string, { title: string; used: boolean }[]>();
   for (const e of events) {
@@ -235,6 +314,8 @@ const fetchCalendarBookings = async (dateStr: string) => {
       pagination: { pageSize: 200 },
     });
     const events = (bookings || []).map((b: any) => ({
+      // ключ структурного матча с service-provided.booking
+      id: b?.documentId || '',
       customer_name: b?.client?.name || b?.clientNameRaw || '',
       event_types: (Array.isArray(b?.services) ? b.services : []).map((s: any) => ({
         title: s?.title || '',
@@ -261,6 +342,8 @@ export default {
         populate: {
           offer: { fields: ['title', 'price'] },
           personal: { fields: ['name', 'ratePercent'] },
+          // записи чекаута из календаря (D2): услуга/цена живут в брони, оффера нет
+          booking: { fields: ['services', 'totalPrice', 'priceOverride'] },
         },
         fields: ['clientName', 'staffSalaries', 'salonSalaries', 'sale', 'internal', 'verifyFlags'],
         pagination: { pageSize: 200 },
@@ -281,12 +364,10 @@ export default {
     //    (недостача — клиент заплатил меньше, чем по прайсу) → показываем минус.
     let rozdil = 0;
     for (const s of comparable) {
-      const offerPrice = Number(s?.offer?.price);
-      if (!Number.isFinite(offerPrice) || offerPrice <= 0) continue;
-      const { discountRate } = computeMustValues(offerPrice, 0, s?.sale);
-      const expected = offerPrice * (1 - discountRate);
+      const pricing = pricingOf(s);
+      if (!pricing) continue;
       const recorded = toNum(s?.staffSalaries) + toNum(s?.salonSalaries);
-      rozdil += recorded - expected;
+      rozdil += recorded - pricing.paidExpected;
     }
     rozdil = Math.round(rozdil);
     // Правило отображения: только недостача (минус) — проблема.
@@ -304,12 +385,12 @@ export default {
       const flags = flagsOf(s);
       const problems = flags.filter((f) => PROBLEM_FLAGS.includes(f));
       if (problems.length === 0) continue;
-      const offerPrice = Number(s?.offer?.price);
+      const pricing = pricingOf(s);
       const ratePercent = Number(s?.personal?.ratePercent);
       let staffDelta: number | null = null;
       let salonDelta: number | null = null;
-      if (Number.isFinite(offerPrice) && offerPrice > 0 && Number.isFinite(ratePercent)) {
-        const { mustStaff, mustSalonNow } = computeMustValues(offerPrice, ratePercent, s?.sale);
+      if (pricing && Number.isFinite(ratePercent)) {
+        const { mustStaff, mustSalonNow } = computeMustValues(pricing, ratePercent);
         staffDelta = r2(toNum(s?.staffSalaries) - mustStaff);
         salonDelta = r2(toNum(s?.salonSalaries) - mustSalonNow);
       }
@@ -327,10 +408,15 @@ export default {
     let strapiOnly: string[] = [];
     let serviceMismatch: { client: string; strapi: string; calendar: string }[] = [];
     if (calendar.available) {
-      const diff = diffByName(allServices, calendar.events);
-      strapiOnly = diff.strapiExtra;
+      // V3: сначала структурно (service-provided.booking ↔ бронь), остаток — по именам.
+      const structural = matchByBooking(allServices, calendar.events);
+      const diff = diffByName(structural.restItems, structural.restEvents);
+      strapiOnly = [
+        ...structural.unmatchedLinked.map((s: any) => (s?.clientName || '').trim()).filter(Boolean),
+        ...diff.strapiExtra,
+      ];
       calendarOnly = diff.calendarExtra;
-      serviceMismatch = offerMismatches(allServices, calendar.events);
+      serviceMismatch = offerMismatches(structural.restItems, structural.restEvents);
     }
 
     // 5. Отсутствующие записи.
