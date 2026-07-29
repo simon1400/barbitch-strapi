@@ -128,6 +128,25 @@ export default {
   },
 
   /**
+   * Σ discountKc погашенных bitchcard-наград этой брони — для разворота полной цены
+   * (redemption снижает total_price + взводит price_override, s152). Сбой lookup /
+   * пустая таблица → 0 (расчёт деградирует к оплаченной сумме, ничего не ломается).
+   */
+  async _redemptionKc(bookingDocId) {
+    try {
+      const rows = await strapi.documents(REDEMPTION_UID).findMany({
+        filters: { status: { $eq: 'used' }, usedInBookingDocId: { $eq: bookingDocId } },
+        fields: ['discountKc'],
+        limit: 10,
+      });
+      return rows.reduce((acc, r) => acc + (Number(r.discountKc) || 0), 0);
+    } catch (e) {
+      strapi.log.warn(`visit-close: redemptionKc lookup failed: ${e?.message || e}`);
+      return 0;
+    }
+  },
+
+  /**
    * GET-ручка для drawer: закрыт ли визит + подсказка расчёта.
    * `hint` считается всегда — форма показывает его до ввода сумм.
    */
@@ -136,7 +155,8 @@ export default {
     const rec = await this._findByBooking(bookingDocId);
     const published = rec ? await this._isPublished(rec.documentId) : false;
     const ratePercent = Number(booking.employee?.ratePercent) || 0;
-    const { fullPrice, paidExpected, systemDiscountKc } = bookingPricing(booking, null);
+    const redemptionKc = await this._redemptionKc(bookingDocId);
+    const { fullPrice, paidExpected, systemDiscountKc } = bookingPricing(booking, null, { redemptionKc });
     const mustStaff = Math.round(fullPrice * (ratePercent / 100) * 100) / 100;
     return {
       checkout: this._shape(rec, published),
@@ -161,6 +181,10 @@ export default {
    * блокирует сохранение.
    */
   async _flagsFor(booking, { staffSalaries, salonSalaries, sale, internal }) {
+    // Погашенные bitchcard-награды нужны ДО расчёта (разворот полной цены, s152),
+    // а не только для 🎟 — поэтому lookup всегда, не под флагом sleva.
+    const redemptionKc = await this._redemptionKc(booking.documentId);
+
     const flags = computeBookingFlags({
       booking,
       ratePercent: Number(booking.employee?.ratePercent) || 0,
@@ -168,22 +192,12 @@ export default {
       salonSalaries: parseMoney(salonSalaries),
       sale,
       internal,
+      redemptionKc,
     });
 
     if (flags.includes('sleva') && process.env.LOYALTY_ENABLED === 'true') {
-      try {
-        const hasRebook = booking.discount?.type === 'rebook' && booking.discount?.applied;
-        let hasRedemption = hasRebook;
-        if (!hasRedemption) {
-          const used = await strapi.documents(REDEMPTION_UID).count({
-            filters: { status: { $eq: 'used' }, usedInBookingDocId: { $eq: booking.documentId } },
-          });
-          hasRedemption = used > 0;
-        }
-        if (!hasRedemption) flags.push('sleva_bez_karty');
-      } catch (e) {
-        strapi.log.warn(`visit-close: sleva_bez_karty check failed: ${e?.message || e}`);
-      }
+      const hasRebook = booking.discount?.type === 'rebook' && booking.discount?.applied;
+      if (!hasRebook && redemptionKc <= 0) flags.push('sleva_bez_karty');
     }
     return flags;
   },

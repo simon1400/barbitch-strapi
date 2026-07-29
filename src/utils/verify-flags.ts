@@ -158,17 +158,41 @@ export type BookingLike = {
   services?: unknown;
   totalPrice?: unknown;
   priceOverride?: unknown;
+  discount?: unknown;
+};
+
+/** Скидка за дозапись (rebook, s133) прямо из booking.discount — синхронно, без lookup. */
+export const rebookDiscountKc = (booking: BookingLike | null | undefined): number => {
+  const d: any = booking?.discount;
+  if (d && d.type === 'rebook' && d.applied) return Math.max(0, parseMoney(d.discountKc));
+  return 0;
 };
 
 /**
  * Цены визита из брони:
- *   fullPrice     = Σ services[].price (у юниора это уже юниор-цена — эквивалент
- *                   старого оффера «Юниор X»; mustStaff всегда от неё).
- *                   priceOverride=true → админ явно задал цену, она и есть полная.
+ *   fullPrice     = цена, от которой мастер получает свой процент (юниор-цена у юниора);
  *   paidExpected  = booking.totalPrice (уже с СИСТЕМНЫМИ скидками: rebook applied /
  *                   bitchcard redemption) минус ручная скидка `sale`, если админ её ввёл.
+ *
+ * 🟥 priceOverride НЕ означает «цену задал админ» (баг s152): этот флаг взводят и
+ * СИСТЕМНЫЕ скидки — bitchcard-redemption (loyalty.ts) и дозапись −15 % (rebook.ts)
+ * снижают total_price + ставят price_override, оставляя в снапшоте полные цены услуг.
+ * Старая ветка `priceOverride ? total` схлопывала полную цену к оплаченной → подсказка
+ * и флаги делили мастеру процент от суммы СО скидкой (1390 → 990), т.е. скидку ел
+ * мастер, а не салон (нарушение правила s47).
+ *
+ * Правильно: fullPrice = total + ИЗВЕСТНЫЕ системные скидки (rebook — из
+ * booking.discount синхронно; bitchcard `redemptionKc` передаёт вызывающий — нужен
+ * async-lookup по redemptions). Ручной override БЕЗ системных скидок остаётся
+ * реальной ценой визита (админ договорился о цене — мастер делит именно её),
+ * а override + системная скидка корректно разворачивается до полной цены.
+ * Без override полная цена = Σ снапшота (как раньше).
  */
-export const bookingPricing = (booking: BookingLike | null | undefined, sale?: unknown) => {
+export const bookingPricing = (
+  booking: BookingLike | null | undefined,
+  sale?: unknown,
+  opts?: { redemptionKc?: number },
+) => {
   let list: any[] = [];
   const raw = booking?.services;
   if (Array.isArray(raw)) list = raw;
@@ -182,8 +206,10 @@ export const bookingPricing = (booking: BookingLike | null | undefined, sale?: u
   }
   const total = parseMoney(booking?.totalPrice);
   const sum = list.reduce((acc, s) => acc + parseMoney(s?.price), 0);
-  // priceOverride — цена задана вручную; снапшот услуг мог остаться от старой услуги
-  const fullPrice = booking?.priceOverride ? total : sum > 0 ? sum : total;
+  const systemKc = rebookDiscountKc(booking) + Math.max(0, opts?.redemptionKc || 0);
+  // priceOverride → снапшот может не отражать реальную цену (админ задал руками);
+  // реальная полная цена = оплачено + системные скидки. Без override — Σ снапшота.
+  const fullPrice = booking?.priceOverride ? total + systemKc : sum > 0 ? sum : total + systemKc;
 
   const discountRate = parseSaleRate(sale, fullPrice);
   const saleKc = fullPrice * discountRate;
@@ -204,6 +230,7 @@ export const computeBookingFlags = ({
   salonSalaries,
   sale,
   internal,
+  redemptionKc,
 }: {
   booking: BookingLike | null | undefined;
   ratePercent: number;
@@ -211,8 +238,10 @@ export const computeBookingFlags = ({
   salonSalaries: number;
   sale?: unknown;
   internal: boolean;
+  /** Σ discountKc погашенных bitchcard-наград этой брони (async-lookup вызывающего). */
+  redemptionKc?: number;
 }): VerifyFlag[] => {
-  const { fullPrice, paidExpected, hasSale } = bookingPricing(booking, sale);
+  const { fullPrice, paidExpected, hasSale } = bookingPricing(booking, sale, { redemptionKc });
   return computeFlagsCore({
     fullPrice,
     paidExpected,

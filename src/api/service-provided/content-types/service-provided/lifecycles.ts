@@ -82,9 +82,26 @@ async function validateOfferMoney(event: any) {
 
     const ratePercent = Number(personal.ratePercent)
 
+    // Σ discountKc погашенных bitchcard-наград брони — нужен ДЛЯ РАСЧЁТА цены
+    // (redemption снижает totalPrice + взводит priceOverride → полную цену надо
+    // развернуть обратно, s152), и переиспользуется ниже для 🎟. Сбой → 0.
+    let redemptionKc = 0
+    if (booking?.documentId) {
+      try {
+        const rows = await strapi.documents('api::redemption.redemption').findMany({
+          filters: { status: { $eq: 'used' }, usedInBookingDocId: { $eq: booking.documentId } },
+          fields: ['discountKc'],
+          limit: 10,
+        })
+        redemptionKc = rows.reduce((acc: number, r: any) => acc + (Number(r.discountKc) || 0), 0)
+      } catch (e: any) {
+        strapi.log.warn(`service-provided redemptionKc lookup failed: ${e?.message || e}`)
+      }
+    }
+
     // Бронь выигрывает у оффера: у booking-linked записи оффер — легаси-поле
     const flags: VerifyFlag[] = booking
-      ? computeBookingFlags({ booking, ratePercent, staffSalaries, salonSalaries, sale: saleRaw, internal })
+      ? computeBookingFlags({ booking, ratePercent, staffSalaries, salonSalaries, sale: saleRaw, internal, redemptionKc })
       : computeOfferFlags(Number(offer.price), ratePercent, staffSalaries, salonSalaries, saleRaw, internal)
 
     // K4 informational flag: sale present, but no used bitchcard redemption on the
@@ -97,14 +114,8 @@ async function validateOfferMoney(event: any) {
         let hasRedemption = false
         if (booking?.documentId) {
           const hasRebookDiscount = booking.discount?.type === 'rebook' && booking.discount?.applied
-          if (hasRebookDiscount) {
-            hasRedemption = true
-          } else {
-            const used = await strapi.documents('api::redemption.redemption').count({
-              filters: { status: { $eq: 'used' }, usedInBookingDocId: { $eq: booking.documentId } },
-            })
-            hasRedemption = used > 0
-          }
+          // redemptionKc уже посчитан выше — второй запрос не нужен
+          hasRedemption = hasRebookDiscount || redemptionKc > 0
         } else {
           const clientName = String(dataCurrent.clientName ?? current?.clientName ?? '').trim()
           const date = String(dataCurrent.date ?? current?.date ?? '').slice(0, 10)

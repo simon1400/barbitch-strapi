@@ -60,13 +60,20 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
  *   • legacy-путь: полная цена = offer.price, скидка вычитается из неё же.
  * null — цену взять неоткуда (нет ни брони, ни оффера) → сравнивать нечего.
  */
-const pricingOf = (item: any): { fullPrice: number; paidExpected: number; hasSale: boolean } | null => {
+const pricingOf = (item: any, redemptionKc = 0): { fullPrice: number; paidExpected: number; hasSale: boolean } | null => {
   const b = item?.booking;
   if (b) {
     const list = Array.isArray(b?.services) ? b.services : [];
     const total = toNum(b?.totalPrice);
     const sum = list.reduce((acc: number, s: any) => acc + toNum(s?.price), 0);
-    const fullPrice = b?.priceOverride ? total : sum > 0 ? sum : total;
+    // 🟥 priceOverride взводят и СИСТЕМНЫЕ скидки (bitchcard/rebook снижают totalPrice,
+    // полные цены остаются в снапшоте) → полная цена при override = оплачено + известные
+    // системные скидки; мастер получает % от ПОЛНОЙ, скидку ест салон (s47, баг s152).
+    // Ручной override без системных скидок = реальная цена. Зеркало verify-flags.ts.
+    const d = b?.discount;
+    const rebookKc = d && d.type === 'rebook' && d.applied ? Math.max(0, toNum(d.discountKc)) : 0;
+    const systemKc = rebookKc + Math.max(0, redemptionKc);
+    const fullPrice = b?.priceOverride ? total + systemKc : sum > 0 ? sum : total + systemKc;
     if (!(fullPrice > 0)) return null;
     const discountRate = parseSaleRate(item?.sale, fullPrice);
     return {
@@ -138,7 +145,7 @@ const computeFlags = (
   return f;
 };
 
-const flagsOf = (item: any): VerifyFlag[] => {
+const flagsOf = (item: any, redemptionKc = 0): VerifyFlag[] => {
   // Предпочитаем сохранённые verifyFlags (как getItemFlags в admin), иначе считаем.
   const stored = Array.isArray(item?.verifyFlags) ? item.verifyFlags : null;
   if (stored && stored.length > 0) {
@@ -146,7 +153,7 @@ const flagsOf = (item: any): VerifyFlag[] => {
       typeof x === 'string' && x in FLAG_META,
     );
   }
-  const pricing = pricingOf(item);
+  const pricing = pricingOf(item, redemptionKc);
   const ratePercent = Number(item?.personal?.ratePercent);
   if (pricing && Number.isFinite(ratePercent)) {
     return computeFlags(
@@ -343,7 +350,7 @@ export default {
           offer: { fields: ['title', 'price'] },
           personal: { fields: ['name', 'ratePercent'] },
           // записи чекаута из календаря (D2): услуга/цена живут в брони, оффера нет
-          booking: { fields: ['services', 'totalPrice', 'priceOverride'] },
+          booking: { fields: ['services', 'totalPrice', 'priceOverride', 'discount'] },
         },
         fields: ['clientName', 'staffSalaries', 'salonSalaries', 'sale', 'internal', 'verifyFlags'],
         pagination: { pageSize: 200 },
@@ -359,12 +366,41 @@ export default {
     const allServices = services || [];
     const comparable = allServices.filter((s: any) => !s?.internal);
 
+    // Σ discountKc погашенных bitchcard-наград по броням дневных записей — для
+    // разворота полной цены (redemption снижает totalPrice + взводит priceOverride,
+    // s152). Сбой lookup → пустая карта (расчёт деградирует к оплаченной сумме).
+    const redemptionKcByBooking = new Map<string, number>();
+    try {
+      const bookingIds = [
+        ...new Set(
+          allServices
+            .map((s: any) => s?.booking?.documentId)
+            .filter((x: unknown): x is string => typeof x === 'string' && x.length > 0),
+        ),
+      ];
+      if (bookingIds.length) {
+        const rows = await strapi.documents('api::redemption.redemption').findMany({
+          filters: { status: { $eq: 'used' }, usedInBookingDocId: { $in: bookingIds } },
+          fields: ['discountKc', 'usedInBookingDocId'],
+          limit: 200,
+        });
+        for (const r of rows || []) {
+          const key = String((r as any).usedInBookingDocId || '');
+          if (!key) continue;
+          redemptionKcByBooking.set(key, (redemptionKcByBooking.get(key) || 0) + (Number((r as any).discountKc) || 0));
+        }
+      }
+    } catch (e: any) {
+      strapi.log.warn(`shift-selfcheck: redemption lookup failed: ${e?.message || e}`);
+    }
+    const kcOf = (s: any): number => redemptionKcByBooking.get(s?.booking?.documentId || '') || 0;
+
     // 1. Rozdíl за смену: Σ (staff+salon − offerPrice×(1−sleva)) по реальным услугам.
     //    Положительное (переплата/салон получил больше) → не показываем; отрицательное
     //    (недостача — клиент заплатил меньше, чем по прайсу) → показываем минус.
     let rozdil = 0;
     for (const s of comparable) {
-      const pricing = pricingOf(s);
+      const pricing = pricingOf(s, kcOf(s));
       if (!pricing) continue;
       const recorded = toNum(s?.staffSalaries) + toNum(s?.salonSalaries);
       rozdil += recorded - pricing.paidExpected;
@@ -382,10 +418,10 @@ export default {
       salonDelta: number | null;
     }[] = [];
     for (const s of services || []) {
-      const flags = flagsOf(s);
+      const flags = flagsOf(s, kcOf(s));
       const problems = flags.filter((f) => PROBLEM_FLAGS.includes(f));
       if (problems.length === 0) continue;
-      const pricing = pricingOf(s);
+      const pricing = pricingOf(s, kcOf(s));
       const ratePercent = Number(s?.personal?.ratePercent);
       let staffDelta: number | null = null;
       let salonDelta: number | null = null;
