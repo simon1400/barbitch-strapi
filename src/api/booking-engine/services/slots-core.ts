@@ -11,7 +11,7 @@
 // ── константы движка ──
 export const STEP_MIN = 15; // шаг сетки слотов
 export const HOLD_TTL_MIN = 5; // жизнь холда (как таймер Noona-флоу)
-export const MIN_LEAD_MIN = 30; // минимальный зазор от «сейчас» до слота сегодня
+export const MIN_LEAD_MIN = 60; // минимальный зазор от «сейчас» до слота сегодня
 export const CANCEL_MIN_HOURS = 3; // клиент может отменить не позже чем за N часов
 // Junior −20% к ИТОГОВОЙ цене (синхронно с client/src/lib/junior.ts и admin/src/constants/junior.ts)
 export const JUNIOR_DISCOUNT_PERCENT = 20;
