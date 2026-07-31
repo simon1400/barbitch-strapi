@@ -479,6 +479,36 @@ export default {
     };
   },
 
+  // ── comeback-напоминание «пора записаться снова» (~25 дней после визита) ──
+  // Рендер живёт здесь (бренд-канон renderEmail); логику кандидатов/дедупа ведёт
+  // сервис api::comeback-reminder.comeback-reminder (cron + ручной триггер).
+  // cv = { clientName, serviceTitle, employeeName, lastVisitDate: 'YYYY-MM-DD', bookUrl }
+
+  buildComeback(cv) {
+    // полдень UTC — чтобы Intl с TZ Прага не уехал на соседний день
+    const lastLabel = cv.lastVisitDate ? czDateLabel(`${cv.lastVisitDate}T12:00:00Z`) : '';
+    const subject = 'Čas na další termín? | Bar.Bitch';
+    const rows = [
+      cv.serviceTitle ? detailRow('Služba', cv.serviceTitle) : '',
+      cv.employeeName ? detailRow('Mistrová', cv.employeeName) : '',
+      lastLabel ? detailRow('Poslední návštěva', lastLabel) : '',
+      detailRow('Adresa', SALON_ADDRESS),
+    ].join('');
+    const html = renderEmail({
+      heading: 'Čas na další návštěvu ✨',
+      intro: `${esc(cv.clientName || 'Dobrý den')}, už je to skoro měsíc od vaší poslední návštěvy v ${esc(SALON_NAME)}. Rádi bychom vám připomněli, že možná nastal čas rezervovat si další termín${
+        cv.serviceTitle
+          ? ` služby <strong style="color:#ffffff;">${esc(cv.serviceTitle)}</strong>`
+          : ''
+      }.`,
+      rows,
+      note: 'Toto je jednorázové připomenutí po vaší návštěvě. Pokud si podobná připomenutí nepřejete, odpovězte na tento e-mail slovem <strong style="color:#ffffff;">NEZASÍLAT</strong>.',
+      ctaLabel: 'REZERVOVAT TERMÍN',
+      ctaUrl: cv.bookUrl || `${SITE_URL}/book`,
+    });
+    return { subject, html };
+  },
+
   // ── личный кабинет клиента: magic-link вход (К1) ──
 
   buildCabinetLogin(email, url) {
@@ -687,6 +717,16 @@ export default {
   // ── превью для ручной проверки (гейт секретом в контроллере) ──
 
   async preview(type, bookingDocId) {
+    // comeback-напоминание не привязано к конкретной брони — фиктивные данные
+    if (type === 'comeback') {
+      return this.buildComeback({
+        clientName: 'Preview Klientka',
+        serviceTitle: 'Gel lak manikúra + Design basic',
+        employeeName: 'Mistrová',
+        lastVisitDate: '2026-07-06',
+        bookUrl: `${SITE_URL}/book`,
+      });
+    }
     // cabinet-login не привязан к брони — рендерим с фиктивными данными
     if (type === 'cabinet-login') {
       return this.buildCabinetLogin(

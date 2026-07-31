@@ -1259,9 +1259,47 @@ export interface ApiClientClient extends Struct.CollectionTypeSchema {
     notes: Schema.Attribute.Text;
     phone: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
+    reminderOptOut: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     source: Schema.Attribute.Enumeration<['import', 'site', 'admin']> &
       Schema.Attribute.DefaultTo<'import'>;
     tags: Schema.Attribute.JSON;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiComebackReminderLogComebackReminderLog
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'comeback_reminder_logs';
+  info: {
+    description: 'Лог автонапоминаний «пора записаться снова» (~25 дней после последнего визита). Одна запись = одно отправленное письмо. Ключ дедупликации: clientDocId + lastVisitDate — на один визит клиент получает максимум одно напоминание.';
+    displayName: 'Comeback reminder logs';
+    pluralName: 'comeback-reminder-logs';
+    singularName: 'comeback-reminder-log';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    bookingDocId: Schema.Attribute.String;
+    clientDocId: Schema.Attribute.String & Schema.Attribute.Required;
+    clientName: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    email: Schema.Attribute.String;
+    lastVisitDate: Schema.Attribute.Date;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::comeback-reminder-log.comeback-reminder-log'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    sentAt: Schema.Attribute.DateTime;
+    serviceDocId: Schema.Attribute.String;
+    serviceTitle: Schema.Attribute.String;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -3367,6 +3405,7 @@ declare module '@strapi/strapi' {
       'api::client-error-log.client-error-log': ApiClientErrorLogClientErrorLog;
       'api::client-login-token.client-login-token': ApiClientLoginTokenClientLoginToken;
       'api::client.client': ApiClientClient;
+      'api::comeback-reminder-log.comeback-reminder-log': ApiComebackReminderLogComebackReminderLog;
       'api::contact.contact': ApiContactContact;
       'api::cost.cost': ApiCostCost;
       'api::email-campaign-log.email-campaign-log': ApiEmailCampaignLogEmailCampaignLog;

@@ -60,6 +60,10 @@
     "cabinetLastLoginAt": {
       "type": "datetime"
     },
+    "reminderOptOut": {
+      "type": "boolean",
+      "default": false
+    },
     "bookings": {
       "type": "relation",
       "relation": "oneToMany",

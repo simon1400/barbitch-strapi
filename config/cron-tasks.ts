@@ -72,6 +72,29 @@ export default {
       tz: 'Europe/Prague',
     },
   },
+  // Comeback-напоминание «пора записаться снова» (~25 дней после последнего визита,
+  // s155). Выключено по умолчанию: ТОЛЬКО env COMEBACK_REMINDER_ENABLED=true
+  // (+ RESEND_API_KEY для реальной отправки). Идемпотентно (comeback-reminder-log),
+  // защиты: будущая бронь / поздний визит / opt-out / blacklist / кулдаун / дневной кап.
+  comebackReminders: {
+    task: async ({ strapi }) => {
+      if (process.env.COMEBACK_REMINDER_ENABLED !== 'true') return;
+      try {
+        const res = await strapi.service('api::comeback-reminder.comeback-reminder').run();
+        if (res.candidates > 0) {
+          strapi.log.info(
+            `comeback reminders: ${res.sent} sent / ${res.candidates} candidates`
+          );
+        }
+      } catch (e) {
+        strapi.log.error(`comeback reminders cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '0 11 * * *', // каждый день в 11:00 (салон уже открыт, после дайджеста 08:00)
+      tz: 'Europe/Prague',
+    },
+  },
   dailyDigest: {
     task: async ({ strapi }) => {
       try {

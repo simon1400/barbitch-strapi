@@ -1,0 +1,41 @@
+{
+  "kind": "collectionType",
+  "collectionName": "comeback_reminder_logs",
+  "info": {
+    "singularName": "comeback-reminder-log",
+    "pluralName": "comeback-reminder-logs",
+    "displayName": "Comeback reminder logs",
+    "description": "Лог автонапоминаний «пора записаться снова» (~25 дней после последнего визита). Одна запись = одно отправленное письмо. Ключ дедупликации: clientDocId + lastVisitDate — на один визит клиент получает максимум одно напоминание."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "clientDocId": {
+      "type": "string",
+      "required": true
+    },
+    "clientName": {
+      "type": "string"
+    },
+    "email": {
+      "type": "string"
+    },
+    "lastVisitDate": {
+      "type": "date"
+    },
+    "serviceTitle": {
+      "type": "string"
+    },
+    "serviceDocId": {
+      "type": "string"
+    },
+    "bookingDocId": {
+      "type": "string"
+    },
+    "sentAt": {
+      "type": "datetime"
+    }
+  }
+}
