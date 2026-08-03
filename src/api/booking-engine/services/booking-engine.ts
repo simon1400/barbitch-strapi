@@ -52,6 +52,24 @@ const fmtDay = (d) => {
 };
 const blokPluralCs = (n) => (n === 1 ? 'blok' : n >= 2 && n <= 4 ? 'bloky' : 'bloků');
 
+// Названия услуг брони одной строкой «A + B» — для журнала действий.
+// Снапшот приходит и массивом (документ Strapi, json-поле), и строкой (наш upd.services).
+const svcTitlesOf = (raw) => {
+  let arr = raw;
+  if (typeof raw === 'string') {
+    try {
+      arr = JSON.parse(raw);
+    } catch {
+      return '';
+    }
+  }
+  return Array.isArray(arr) ? arr.map((s) => s?.title || '').filter(Boolean).join(' + ') : '';
+};
+// «1 200 Kč» / «—» — деньги в деталях журнала
+const fmtKcLog = (v) => (v == null || v === '' ? '—' : `${Number(v)} Kč`);
+// Значение «старое → новое» (если не изменилось — просто новое)
+const arrowLog = (before, after) => (before === after ? String(after) : `${before} → ${after}`);
+
 /** Ошибка с HTTP-статусом — контроллер мапит в ответ. */
 export class EngineError extends Error {
   status: number;
@@ -816,7 +834,14 @@ export default {
         clientName: clientDoc.name,
         employeeName: emp.name,
         summary: `Nová rezervace: ${clientDoc.name} · ${fmtDay(date)} ${time} · ${emp.name}`,
-        details: { date: fmtDay(date), time, employee: emp.name, client: clientDoc.name, services: snapshot.map((s) => s.title), total: totalPrice },
+        details: {
+          datum: fmtDay(date),
+          čas: time,
+          mistr: emp.name,
+          klient: clientDoc.name,
+          služba: svcTitlesOf(snapshot) || '—',
+          cena: fmtKcLog(totalPrice),
+        },
       })
       .catch((e) => strapi.log.error(`calendar-log create failed: ${e.message}`));
 
@@ -1047,18 +1072,25 @@ export default {
         } else {
           logAction = 'booking_status';
           logSummary = `${STATUS_CS[patch.status] || patch.status}: ${cn} · ${fmtDay(fromInfo.date)} ${fromInfo.time}`;
-          logDetails = { prevStatus: booking.status, status: patch.status };
+          // в деталях — чешские подписи статусов (не сырой enum)
+          logDetails = {
+            prevStatus: STATUS_CS[booking.status] || booking.status,
+            status: STATUS_CS[patch.status] || patch.status,
+          };
         }
       } else if (serviceChanged) {
         logAction = 'booking_service';
-        let svcTitles: string[] = [];
-        try {
-          svcTitles = (JSON.parse(String(upd.services)) as Array<{ title?: string }>).map((s) => s.title || '');
-        } catch {
-          svcTitles = [];
-        }
-        logSummary = `Změna služby: ${cn} · ${fmtDay(fromInfo.date)} ${fromInfo.time}`;
-        logDetails = { services: svcTitles, total: upd.total_price };
+        // «старое → новое»: снапшот до правки берём из документа брони (booking.services),
+        // новый — из upd.services (строка JSON, записанная выше)
+        const oldSvc = svcTitlesOf(booking.services) || '—';
+        const newSvc = svcTitlesOf(upd.services) || '—';
+        const oldTotal = booking.totalPrice;
+        const newTotal = upd.total_price != null ? upd.total_price : oldTotal;
+        logSummary = `Změna služby: ${cn} · ${fmtDay(fromInfo.date)} ${fromInfo.time} · ${oldSvc} → ${newSvc}`;
+        logDetails = {
+          služba: arrowLog(oldSvc, newSvc),
+          cena: arrowLog(fmtKcLog(oldTotal), fmtKcLog(newTotal)),
+        };
       } else {
         // «Dorazila» (arrived) не логируем; если в PATCH менялся ТОЛЬКО arrived —
         // не пишем вообще (иначе получилась бы пустая «Úprava»).
@@ -1071,7 +1103,19 @@ export default {
         } else {
           logAction = 'booking_edit';
           logSummary = `Úprava: ${cn} · ${changed.join(', ')}`;
-          logDetails = { changed, comment: patch.comment ?? null, total: patch.totalPrice ?? null };
+          // детали по-чешски и всегда «старое → новое»
+          logDetails = { změněno: changed.join(', ') };
+          if (patch.comment != null) {
+            logDetails['poznámka'] = arrowLog(booking.comment || '—', String(patch.comment) || '—');
+          }
+          if ('label' in patch) {
+            const oldLabel = booking.label?.name || '—';
+            const newLabel = patch.label?.name || '—';
+            logDetails['štítek'] = arrowLog(oldLabel, newLabel);
+          }
+          if (patch.totalPrice != null) {
+            logDetails['cena'] = arrowLog(fmtKcLog(booking.totalPrice), fmtKcLog(patch.totalPrice));
+          }
         }
       }
       if (shouldLog) {
@@ -1154,9 +1198,11 @@ export default {
         employeeName: booking.employeeNameRaw || '',
         summary: `Smazáno: ${booking.clientNameRaw || ''} · ${fmtDay(String(booking.date))}`,
         details: {
-          date: fmtDay(String(booking.date)),
-          services: Array.isArray(booking.services) ? booking.services.map((s: any) => s?.title || '') : [],
-          total: booking.totalPrice,
+          datum: fmtDay(String(booking.date)),
+          čas: booking.startsAt ? minToHHMM(utcToPragueMinClamped(booking.startsAt, String(booking.date))) : '—',
+          mistr: booking.employeeNameRaw || '—',
+          služba: svcTitlesOf(booking.services) || '—',
+          cena: fmtKcLog(booking.totalPrice),
         },
       })
       .catch((e) => strapi.log.error(`calendar-log delete failed: ${e.message}`));
