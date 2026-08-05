@@ -1,0 +1,39 @@
+{
+  "kind": "collectionType",
+  "collectionName": "client_merge_logs",
+  "info": {
+    "singularName": "client-merge-log",
+    "pluralName": "client-merge-logs",
+    "displayName": "Client merge logs",
+    "description": "Аудит модуля «Дубли клиентов»: слияния карточек, пометки «не дубли», синхронизация блэклиста. Слияние необратимо — в details лежит полный снимок удалённых карточек (имя/телефон/e-mail/noonaCustomerId) на случай ручного восстановления."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "action": {
+      "type": "enumeration",
+      "enum": ["merge", "ignore", "unignore", "blacklist"],
+      "required": true
+    },
+    "groupKey": {
+      "type": "string"
+    },
+    "primaryDocId": {
+      "type": "string"
+    },
+    "primaryName": {
+      "type": "string"
+    },
+    "mergedDocIds": {
+      "type": "json"
+    },
+    "details": {
+      "type": "json"
+    },
+    "actorName": {
+      "type": "string"
+    }
+  }
+}

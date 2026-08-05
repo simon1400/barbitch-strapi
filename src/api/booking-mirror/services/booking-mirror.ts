@@ -116,6 +116,15 @@ export default {
     });
     const known = new Set(existing.map((c) => c.noonaCustomerId).filter(Boolean));
 
+    // Tombstones: noonaCustomerId карточек, слитых в модуле «Дубли клиентов»
+    // (их у нас больше нет) — иначе create-only синк заведёт дубль заново.
+    try {
+      const merged = await strapi.store({ type: 'api', name: 'booking-mirror' }).get({ key: 'mergedCustomerIds' });
+      for (const id of Array.isArray(merged) ? merged : []) known.add(id);
+    } catch (e) {
+      strapi.log.warn(`booking-mirror: merged-customer tombstone read failed: ${e.message}`);
+    }
+
     let created = 0;
     const errors = [];
     for (const c of customers || []) {

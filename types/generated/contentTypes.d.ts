@@ -1269,6 +1269,45 @@ export interface ApiClientClient extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiClientMergeLogClientMergeLog
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'client_merge_logs';
+  info: {
+    description: 'Аудит модуля «Дубли клиентов»';
+    displayName: 'Client merge logs';
+    pluralName: 'client-merge-logs';
+    singularName: 'client-merge-log';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    action: Schema.Attribute.Enumeration<
+      ['merge', 'ignore', 'unignore', 'blacklist']
+    > &
+      Schema.Attribute.Required;
+    actorName: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    details: Schema.Attribute.JSON;
+    groupKey: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::client-merge-log.client-merge-log'
+    > &
+      Schema.Attribute.Private;
+    mergedDocIds: Schema.Attribute.JSON;
+    primaryDocId: Schema.Attribute.String;
+    primaryName: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiComebackReminderLogComebackReminderLog
   extends Struct.CollectionTypeSchema {
   collectionName: 'comeback_reminder_logs';
@@ -3405,6 +3444,7 @@ declare module '@strapi/strapi' {
       'api::chat-session.chat-session': ApiChatSessionChatSession;
       'api::client-error-log.client-error-log': ApiClientErrorLogClientErrorLog;
       'api::client-login-token.client-login-token': ApiClientLoginTokenClientLoginToken;
+      'api::client-merge-log.client-merge-log': ApiClientMergeLogClientMergeLog;
       'api::client.client': ApiClientClient;
       'api::comeback-reminder-log.comeback-reminder-log': ApiComebackReminderLogComebackReminderLog;
       'api::contact.contact': ApiContactContact;
