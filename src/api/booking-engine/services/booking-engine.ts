@@ -1277,6 +1277,7 @@ export default {
             endsAt: pragueMinToUtcIso(d, endMin),
             title: titleStr,
             theme: '',
+            createdByName: session?.username || '',
           },
         })
       );

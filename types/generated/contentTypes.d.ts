@@ -2611,6 +2611,7 @@ export interface ApiTimeBlockTimeBlock extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    createdByName: Schema.Attribute.String;
     date: Schema.Attribute.Date;
     employee: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     employeeNameRaw: Schema.Attribute.String;
