@@ -1,5 +1,5 @@
 // @ts-nocheck
-// Ручки модуля «Дубли клиентов» (admin-апка, owner-only).
+// Ручки модуля «Дубли клиентов» (admin-апка, owner + administrator).
 // Паттерн s78: роуты auth:false + ручная проверка admin-jwt здесь
 // (Strapi-стратегии наш HS256-токен не знают).
 
@@ -8,12 +8,14 @@ import { DedupeError } from '../services/client-dedupe';
 
 const svc = () => strapi.service('api::client-dedupe.client-dedupe');
 
-const requireOwner = (ctx) => {
+const ALLOWED_ROLES = new Set(['owner', 'administrator']);
+
+const requireStaff = (ctx) => {
   const session = verifySession(tokenFromCtx(ctx));
-  // слияние/удаление карточек клиентов — только владелец
-  if (!session || session.role !== 'owner') {
+  // слияние/удаление карточек клиентов — владелец и администраторы
+  if (!session || !ALLOWED_ROLES.has(session.role)) {
     ctx.status = 401;
-    ctx.body = { error: { status: 401, code: 'unauthorized', message: 'Доступ только для владельца' } };
+    ctx.body = { error: { status: 401, code: 'unauthorized', message: 'Доступ только для владельца и администраторов' } };
     return null;
   }
   return session;
@@ -36,12 +38,12 @@ const handle = async (ctx, fn) => {
 
 export default {
   async groups(ctx) {
-    if (!requireOwner(ctx)) return;
+    if (!requireStaff(ctx)) return;
     await handle(ctx, () => svc().findGroups());
   },
 
   async merge(ctx) {
-    const session = requireOwner(ctx);
+    const session = requireStaff(ctx);
     if (!session) return;
     const b = ctx.request.body || {};
     await handle(ctx, () =>
@@ -55,7 +57,7 @@ export default {
   },
 
   async updateClient(ctx) {
-    const session = requireOwner(ctx);
+    const session = requireStaff(ctx);
     if (!session) return;
     const b = ctx.request.body || {};
     await handle(ctx, () =>
@@ -69,7 +71,7 @@ export default {
   },
 
   async blacklist(ctx) {
-    const session = requireOwner(ctx);
+    const session = requireStaff(ctx);
     if (!session) return;
     const b = ctx.request.body || {};
     await handle(ctx, () =>
@@ -83,21 +85,21 @@ export default {
   },
 
   async ignore(ctx) {
-    const session = requireOwner(ctx);
+    const session = requireStaff(ctx);
     if (!session) return;
     const b = ctx.request.body || {};
     await handle(ctx, () => svc().ignore({ docIds: b.docIds, note: b.note, actorName: session.username }));
   },
 
   async unignore(ctx) {
-    const session = requireOwner(ctx);
+    const session = requireStaff(ctx);
     if (!session) return;
     const b = ctx.request.body || {};
     await handle(ctx, () => svc().unignore({ groupKey: b.groupKey, actorName: session.username }));
   },
 
   async history(ctx) {
-    if (!requireOwner(ctx)) return;
+    if (!requireStaff(ctx)) return;
     await handle(ctx, () => svc().history(Number(ctx.query.limit) || 50));
   },
 };
