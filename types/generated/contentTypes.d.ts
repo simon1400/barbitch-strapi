@@ -1223,6 +1223,45 @@ export interface ApiClientLoginTokenClientLoginToken
   };
 }
 
+export interface ApiClientMergeLogClientMergeLog
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'client_merge_logs';
+  info: {
+    description: '\u0410\u0443\u0434\u0438\u0442 \u043C\u043E\u0434\u0443\u043B\u044F \u00AB\u0414\u0443\u0431\u043B\u0438 \u043A\u043B\u0438\u0435\u043D\u0442\u043E\u0432\u00BB: \u0441\u043B\u0438\u044F\u043D\u0438\u044F \u043A\u0430\u0440\u0442\u043E\u0447\u0435\u043A, \u043F\u043E\u043C\u0435\u0442\u043A\u0438 \u00AB\u043D\u0435 \u0434\u0443\u0431\u043B\u0438\u00BB, \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0431\u043B\u044D\u043A\u043B\u0438\u0441\u0442\u0430. \u0421\u043B\u0438\u044F\u043D\u0438\u0435 \u043D\u0435\u043E\u0431\u0440\u0430\u0442\u0438\u043C\u043E \u2014 \u0432 details \u043B\u0435\u0436\u0438\u0442 \u043F\u043E\u043B\u043D\u044B\u0439 \u0441\u043D\u0438\u043C\u043E\u043A \u0443\u0434\u0430\u043B\u0451\u043D\u043D\u044B\u0445 \u043A\u0430\u0440\u0442\u043E\u0447\u0435\u043A (\u0438\u043C\u044F/\u0442\u0435\u043B\u0435\u0444\u043E\u043D/e-mail/noonaCustomerId) \u043D\u0430 \u0441\u043B\u0443\u0447\u0430\u0439 \u0440\u0443\u0447\u043D\u043E\u0433\u043E \u0432\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F.';
+    displayName: 'Client merge logs';
+    pluralName: 'client-merge-logs';
+    singularName: 'client-merge-log';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    action: Schema.Attribute.Enumeration<
+      ['merge', 'ignore', 'unignore', 'blacklist']
+    > &
+      Schema.Attribute.Required;
+    actorName: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    details: Schema.Attribute.JSON;
+    groupKey: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::client-merge-log.client-merge-log'
+    > &
+      Schema.Attribute.Private;
+    mergedDocIds: Schema.Attribute.JSON;
+    primaryDocId: Schema.Attribute.String;
+    primaryName: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiClientClient extends Struct.CollectionTypeSchema {
   collectionName: 'clients';
   info: {
@@ -1259,49 +1298,11 @@ export interface ApiClientClient extends Struct.CollectionTypeSchema {
     notes: Schema.Attribute.Text;
     phone: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
-    reminderOptOut: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    reminderOptOut: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
     source: Schema.Attribute.Enumeration<['import', 'site', 'admin']> &
       Schema.Attribute.DefaultTo<'import'>;
     tags: Schema.Attribute.JSON;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-  };
-}
-
-export interface ApiClientMergeLogClientMergeLog
-  extends Struct.CollectionTypeSchema {
-  collectionName: 'client_merge_logs';
-  info: {
-    description: 'Аудит модуля «Дубли клиентов»';
-    displayName: 'Client merge logs';
-    pluralName: 'client-merge-logs';
-    singularName: 'client-merge-log';
-  };
-  options: {
-    draftAndPublish: false;
-  };
-  attributes: {
-    action: Schema.Attribute.Enumeration<
-      ['merge', 'ignore', 'unignore', 'blacklist']
-    > &
-      Schema.Attribute.Required;
-    actorName: Schema.Attribute.String;
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    details: Schema.Attribute.JSON;
-    groupKey: Schema.Attribute.String;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::client-merge-log.client-merge-log'
-    > &
-      Schema.Attribute.Private;
-    mergedDocIds: Schema.Attribute.JSON;
-    primaryDocId: Schema.Attribute.String;
-    primaryName: Schema.Attribute.String;
-    publishedAt: Schema.Attribute.DateTime;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1312,7 +1313,7 @@ export interface ApiComebackReminderLogComebackReminderLog
   extends Struct.CollectionTypeSchema {
   collectionName: 'comeback_reminder_logs';
   info: {
-    description: 'Лог автонапоминаний «пора записаться снова» (~25 дней после последнего визита). Одна запись = одно отправленное письмо. Ключ дедупликации: clientDocId + lastVisitDate — на один визит клиент получает максимум одно напоминание.';
+    description: '\u041B\u043E\u0433 \u0430\u0432\u0442\u043E\u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u0439 \u00AB\u043F\u043E\u0440\u0430 \u0437\u0430\u043F\u0438\u0441\u0430\u0442\u044C\u0441\u044F \u0441\u043D\u043E\u0432\u0430\u00BB (~25 \u0434\u043D\u0435\u0439 \u043F\u043E\u0441\u043B\u0435 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0435\u0433\u043E \u0432\u0438\u0437\u0438\u0442\u0430). \u041E\u0434\u043D\u0430 \u0437\u0430\u043F\u0438\u0441\u044C = \u043E\u0434\u043D\u043E \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043D\u043E\u0435 \u043F\u0438\u0441\u044C\u043C\u043E. \u041A\u043B\u044E\u0447 \u0434\u0435\u0434\u0443\u043F\u043B\u0438\u043A\u0430\u0446\u0438\u0438: clientDocId + lastVisitDate \u2014 \u043D\u0430 \u043E\u0434\u0438\u043D \u0432\u0438\u0437\u0438\u0442 \u043A\u043B\u0438\u0435\u043D\u0442 \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u0442 \u043C\u0430\u043A\u0441\u0438\u043C\u0443\u043C \u043E\u0434\u043D\u043E \u043D\u0430\u043F\u043E\u043C\u0438\u043D\u0430\u043D\u0438\u0435.';
     displayName: 'Comeback reminder logs';
     pluralName: 'comeback-reminder-logs';
     singularName: 'comeback-reminder-log';
