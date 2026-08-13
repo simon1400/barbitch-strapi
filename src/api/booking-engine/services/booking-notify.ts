@@ -59,6 +59,35 @@ const czDateShort = (iso) =>
 // Цена с разделением тысяч: «1 190 Kč», «935 Kč».
 const fmtKc = (n) => `${Number(n).toLocaleString('cs-CZ')} Kč`;
 
+// Дата брони как «YYYY-MM-DD» в пражской зоне (сервер в UTC — сравнивать
+// getDate() нельзя). Нужна reminder'у, чтобы отличить «dnes» от «zítra».
+const pragueYmd = (d: Date) =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Prague',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+
+// Следующий день от «YYYY-MM-DD» (через полдень UTC — DST не сдвигает).
+const nextYmd = (ymd: string) => {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+};
+
+// 'today' | 'tomorrow' | 'later' — термин относительно СЕЙЧАС (Прага).
+// Reminder-крон ловит окно now..+24ч, туда попадают и сегодняшние брони
+// (клиентка записалась утром на вечер того же дня) — им нельзя писать «zítra».
+const dayRelation = (iso: string): 'today' | 'tomorrow' | 'later' => {
+  if (!iso) return 'later';
+  const target = pragueYmd(new Date(iso));
+  const today = pragueYmd(new Date());
+  if (target === today) return 'today';
+  if (target === nextYmd(today)) return 'tomorrow';
+  return 'later';
+};
+
 export interface BookingNotifyView {
   bookingId: string;
   dateLabel: string; // «neděle 12. 7. 2026»
@@ -431,10 +460,21 @@ export default {
   },
 
   buildReminder(v: BookingNotifyView) {
-    const subject = `Připomínka: ${v.dateLabel} v ${v.time} | Bar.Bitch`;
+    // Термин может быть и сегодняшним (запись утром на вечер того же дня) —
+    // заголовок/текст обязаны это отражать, иначе клиентка придёт не в тот день.
+    const rel = dayRelation(v.startsAt);
+    const heading =
+      rel === 'today'
+        ? 'Vidíme se už dnes! 💕'
+        : rel === 'tomorrow'
+          ? 'Vidíme se už zítra! 💕'
+          : 'Připomínka rezervace 💕';
+    const when = rel === 'today' ? 'dnešní ' : rel === 'tomorrow' ? 'zítřejší ' : '';
+    const subjectPrefix = rel === 'today' ? 'dnes — ' : rel === 'tomorrow' ? 'zítra — ' : '';
+    const subject = `Připomínka: ${subjectPrefix}${v.dateLabel} v ${v.time} | Bar.Bitch`;
     const html = renderEmail({
-      heading: 'Vidíme se už zítra! 💕',
-      intro: `${esc(v.clientName || 'Dobrý den')}, připomínáme vaši rezervaci v ${esc(SALON_NAME)}.`,
+      heading,
+      intro: `${esc(v.clientName || 'Dobrý den')}, připomínáme vaši ${when}rezervaci v ${esc(SALON_NAME)}.`,
       rows: bookingRows(v),
       note: cancelNote(v),
       ...manageCta(v),
@@ -691,6 +731,11 @@ export default {
       const already = Array.isArray(booking.remindersSent) ? booking.remindersSent : [];
       if (already.includes('24h')) continue;
       if (booking.createdAt && now - new Date(booking.createdAt).getTime() < 2 * 3600000) continue;
+      // Бронь на СЕГОДНЯ (клиентка записалась на этот же день) — напоминание не шлём:
+      // подтверждение она получила только что, а «Vidíme se už zítra» вводило в
+      // заблуждение (реальный кейс 12.08.2026 — пришла бы не в тот день).
+      // Отметку remindersSent не ставим: бронь всё равно уйдёт из окна сама.
+      if (dayRelation(booking.startsAt) === 'today') continue;
 
       const v = viewFromBookingDoc(booking);
       try {
