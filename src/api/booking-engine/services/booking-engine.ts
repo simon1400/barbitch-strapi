@@ -20,6 +20,7 @@ import {
   MIN_LEAD_MIN,
   STEP_MIN,
   buildComboTitle,
+  calcJuniorPrice,
   computePricing,
   dayAvailability,
   minToHHMM,
@@ -64,6 +65,18 @@ const svcTitlesOf = (raw) => {
     }
   }
   return Array.isArray(arr) ? arr.map((s) => s?.title || '').filter(Boolean).join(' + ') : '';
+};
+// Снапшот услуг брони массивом (json-поле или JSON-строка); битый → []
+const svcArrayOf = (raw) => {
+  let arr = raw;
+  if (typeof raw === 'string') {
+    try {
+      arr = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(arr) ? arr : [];
 };
 // «1 200 Kč» / «—» — деньги в деталях журнала
 const fmtKcLog = (v) => (v == null || v === '' ? '—' : `${Number(v)} Kč`);
@@ -938,6 +951,10 @@ export default {
 
     // перенос: новые дата/время/мастер и/или новая длительность (смена услуги)
     let newPersonalRows = null;
+    // Итог пересчёта цены при смене мастера senior↔junior (см. блок ниже).
+    // null = смены мастера не было; {applied:false, reason} = пересчёт осознанно
+    // пропущен (админ увидит подсказку в календаре).
+    let repricing = null;
     const moving = patch.date != null || patch.time != null || patch.employee != null || newDuration != null;
     if (moving) {
       const date = patch.date ?? String(booking.date);
@@ -966,6 +983,36 @@ export default {
       // флаг пересчитывается на каждом переносе: уехали на свободное время → снова false
       // (бронь возвращается под защиту constraint)
       upd.overlap_allowed = busyList.some((b) => b.startMin < startMin + durationMin && startMin < b.endMin);
+
+      // Смена мастера senior↔junior → пересчёт цены по СНАПШОТУ услуг брони: в нём
+      // у каждой позиции лежит seniorPrice, поэтому цены каталога на момент брони
+      // не «поедут» (junior = calcJuniorPrice(seniorPrice), senior = seniorPrice).
+      // НЕ пересчитываем:
+      //  • priceOverride — ручная цена админа И системные скидки (bitchcard-redemption,
+      //    −15 % за дозапись тоже ставят этот флаг, s153) — иначе скидку бы стёрло;
+      //  • явный patch.totalPrice / смена услуги (там свой расчёт выше);
+      //  • зеркальные Noona-брони — в их снапшоте нет seniorPrice.
+      if (patch.employee && patch.serviceItems == null && patch.totalPrice == null) {
+        const tier = emp.tier === 'junior' ? 'junior' : 'senior';
+        const snap = svcArrayOf(booking.services);
+        if (booking.priceOverride) {
+          repricing = { applied: false, reason: 'price_override', tier };
+        } else if (!snap.length || snap.some((s) => !Number.isFinite(Number(s?.seniorPrice)))) {
+          repricing = { applied: false, reason: 'no_snapshot', tier };
+        } else {
+          const next = snap.map((s) => ({
+            ...s,
+            price: tier === 'junior' ? calcJuniorPrice(Number(s.seniorPrice)) : Number(s.seniorPrice),
+          }));
+          const to = next.reduce((sum, s) => sum + Number(s.price), 0);
+          const from = Number(booking.totalPrice) || 0;
+          if (to !== from) {
+            upd.services = JSON.stringify(next);
+            upd.total_price = to;
+            repricing = { applied: true, from, to, tier };
+          }
+        }
+      }
 
       upd.date = date;
       upd.starts_at = new Date(pragueMinToUtcIso(date, startMin));
@@ -1066,6 +1113,10 @@ export default {
           from: { date: fmtDay(fromInfo.date), time: fromInfo.time, employee: fromInfo.employeeName },
           to: { date: fmtDay(newDate), time: newTime, employee: newEmp },
         };
+        // цену пересчитал переход senior↔junior — пишем «старое → новое»
+        if (repricing?.applied) {
+          logDetails['cena'] = `${arrowLog(fmtKcLog(repricing.from), fmtKcLog(repricing.to))} (${repricing.tier})`;
+        }
       } else if (statusChanged) {
         if (patch.status === 'checkedOut') {
           shouldLog = false; // «Proběhla» — не пишем
@@ -1135,7 +1186,10 @@ export default {
       }
     }
 
-    return strapi.documents(BOOKING_UID).findOne({ documentId: bookingDocId, populate: { employee: { fields: ['name'] }, client: { fields: ['name', 'phone'] } } });
+    // + repricing: итог пересчёта цены при смене мастера (null — мастера не меняли),
+    // календарь показывает по нему подсказку «Cena přepočítána …»
+    const fresh = await strapi.documents(BOOKING_UID).findOne({ documentId: bookingDocId, populate: { employee: { fields: ['name'] }, client: { fields: ['name', 'phone'] } } });
+    return { ...fresh, repricing };
   },
 
   // Полное удаление брони (корзина в drawer). ЖЁСТКОЕ удаление записи, НЕ отмена:
