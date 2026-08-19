@@ -46,6 +46,21 @@
     },
     "createdByName": {
       "type": "string"
+    },
+    "approvalStatus": {
+      "type": "enumeration",
+      "enum": [
+        "approved",
+        "pending",
+        "rejected"
+      ],
+      "default": "approved"
+    },
+    "approvedByName": {
+      "type": "string"
+    },
+    "approvedAt": {
+      "type": "datetime"
     }
   }
 }

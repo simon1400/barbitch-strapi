@@ -374,7 +374,11 @@ export default {
         }
       }
       const blocksRaw = await strapi.documents('api::time-block.time-block').findMany({
-        filters: { date: { $gte: today, $lte: weekEnd } },
+        // блоки, ждущие подтверждения владельца (pending) или отклонённые, ещё не действуют
+        filters: {
+          date: { $gte: today, $lte: weekEnd },
+          $or: [{ approvalStatus: { $null: true } }, { approvalStatus: 'approved' }],
+        },
         limit: 5000,
       });
       const blocked = (blocksRaw || []).map((b) => ({

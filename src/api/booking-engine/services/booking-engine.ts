@@ -42,6 +42,12 @@ const TIME_BLOCK_UID = 'api::time-block.time-block';
 const MAX_RANGE_DAYS = 120; // потолок окна availability за один запрос (сайт просит ~3,5 месяца, как в Noona-флоу)
 const PG_EXCLUSION_VIOLATION = '23P01';
 const OWN_BLOCK_PREFIX = 'own|'; // noonaKey engine-блоков — реконсайл зеркала их не трогает
+// Блоки, заведённые администратором, вступают в силу только после подтверждения владельцем.
+// approvalStatus: approved (действует) | pending (ждёт владельца) | rejected (отклонён).
+// Легаси-строки (созданные до этой правки) и зеркальные Noona-блоки имеют NULL → approved.
+const BLOCK_APPROVED = 'approved';
+const BLOCK_PENDING = 'pending';
+const BLOCK_REJECTED = 'rejected';
 const RESCHEDULE_LIMIT = 3; // максимум самостоятельных переносов одной брони клиентом
 
 // Формат даты для журнала действий: «pá 17.7.» (день недели + D.M., без года).
@@ -306,7 +312,11 @@ export default {
         limit: 1000,
       }),
       strapi.documents(TIME_BLOCK_UID).findMany({
-        filters: { date: { $gte: fromDate, $lte: toDate } },
+        // pending/rejected блоки НЕ занимают время — они ещё не подтверждены владельцем
+        filters: {
+          date: { $gte: fromDate, $lte: toDate },
+          $or: [{ approvalStatus: { $null: true } }, { approvalStatus: BLOCK_APPROVED }],
+        },
         populate: { employee: { fields: ['documentId'] } },
         limit: 10000,
       }),
@@ -1312,6 +1322,11 @@ export default {
     const emp = await this.getEmployee(employee);
     // общий ключ на всю серию (уникальный uuid) — каждый день = отдельная строка, но одна группа
     const key = `${OWN_BLOCK_PREFIX}${crypto.randomUUID()}`;
+    // блок владельца действует сразу; блок администратора ждёт подтверждения владельца
+    const isOwner = session?.role === 'owner';
+    const approval = isOwner
+      ? { approvalStatus: BLOCK_APPROVED, approvedByName: session?.username || '', approvedAt: new Date().toISOString() }
+      : { approvalStatus: BLOCK_PENDING, approvedByName: '', approvedAt: null };
     const titleStr = String(title || '').trim() || 'Blokace';
     const dates = this._expandBlockDates(date, recurrence);
 
@@ -1332,6 +1347,7 @@ export default {
             title: titleStr,
             theme: '',
             createdByName: session?.username || '',
+            ...approval,
           },
         })
       );
@@ -1355,7 +1371,9 @@ export default {
           dates.length > 1
             ? `${recLabel ? `${recLabel} · ` : ''}${fmtDay(date)} – ${fmtDay(lastDate)} (${dates.length}×)`
             : fmtDay(date)
-        } · ${minToHHMM(startMin)}–${minToHHMM(endMin)}${titleStr && titleStr !== 'Blokace' ? ` · ${titleStr}` : ''}`,
+        } · ${minToHHMM(startMin)}–${minToHHMM(endMin)}${titleStr && titleStr !== 'Blokace' ? ` · ${titleStr}` : ''}${
+          isOwner ? '' : ' · čeká na schválení'
+        }`,
         details: {
           mistr: emp.name,
           opakování: recLabel ? (recurrence?.freq === 'daily' ? 'každý den' : `vybrané dny: ${recLabel}`) : null,
@@ -1365,10 +1383,47 @@ export default {
           čas: `${minToHHMM(startMin)}–${minToHHMM(endMin)}`,
           název: titleStr,
           dny: dates.length > 1 && dates.length <= 14 ? dates.map(fmtDay).join(', ') : null,
+          schválení: isOwner ? 'schváleno (majitel)' : 'čeká na schválení majitele',
         },
       })
       .catch((e) => strapi.log.error(`calendar-log block-create failed: ${e.message}`));
-    return { documentId: created[0]?.documentId, count: created.length };
+    if (!isOwner) {
+      this._notifyBlockPending({
+        employeeName: emp.name,
+        actorName: session?.username || '',
+        dates,
+        startMin,
+        endMin,
+        title: titleStr,
+        recLabel,
+      });
+    }
+    return { documentId: created[0]?.documentId, count: created.length, approvalStatus: approval.approvalStatus };
+  },
+
+  // Telegram владельцу: администратор завёл/изменил блок, тот ждёт подтверждения.
+  // Fire-and-forget; гейты (ENGINE_NOTIFY_TELEGRAM_ENABLED / DRY) внутри booking-notify.
+  _notifyBlockPending({ employeeName, actorName, dates, startMin, endMin, title, recLabel, edited = false }) {
+    const first = dates[0];
+    const last = dates[dates.length - 1];
+    const when =
+      dates.length > 1
+        ? `${recLabel ? `${recLabel} · ` : ''}${fmtDay(first)} – ${fmtDay(last)} (${dates.length}×)`
+        : fmtDay(first);
+    const lines = [
+      edited ? '🔒 <b>Upravený blok čeká na schválení</b>' : '🔒 <b>Nový blok čeká na schválení</b>',
+      `💇 ${employeeName || '—'}`,
+      `🗓 ${when}`,
+      `🕐 ${minToHHMM(startMin)}–${minToHHMM(endMin)}`,
+      title && title !== 'Blokace' ? `📝 ${title}` : '',
+      `👤 zadal/a: ${actorName || '—'}`,
+      '',
+      'Schvalte v kalendáři — tlačítko «Ke schválení».',
+    ].filter(Boolean);
+    strapi
+      .service('api::booking-engine.booking-notify')
+      .sendTelegram(lines.join('\n'))
+      .catch((e) => strapi.log.error(`block pending telegram failed: ${e.message}`));
   },
 
   // Имя мастера для журнала: зеркальные блоки из Noona-импорта создавались БЕЗ
@@ -1408,6 +1463,15 @@ export default {
     }
     if (title != null) data.title = String(title).trim() || 'Blokace';
     if (!Object.keys(data).length) return block;
+    // правка администратором снимает подтверждение — блок снова ждёт владельца
+    // (иначе обход: одобрили блок на 15 мин → админ растянул его на весь день).
+    // Владелец правит свободно: статус не трогаем, он подтверждает отдельной кнопкой.
+    const resetApproval = session?.role !== 'owner' && block.approvalStatus !== BLOCK_PENDING;
+    if (resetApproval) {
+      data.approvalStatus = BLOCK_PENDING;
+      data.approvedByName = '';
+      data.approvedAt = null;
+    }
     const updated = await strapi.documents(TIME_BLOCK_UID).update({ documentId: blockDocId, data });
     strapi.log.info(`booking-engine: admin ${session?.username || '?'} patched block ${block.noonaKey} (${block.date})`);
     {
@@ -1424,18 +1488,130 @@ export default {
             actorName: session?.username || '',
             entityDocId: blockDocId,
             employeeName: empName,
-            summary: `Úprava bloku: ${empName ? `${empName} · ` : ''}${fmtDay(bDate)}${data.startsAt ? ` · ${oldTime} → ${newTime}` : ''}${data.title != null ? ` · ${data.title}` : ''}`,
+            summary: `Úprava bloku: ${empName ? `${empName} · ` : ''}${fmtDay(bDate)}${data.startsAt ? ` · ${oldTime} → ${newTime}` : ''}${data.title != null ? ` · ${data.title}` : ''}${resetApproval ? ' · čeká na schválení' : ''}`,
             details: {
               mistr: empName || null,
               date: fmtDay(bDate),
               before: { time: oldTime, title: block.title },
               after: { time: newTime, title: data.title != null ? data.title : block.title },
+              schválení: resetApproval ? 'zrušeno — čeká na schválení majitele' : null,
             },
           })
         )
         .catch((e) => strapi.log.error(`calendar-log block-edit failed: ${e.message}`));
+      if (resetApproval) {
+        const startNow = utcToPragueMinClamped(data.startsAt || block.startsAt, bDate);
+        const endNow = utcToPragueMinClamped(data.endsAt || block.endsAt, bDate);
+        this._blockEmployeeName(block).then((empName) =>
+          this._notifyBlockPending({
+            employeeName: empName,
+            actorName: session?.username || '',
+            dates: [bDate],
+            startMin: startNow,
+            endMin: endNow,
+            title: data.title != null ? data.title : block.title,
+            recLabel: '',
+            edited: true,
+          })
+        );
+      }
     }
     return updated;
+  },
+
+  // Ключ серии блока: own-серия делит noonaKey, зеркальная rrule-серия — noonaBlockedId
+  // (у зеркальных noonaKey per-date `id|date`, для группировки не годится).
+  _blockSeriesFilter(block) {
+    const isOwn = String(block.noonaKey || '').startsWith(OWN_BLOCK_PREFIX);
+    return isOwn ? { noonaKey: block.noonaKey } : { noonaBlockedId: block.noonaBlockedId || '__none__' };
+  },
+
+  // Владелец подтверждает/отклоняет блок (series=true — всю серию повторений сразу).
+  // approved → блок начинает занимать время; rejected → остаётся в календаре помеченным,
+  // но слоты не блокирует (админ его видит и правит/удаляет сам).
+  async adminSetBlockApproval(blockDocId, { status, series = false } = {}, session) {
+    if (status !== BLOCK_APPROVED && status !== BLOCK_REJECTED) {
+      throw new EngineError(400, 'bad_approval_status', 'status должен быть approved|rejected');
+    }
+    const block = await strapi.documents(TIME_BLOCK_UID).findOne({
+      documentId: blockDocId,
+      populate: { employee: { fields: ['name'] } },
+    });
+    if (!block) throw new EngineError(404, 'block_not_found', 'Блок не найден');
+
+    const targets = series
+      ? await strapi.documents(TIME_BLOCK_UID).findMany({ filters: this._blockSeriesFilter(block), limit: 1000 })
+      : [block];
+    const data = {
+      approvalStatus: status,
+      approvedByName: session?.username || '',
+      approvedAt: new Date().toISOString(),
+    };
+    for (const b of targets) {
+      await strapi.documents(TIME_BLOCK_UID).update({ documentId: b.documentId, data });
+    }
+
+    const empName = await this._blockEmployeeName(block);
+    const bDate = String(block.date);
+    const bTime = block.startsAt
+      ? `${minToHHMM(utcToPragueMinClamped(block.startsAt, bDate))}–${minToHHMM(utcToPragueMinClamped(block.endsAt, bDate))}`
+      : '';
+    const approved = status === BLOCK_APPROVED;
+    strapi.log.info(
+      `booking-engine: owner ${session?.username || '?'} ${approved ? 'approved' : 'rejected'} ${targets.length} block(s) ${block.noonaKey}`
+    );
+    strapi
+      .service('api::calendar-log.calendar-log')
+      .write({
+        action: approved ? 'block_approve' : 'block_reject',
+        entityType: 'block',
+        actorName: session?.username || '',
+        entityDocId: blockDocId,
+        employeeName: empName,
+        summary: `${approved ? 'Blok schválen' : 'Blok zamítnut'}: ${empName ? `${empName} · ` : ''}${fmtDay(bDate)}${
+          bTime ? ` · ${bTime}` : ''
+        }${targets.length > 1 ? ` (série ${targets.length}×)` : ''}`,
+        details: {
+          mistr: empName || null,
+          datum: fmtDay(bDate),
+          čas: bTime,
+          název: block.title,
+          zadal: block.createdByName || null,
+          počet: targets.length > 1 ? `${targets.length} ${blokPluralCs(targets.length)}` : null,
+        },
+      })
+      .catch((e) => strapi.log.error(`calendar-log block-approval failed: ${e.message}`));
+    return { updated: targets.length, status };
+  },
+
+  // Блоки, ждущие подтверждения владельца: от сегодняшнего дня (Прага) и дальше.
+  // Прошлые pending-блоки не показываем — подтверждать их уже нечего.
+  async adminPendingBlocks() {
+    const today = pragueDateOf(new Date().toISOString());
+    const rows = await strapi.documents(TIME_BLOCK_UID).findMany({
+      filters: { approvalStatus: BLOCK_PENDING, date: { $gte: today } },
+      populate: { employee: { fields: ['name'] } },
+      sort: ['date:asc', 'startsAt:asc'],
+      limit: 500,
+    });
+    return {
+      items: rows.map((b) => {
+        const d = String(b.date);
+        const own = String(b.noonaKey || '').startsWith(OWN_BLOCK_PREFIX);
+        return {
+          documentId: b.documentId,
+          date: d,
+          startMin: b.startsAt ? utcToPragueMinClamped(b.startsAt, d) : null,
+          endMin: b.endsAt ? utcToPragueMinClamped(b.endsAt, d) : null,
+          title: b.title || '',
+          employeeName: b.employeeNameRaw || b.employee?.name || '',
+          createdByName: b.createdByName || '',
+          createdAt: b.createdAt || null,
+          own,
+          seriesKey: own ? b.noonaKey : b.noonaBlockedId || b.documentId,
+        };
+      }),
+    };
   },
 
   // series=true → удалить все повторения: own-серия делит noonaKey,

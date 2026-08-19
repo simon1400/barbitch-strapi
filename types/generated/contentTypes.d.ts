@@ -2648,6 +2648,12 @@ export interface ApiTimeBlockTimeBlock extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
+    approvalStatus: Schema.Attribute.Enumeration<
+      ['approved', 'pending', 'rejected']
+    > &
+      Schema.Attribute.DefaultTo<'approved'>;
+    approvedAt: Schema.Attribute.DateTime;
+    approvedByName: Schema.Attribute.String;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;

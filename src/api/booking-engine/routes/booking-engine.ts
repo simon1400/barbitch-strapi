@@ -57,6 +57,8 @@ export default {
     admin('POST', '/engine/admin/bookings/:id/rebook-discount', 'booking-engine.adminRestoreRebookDiscount'),
     admin('DELETE', '/engine/admin/bookings/:id/rebook-discount', 'booking-engine.adminRemoveRebookDiscount'),
     admin('POST', '/engine/admin/blocks', 'booking-engine.adminCreateBlock'),
+    admin('GET', '/engine/admin/blocks/pending', 'booking-engine.adminPendingBlocks'),
+    admin('POST', '/engine/admin/blocks/:id/approval', 'booking-engine.adminSetBlockApproval'),
     admin('PATCH', '/engine/admin/blocks/:id', 'booking-engine.adminPatchBlock'),
     admin('DELETE', '/engine/admin/blocks/:id', 'booking-engine.adminDeleteBlock'),
   ],

@@ -35,6 +35,17 @@ const requireAdmin = (ctx) => {
   return session;
 };
 
+// только владелец — подтверждение блоков, заведённых администраторами
+const requireOwner = (ctx) => {
+  const session = verifySession(tokenFromCtx(ctx));
+  if (!session || session.role !== 'owner') {
+    ctx.status = 401;
+    ctx.body = { error: { status: 401, code: 'owner_only', message: 'Schvalovat bloky může jen majitel' } };
+    return null;
+  }
+  return session;
+};
+
 // любой залогиненный сотрудник (owner/administrator/master) — для push-подписки
 const requireStaff = (ctx) => {
   const session = verifySession(tokenFromCtx(ctx));
@@ -422,6 +433,23 @@ export default {
   },
 
   // DELETE /api/engine/admin/blocks/:id[?series=1] — series=1 удаляет все повторения
+  // GET /api/engine/admin/blocks/pending — блоки, ждущие подтверждения владельца
+  async adminPendingBlocks(ctx) {
+    const session = requireOwner(ctx);
+    if (!session) return;
+    await handle(ctx, () => svc().adminPendingBlocks());
+  },
+
+  // POST /api/engine/admin/blocks/:id/approval {status:'approved'|'rejected', series?:boolean}
+  async adminSetBlockApproval(ctx) {
+    const session = requireOwner(ctx);
+    if (!session) return;
+    const b = ctx.request.body || {};
+    await handle(ctx, () =>
+      svc().adminSetBlockApproval(ctx.params.id, { status: b.status, series: b.series === true }, session)
+    );
+  },
+
   async adminDeleteBlock(ctx) {
     const session = requireAdmin(ctx);
     if (!session) return;
