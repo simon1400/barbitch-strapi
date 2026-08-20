@@ -514,6 +514,21 @@ export default {
     return map;
   },
 
+  // Применённая к брони награда ЦЕЛИКОМ (с reward) — нужна booking-engine, чтобы
+  // при смене состава услуг пересчитать скидку от НОВОЙ суммы (s174). Гейта
+  // LOYALTY_ENABLED тут НЕТ намеренно: это защита уже применённой скидки от
+  // затирания, а не выдача новой (при выключенной программе старые used-награды
+  // никуда не делись). null — награды на брони нет.
+  async usedRedemptionForBooking(bookingDocId) {
+    if (!bookingDocId) return null;
+    const rows = await strapi.documents(REDEMPTION_UID).findMany({
+      filters: { status: { $eq: 'used' }, usedInBookingDocId: { $eq: bookingDocId } },
+      populate: { reward: { fields: ['title', 'discountType', 'discountValue'] } },
+      limit: 1,
+    });
+    return rows[0] || null;
+  },
+
   async redemptionsForAdmin(clientDocId, bookingDocId = null) {
     this.assertEnabled();
     // Гейт (решение владельца 2026-07-21): available-скидки bitchcard в календаре

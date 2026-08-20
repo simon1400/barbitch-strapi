@@ -873,6 +873,55 @@ export default {
 
   // ── админ: изменение брони (перенос / статус / коммент / цена) ──
 
+  // Пересчёт УЖЕ ПРИМЕНЁННОЙ скидки при смене состава услуг (s174). Цена брони
+  // собирается заново от каталога, поэтому скидку надо пересчитать от НОВОЙ суммы —
+  // иначе она молча исчезала: клиент платил полную цену, а награда/скидка
+  // оставалась записанной (жалоба клиентки 20.08.2026, 944 Kč вместо 755 Kč).
+  //  • bitchcard-redemption: percent → тот же % от новой суммы, fixed → те же Kč
+  //    (не больше суммы); discount_kc награды обновляется в той же транзакции;
+  //  • −15 % за дозапис (booking.discount, applied): тот же % от новой суммы.
+  // Правило салона «одна скидка на услугу» гарантирует, что активна максимум одна.
+  // null — применённой скидки нет (обычная ветка каталожного пересчёта).
+  async _repriceDiscountOnServiceChange(bookingDocId, booking, basePrice) {
+    let used = null;
+    try {
+      used = await strapi.service('api::loyalty.loyalty').usedRedemptionForBooking(bookingDocId);
+    } catch (e) {
+      // Смену услуги из-за лояльности не роняем, но и цену тогда не трогаем:
+      // безопаснее оставить полную (админ увидит и применит скидку заново).
+      strapi.log.warn(`booking-engine: redemption lookup on service change failed: ${e?.message || e}`);
+    }
+    if (used?.reward) {
+      const value = Number(used.reward.discountValue) || 0;
+      const newPrice =
+        used.reward.discountType === 'percent'
+          ? Math.round(basePrice * (1 - value / 100))
+          : Math.max(0, basePrice - Math.round(value));
+      return {
+        kind: 'bitchcard',
+        label: used.reward.title || 'Bitchcard',
+        code: used.code || null,
+        totalPrice: newPrice,
+        discountKc: basePrice - newPrice,
+        redemptionDocId: used.documentId,
+      };
+    }
+    const d = booking.discount;
+    if (d && d.type === 'rebook' && d.applied && Number(d.percent) > 0) {
+      const percent = Number(d.percent);
+      const newPrice = Math.round(basePrice * (1 - percent / 100));
+      return {
+        kind: 'rebook',
+        label: `Sleva za dozápis ${percent} %`,
+        code: null,
+        totalPrice: newPrice,
+        discountKc: basePrice - newPrice,
+        discount: { ...d, discountKc: basePrice - newPrice, originalPrice: basePrice },
+      };
+    }
+    return null;
+  },
+
   async adminPatchBooking(bookingDocId, patch, session) {
     const booking = await strapi.documents(BOOKING_UID).findOne({
       documentId: bookingDocId,
@@ -924,6 +973,9 @@ export default {
     // смена услуги (админ-календарь): новый снапшот services + пересчёт цены и
     // длительности (endsAt пересчитается в блоке переноса ниже, с валидацией пересечений)
     let newDuration = null;
+    // Итог пересчёта применённой скидки при смене состава услуг (s174); null —
+    // скидки на брони нет либо состав не менялся.
+    let discountReprice = null;
     if (patch.serviceItems != null) {
       if (!Array.isArray(patch.serviceItems) || !patch.serviceItems.length) {
         throw new EngineError(400, 'services_required', 'Нужна минимум одна услуга');
@@ -953,8 +1005,17 @@ export default {
       upd.services = JSON.stringify(snapshot);
       // явный patch.totalPrice (обработан выше) побеждает пересчитанную цену
       if (patch.totalPrice == null) {
-        upd.total_price = computedPrice;
-        upd.price_override = patch.serviceItems.some((i) => i.priceOverride != null);
+        discountReprice = await this._repriceDiscountOnServiceChange(bookingDocId, booking, computedPrice);
+        if (discountReprice) {
+          discountReprice.from = booking.totalPrice != null ? Number(booking.totalPrice) : null;
+          discountReprice.fullPrice = computedPrice;
+          upd.total_price = discountReprice.totalPrice;
+          upd.price_override = true; // цена со скидкой — не каталожная
+          if (discountReprice.kind === 'rebook') upd.discount = JSON.stringify(discountReprice.discount);
+        } else {
+          upd.total_price = computedPrice;
+          upd.price_override = patch.serviceItems.some((i) => i.priceOverride != null);
+        }
       }
       newDuration = totalDuration;
     }
@@ -1040,6 +1101,13 @@ export default {
     try {
       await knex.transaction(async (trx) => {
         await trx('bookings').where('id', bookingRow.id).update(upd);
+        // discount_kc награды должен совпадать с реально списанной суммой — его
+        // читают сверка чекаута и доля мастера в календаре (s172)
+        if (discountReprice?.redemptionDocId) {
+          await trx('redemptions')
+            .where('document_id', discountReprice.redemptionDocId)
+            .update({ discount_kc: discountReprice.discountKc, updated_at: new Date() });
+        }
         if (newPersonalRows) {
           await trx('bookings_employee_lnk').where('booking_id', bookingRow.id).del();
           for (const p of newPersonalRows) {
@@ -1152,6 +1220,9 @@ export default {
           služba: arrowLog(oldSvc, newSvc),
           cena: arrowLog(fmtKcLog(oldTotal), fmtKcLog(newTotal)),
         };
+        if (discountReprice) {
+          logDetails['sleva'] = `${discountReprice.label}: −${fmtKcLog(discountReprice.discountKc)} (z ${fmtKcLog(discountReprice.fullPrice)})`;
+        }
       } else {
         // «Dorazila» (arrived) не логируем; если в PATCH менялся ТОЛЬКО arrived —
         // не пишем вообще (иначе получилась бы пустая «Úprava»).
@@ -1199,7 +1270,7 @@ export default {
     // + repricing: итог пересчёта цены при смене мастера (null — мастера не меняли),
     // календарь показывает по нему подсказку «Cena přepočítána …»
     const fresh = await strapi.documents(BOOKING_UID).findOne({ documentId: bookingDocId, populate: { employee: { fields: ['name'] }, client: { fields: ['name', 'phone'] } } });
-    return { ...fresh, repricing };
+    return { ...fresh, repricing, discountReprice };
   },
 
   // Полное удаление брони (корзина в drawer). ЖЁСТКОЕ удаление записи, НЕ отмена:
