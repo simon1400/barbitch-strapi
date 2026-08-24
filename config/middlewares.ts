@@ -44,6 +44,10 @@ export default () => [
   'strapi::poweredBy',
   'strapi::query',
   { name: 'strapi::body', config: { jsonLimit: '100mb', formLimit: '100mb', textLimit: '100mb', multipart: true } },
+  // Обмен сессии сотрудника на серверный API-токен — ДО роутинга, чтобы штатная
+  // авторизация Strapi отработала как обычно. Убирает вечный full-access токен
+  // из браузерного бандла админки (см. src/middlewares/admin-session.ts).
+  'global::admin-session',
   'strapi::session',
   'strapi::favicon',
   'strapi::public',

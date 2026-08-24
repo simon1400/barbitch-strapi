@@ -66,8 +66,18 @@ export const verifySession = (token: string | null | undefined): VerifiedSession
   }
 }
 
-/** Pull the Bearer token out of a Koa/Strapi request context. */
+/**
+ * Pull the Bearer token out of a Koa/Strapi request context.
+ *
+ * The `admin-session` global middleware swaps a valid admin session for the
+ * server-side API token before routing (so core content routes authorise
+ * without shipping that token to the browser). It stashes the original session
+ * in `ctx.state.adminJwt` first — read that here, otherwise every custom
+ * handler that gates on the session (engine, campaign, …) would stop seeing it.
+ */
 export const tokenFromCtx = (ctx: any): string | null => {
+  const stashed: unknown = ctx?.state?.adminJwt
+  if (typeof stashed === 'string' && stashed.length > 0) return stashed
   const auth: unknown = ctx?.request?.header?.authorization ?? ctx?.request?.headers?.authorization
   if (!auth || typeof auth !== 'string') return null
   const m = auth.match(/^Bearer\s+(.+)$/i)
