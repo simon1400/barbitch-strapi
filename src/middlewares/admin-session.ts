@@ -27,13 +27,30 @@
 
 import { tokenFromCtx, verifySession } from '../utils/admin-jwt';
 
+// 🟥 РЕГРЕССИЯ 24.08.2026 — почему тут ДВА жёстких ограничения.
+// Панель Strapi (/admin) подписывает свои токены ТЕМ ЖЕ `ADMIN_JWT_SECRET`,
+// что и наши сессии: у обоих HS256 и валидный `exp`, поэтому `verifySession`
+// принимал токен панели за сессию сотрудника. Middleware подменял ему заголовок
+// на API-токен, панель теряла авторизацию и уходила в цикл перезагрузок на
+// странице логина.
+//   1. Работаем ТОЛЬКО на /api/** — маршруты панели (/admin/**) не трогаем.
+//   2. Требуем нашу роль в payload: у токена панели Strapi её нет вообще.
+// Любое из двух условий закрыло бы дыру, но нужны оба: первое защищает панель,
+// второе — от чужого токена с тем же секретом на прикладных маршрутах.
+const STAFF_ROLES = new Set(['owner', 'administrator', 'master']);
+
 export default (_config: unknown, { strapi }: { strapi: any }) => {
   let warned = false;
   return async (ctx: any, next: () => Promise<void>) => {
+    const path: string = ctx?.request?.path || ctx?.path || '';
+    if (!path.startsWith('/api/')) {
+      await next();
+      return;
+    }
     const raw = tokenFromCtx(ctx);
     if (raw) {
       const session = verifySession(raw);
-      if (session) {
+      if (session && STAFF_ROLES.has(session.role)) {
         // сохраняем ДО подмены — иначе гейты собственных ручек ослепнут
         ctx.state.adminJwt = raw;
         ctx.state.adminSession = session;
