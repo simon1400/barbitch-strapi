@@ -18,6 +18,20 @@ export interface BookingServiceModifier extends Struct.ComponentSchema {
   };
 }
 
+export interface BookingServiceRestriction extends Struct.ComponentSchema {
+  collectionName: 'components_booking_service_restrictions';
+  info: {
+    description: 'Ограничение мастера по услуге';
+    displayName: 'serviceRestriction';
+    icon: 'lock';
+  };
+  attributes: {
+    allowedModifiers: Schema.Attribute.JSON;
+    allowedVariants: Schema.Attribute.JSON;
+    personalDocId: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
 export interface BookingServiceVariant extends Struct.ComponentSchema {
   collectionName: 'components_booking_service_variants';
   info: {
@@ -308,6 +322,7 @@ declare module '@strapi/strapi' {
   export module Public {
     export interface ComponentSchemas {
       'booking.service-modifier': BookingServiceModifier;
+      'booking.service-restriction': BookingServiceRestriction;
       'booking.service-variant': BookingServiceVariant;
       'content.ask-answer': ContentAskAnswer;
       'content.content-baner': ContentContentBaner;

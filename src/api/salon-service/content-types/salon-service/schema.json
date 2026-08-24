@@ -65,6 +65,11 @@
       "component": "booking.service-modifier",
       "repeatable": true
     },
+    "restrictions": {
+      "type": "component",
+      "component": "booking.service-restriction",
+      "repeatable": true
+    },
     "noonaBaseId": {
       "type": "string",
       "unique": true

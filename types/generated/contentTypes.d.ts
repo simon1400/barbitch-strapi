@@ -2388,6 +2388,7 @@ export interface ApiSalonServiceSalonService
       'manyToMany',
       'api::personal.personal'
     >;
+    restrictions: Schema.Attribute.Component<'booking.service-restriction', true>;
     price: Schema.Attribute.Integer & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
     title: Schema.Attribute.String & Schema.Attribute.Required;

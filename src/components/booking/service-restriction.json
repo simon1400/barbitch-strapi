@@ -1,0 +1,21 @@
+{
+  "collectionName": "components_booking_service_restrictions",
+  "info": {
+    "displayName": "serviceRestriction",
+    "icon": "lock",
+    "description": "Ограничение мастера по услуге: какие варианты/дополнения он делает. Пустое значение (null) = разрешено всё, пустой массив = не разрешено ничего (только база)."
+  },
+  "options": {},
+  "attributes": {
+    "personalDocId": {
+      "type": "string",
+      "required": true
+    },
+    "allowedVariants": {
+      "type": "json"
+    },
+    "allowedModifiers": {
+      "type": "json"
+    }
+  }
+}

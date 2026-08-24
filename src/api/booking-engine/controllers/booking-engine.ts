@@ -91,9 +91,13 @@ export default {
     await handle(ctx, () => svc().publicService(ctx.params.id));
   },
 
-  // GET /api/engine/services/:id/employees — мастера услуги (страница выбора мастера)
+  // GET /api/engine/services/:id/employees?variant=&modifiers=a,b — мастера услуги
+  // (страница выбора мастера). Выбор с шага /extras отсекает мастеров, которым эта
+  // комбинация не разрешена (salon-service.restrictions).
   async listServiceEmployees(ctx) {
-    await handle(ctx, () => svc().publicServiceEmployees(ctx.params.id));
+    await handle(ctx, () =>
+      svc().publicServiceEmployees(ctx.params.id, ctx.query.variant || null, parseModifiers(ctx.query.modifiers))
+    );
   },
 
   // GET /api/engine/availability?service=&variant=&modifiers=a,b&employee=id|any&from=&to=

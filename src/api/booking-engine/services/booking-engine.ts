@@ -147,13 +147,13 @@ export default {
     if (!serviceDocId) throw new EngineError(400, 'service_required', 'Параметр service обязателен');
     let svc = await strapi.documents(SALON_SERVICE_UID).findOne({
       documentId: serviceDocId,
-      populate: { variants: true, modifiers: true, icon: true },
+      populate: { variants: true, modifiers: true, icon: true, restrictions: true },
     });
     if (!svc) {
       // легаси-ссылки (/cenik, старые письма) несут Noona event_type id базовой услуги
       const byNoona = await strapi.documents(SALON_SERVICE_UID).findMany({
         filters: { noonaBaseId: serviceDocId },
-        populate: { variants: true, modifiers: true, icon: true },
+        populate: { variants: true, modifiers: true, icon: true, restrictions: true },
         limit: 1,
       });
       svc = byNoona[0] || null;
@@ -219,17 +219,56 @@ export default {
     return this.shapeService(svc);
   },
 
-  async publicServiceEmployees(serviceDocId) {
+  // ── ограничения мастера по варианту/дополнениям (salon-service.restrictions) ──
+  // Семантика поля: null/отсутствует = мастеру разрешено ВСЁ (легаси-услуги без
+  // ограничений работают как раньше), массив = белый список; пустой массив =
+  // «только базовая услуга» / «без дополнений».
+
+  restrictionsMap(svc) {
+    const map = new Map();
+    for (const r of svc?.restrictions || []) {
+      if (!r?.personalDocId) continue;
+      map.set(String(r.personalDocId), {
+        variants: Array.isArray(r.allowedVariants) ? r.allowedVariants.map(String) : null,
+        modifiers: Array.isArray(r.allowedModifiers) ? r.allowedModifiers.map(String) : null,
+      });
+    }
+    return map;
+  },
+
+  employeeAllowsSelection(rule, variantLabel, modifierKeys) {
+    if (!rule) return true;
+    if (variantLabel && rule.variants && !rule.variants.includes(String(variantLabel))) return false;
+    if (rule.modifiers) {
+      for (const k of modifierKeys || []) if (!rule.modifiers.includes(String(k))) return false;
+    }
+    return true;
+  },
+
+  // Отсев мастеров, которым выбранная комбинация не разрешена. Применяется только
+  // на публичных путях (сайт): у админа в календаре ограничение — подсказка, не запрет.
+  filterEmployeesBySelection(svc, employees, variantLabel, modifierKeys) {
+    const rules = this.restrictionsMap(svc);
+    if (!rules.size) return employees;
+    const keys = Array.isArray(modifierKeys) ? modifierKeys.filter(Boolean) : [];
+    return employees.filter((e) => this.employeeAllowsSelection(rules.get(e.documentId), variantLabel, keys));
+  },
+
+  // variantLabel/modifierKeys — выбор клиента с шага /extras: мастера, которым эта
+  // комбинация не разрешена, в список не попадают (hiddenByRestrictions — сколько отсеяно).
+  async publicServiceEmployees(serviceDocId, variantLabel = null, modifierKeys = []) {
     const svc = await this.resolveService(serviceDocId);
-    const employees = await strapi.documents(PERSONAL_UID).findMany({
+    const all = await strapi.documents(PERSONAL_UID).findMany({
       status: 'published',
       filters: { isActive: true, services: { documentId: { $eq: svc.documentId } } },
       fields: ['name', 'tier'],
       populate: { photo: true },
       limit: 100,
     });
+    const employees = this.filterEmployeesBySelection(svc, all, variantLabel, modifierKeys);
     return {
       serviceId: svc.documentId,
+      hiddenByRestrictions: all.length - employees.length,
       employees: employees.map((e) => ({
         documentId: e.documentId,
         name: e.name,
@@ -401,10 +440,20 @@ export default {
     if (durationMin <= 0) throw new EngineError(400, 'bad_duration', 'Нулевая длительность услуги');
 
     const assigned = await this.listEmployeesForService(svc.documentId);
-    let employees = assigned;
+    // ограничения по варианту/дополнениям — только публичный флоу (сайт); перенос
+    // существующей брони и админ-пути (publicOnly:false) они не касаются
+    const pool = publicOnly
+      ? this.filterEmployeesBySelection(svc, assigned, variantLabel, modifierKeys)
+      : assigned;
+    let employees = pool;
     if (employee && employee !== 'any') {
-      employees = assigned.filter((p) => p.documentId === employee);
-      if (!employees.length) throw new EngineError(400, 'employee_service_mismatch', 'Мастер не делает эту услугу');
+      employees = pool.filter((p) => p.documentId === employee);
+      if (!employees.length) {
+        const assignedToService = assigned.some((p) => p.documentId === employee);
+        throw assignedToService
+          ? new EngineError(400, 'employee_not_allowed', 'Мастер не делает выбранный вариант или дополнение')
+          : new EngineError(400, 'employee_service_mismatch', 'Мастер не делает эту услугу');
+      }
     }
     if (!employees.length) return { durationMin, days: [] };
 
