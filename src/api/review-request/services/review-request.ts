@@ -43,6 +43,12 @@ const MIN_VISITS = Math.max(1, Number(process.env.REVIEW_REQUEST_MIN_VISITS) || 
 const DAILY_CAP = Math.max(1, Number(process.env.REVIEW_REQUEST_DAILY_CAP) || 10);
 const COOLDOWN_DAYS = Math.max(1, Number(process.env.REVIEW_REQUEST_COOLDOWN_DAYS) || 365);
 
+// Адрес должен быть похож на настоящий. Проверки «есть собака» мало: в базе
+// лежат заглушки («123456789@cz», «Jkakl@jskekn») и опечатки с пробелом внутри
+// («zouharova.ivana@ seznam.cz») — отправка по ним даёт bounce, а отказы бьют по
+// репутации домена и ухудшают доставляемость ОСТАЛЬНЫХ писем салона.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/;
+
 // Сегодня в Праге как 'YYYY-MM-DD' (сервер в UTC — брать локальную дату нельзя)
 const pragueToday = () =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date());
@@ -113,13 +119,14 @@ export default {
         .map((l) => l.clientDocId)
     );
 
-    const skipped = { noEmail: 0, optOut: 0, blacklisted: 0, hasLater: 0, cooldown: 0, tooFewVisits: 0 };
+    const skipped = { noEmail: 0, badEmail: 0, optOut: 0, blacklisted: 0, hasLater: 0, cooldown: 0, tooFewVisits: 0 };
     const toSend = [];
 
     for (const [clientDocId, booking] of byClient) {
       const c = booking.client;
       const email = String(c.email || '').trim();
-      if (!email || !email.includes('@')) { skipped.noEmail += 1; continue; }
+      if (!email) { skipped.noEmail += 1; continue; }
+      if (!EMAIL_RE.test(email)) { skipped.badEmail += 1; continue; }
       if (c.reminderOptOut) { skipped.optOut += 1; continue; }
       if (c.blacklisted) { skipped.blacklisted += 1; continue; }
       if (recentlyAsked.has(clientDocId)) { skipped.cooldown += 1; continue; }
