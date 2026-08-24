@@ -95,6 +95,29 @@ export default {
       tz: 'Europe/Prague',
     },
   },
+  // Просьба оставить отзыв на Google — через день после визита, только клиентам
+  // с 2+ завершёнными визитами. Выключено по умолчанию: ТОЛЬКО env
+  // REVIEW_REQUEST_ENABLED=true (+ RESEND_API_KEY для реальной отправки и
+  // GOOGLE_PLACE_ID / REVIEW_LINK_URL для ссылки — без ссылки прогон no-op).
+  // Идемпотентно (review-request-log), защиты: opt-out / blacklist / поздний визит /
+  // кулдаун ~год / дневной кап (пачка отзывов за день = флаг для антиспама Google).
+  reviewRequests: {
+    task: async ({ strapi }) => {
+      if (process.env.REVIEW_REQUEST_ENABLED !== 'true') return;
+      try {
+        const res = await strapi.service('api::review-request.review-request').run();
+        if (res.candidates > 0) {
+          strapi.log.info(`review requests: ${res.sent} sent / ${res.candidates} candidates`);
+        }
+      } catch (e) {
+        strapi.log.error(`review requests cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '0 12 * * *', // каждый день в 12:00 (обед — письмо не теряется в утренней почте)
+      tz: 'Europe/Prague',
+    },
+  },
   dailyDigest: {
     task: async ({ strapi }) => {
       try {

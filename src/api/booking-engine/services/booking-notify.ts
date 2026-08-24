@@ -15,6 +15,9 @@ import {
   minToHHMM,
   utcToPragueMinClamped,
 } from './slots-core';
+// только для превью письма-просьбы об отзыве (сборка ссылки из GOOGLE_PLACE_ID);
+// модуль на загрузке ничего не делает, кроме чтения env — цикла импорта нет
+import { reviewUrl } from '../../review-request/services/review-request';
 
 const BOOKING_UID = 'api::booking.booking';
 
@@ -549,6 +552,38 @@ export default {
     return { subject, html };
   },
 
+  // ── просьба оставить отзыв на Google (через день после визита) ──
+  // Рендер живёт здесь (бренд-канон renderEmail); отбор кандидатов/дедуп ведёт
+  // сервис api::review-request.review-request (cron + ручной триггер).
+  // rv = { clientName, serviceTitle, employeeName, visitDate: 'YYYY-MM-DD', visitCount, reviewUrl }
+  //
+  // 🟥 Текст намеренно НЕ фильтрует по впечатлению («líbilo se vám?» → только
+  // довольных на Google) и ничего не обещает взамен — и то, и другое запрещено
+  // политикой Google и грозит сносом всех отзывов профиля.
+
+  buildReviewRequest(rv) {
+    // полдень UTC — чтобы Intl с TZ Прага не уехал на соседний день
+    const visitLabel = rv.visitDate ? czDateLabel(`${rv.visitDate}T12:00:00Z`) : '';
+    const subject = 'Jak se vám u nás líbilo? | Bar.Bitch';
+    const rows = [
+      rv.serviceTitle ? detailRow('Služba', rv.serviceTitle) : '',
+      rv.employeeName ? detailRow('Mistrová', rv.employeeName) : '',
+      visitLabel ? detailRow('Návštěva', visitLabel) : '',
+    ].join('');
+    const html = renderEmail({
+      heading: 'Děkujeme za návštěvu 💕',
+      intro: `${esc(rv.clientName || 'Dobrý den')}, děkujeme, že se k nám vracíte! Budeme moc rádi, když věnujete minutku a napíšete nám recenzi na Google — pomůže to ostatním holkám vybrat si salon a nám dělá obrovskou radost.`,
+      rows,
+      // Кто уже оставил отзыв, мы знать не можем (Google не отдаёт связь
+      // «отзыв → клиент», а Places API показывает лишь 5 последних под именами
+      // Google-аккаунтов). Поэтому случай закрыт текстом, а не фильтром.
+      note: 'Napište prosím upřímně, jak to u nás bylo — ceníme si každé zpětné vazby. Pokud jste nám recenzi už napsali, moc děkujeme a tento e-mail prosím ignorujte. Nepřejete-li si podobné e-maily, odpovězte na tento e-mail slovem <strong style="color:#ffffff;">NEZASÍLAT</strong>.',
+      ctaLabel: 'NAPSAT RECENZI',
+      ctaUrl: rv.reviewUrl,
+    });
+    return { subject, html };
+  },
+
   // ── личный кабинет клиента: magic-link вход (К1) ──
 
   buildCabinetLogin(email, url) {
@@ -770,6 +805,17 @@ export default {
         employeeName: 'Mistrová',
         lastVisitDate: '2026-07-06',
         bookUrl: `${SITE_URL}/book`,
+      });
+    }
+    // просьба об отзыве не привязана к конкретной брони — фиктивные данные
+    if (type === 'review-request') {
+      return this.buildReviewRequest({
+        clientName: 'Preview Klientka',
+        serviceTitle: 'Gel lak manikúra + Design basic',
+        employeeName: 'Mistrová',
+        visitDate: '2026-08-23',
+        visitCount: 3,
+        reviewUrl: reviewUrl() || `${SITE_URL}`,
       });
     }
     // cabinet-login не привязан к брони — рендерим с фиктивными данными

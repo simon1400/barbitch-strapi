@@ -2210,6 +2210,44 @@ export interface ApiRedemptionRedemption extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiReviewRequestLogReviewRequestLog
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'review_request_logs';
+  info: {
+    description: 'Лог писем-просьб оставить отзыв на Google (через день после визита, только постоянным клиентам). Одна запись = одно отправленное письмо. Ключ дедупликации: clientDocId — повторно просим не раньше чем через REVIEW_REQUEST_COOLDOWN_DAYS (по умолчанию 365 дней).';
+    displayName: 'Review request logs';
+    pluralName: 'review-request-logs';
+    singularName: 'review-request-log';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    bookingDocId: Schema.Attribute.String;
+    clientDocId: Schema.Attribute.String & Schema.Attribute.Required;
+    clientName: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    email: Schema.Attribute.String;
+    employeeName: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::review-request-log.review-request-log'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    sentAt: Schema.Attribute.DateTime;
+    serviceTitle: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    visitCount: Schema.Attribute.Integer;
+    visitDate: Schema.Attribute.Date;
+  };
+}
+
 export interface ApiRewardReward extends Struct.CollectionTypeSchema {
   collectionName: 'rewards';
   info: {
@@ -3471,6 +3509,7 @@ declare module '@strapi/strapi' {
       'api::push-subscription.push-subscription': ApiPushSubscriptionPushSubscription;
       'api::qr-pay.qr-pay': ApiQrPayQrPay;
       'api::redemption.redemption': ApiRedemptionRedemption;
+      'api::review-request-log.review-request-log': ApiReviewRequestLogReviewRequestLog;
       'api::reward.reward': ApiRewardReward;
       'api::salary.salary': ApiSalarySalary;
       'api::salon-hour.salon-hour': ApiSalonHourSalonHour;

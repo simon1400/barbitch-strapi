@@ -1,0 +1,44 @@
+{
+  "kind": "collectionType",
+  "collectionName": "review_request_logs",
+  "info": {
+    "singularName": "review-request-log",
+    "pluralName": "review-request-logs",
+    "displayName": "Review request logs",
+    "description": "Лог писем-просьб оставить отзыв на Google (через день после визита, только постоянным клиентам). Одна запись = одно отправленное письмо. Ключ дедупликации: clientDocId — повторно просим не раньше чем через REVIEW_REQUEST_COOLDOWN_DAYS (по умолчанию 365 дней)."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "clientDocId": {
+      "type": "string",
+      "required": true
+    },
+    "clientName": {
+      "type": "string"
+    },
+    "email": {
+      "type": "string"
+    },
+    "visitDate": {
+      "type": "date"
+    },
+    "visitCount": {
+      "type": "integer"
+    },
+    "serviceTitle": {
+      "type": "string"
+    },
+    "employeeName": {
+      "type": "string"
+    },
+    "bookingDocId": {
+      "type": "string"
+    },
+    "sentAt": {
+      "type": "datetime"
+    }
+  }
+}
