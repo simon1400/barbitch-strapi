@@ -102,9 +102,17 @@ export interface BookingNotifyView {
   serviceTitles: string[]; // каждая услуга отдельно (мульти-бронь → построчно в Telegram)
   employeeName: string;
   price: number | null;
-  // Заполнена ТОЛЬКО у брони к junior-мастеру со скидкой: сумма senior-цен услуг
-  // (для строки «Sleva: junior mistrová −20 % (běžná cena … Kč)» в письме)
-  seniorPrice: number | null;
+  // Полная цена ДО ВСЕХ скидок (senior-каталог). Заполнена ТОЛЬКО когда разбивка
+  // сходится: price + junior + bitchcard + dozápis = fullPrice. При ручной цене
+  // админа (priceOverride) сумма не сойдётся → null, и тогда ни письмо, ни Telegram
+  // про скидки не пишут вообще (лучше молчать, чем приписать скидке чужие деньги).
+  fullPrice: number | null;
+  // Скидка за junior-тир мастера. Процент считается ОТ КАТАЛОГА (senior→junior),
+  // а НЕ от оплаченной суммы — иначе к нему приплюсовывались бы bitchcard и dozápis
+  // (реальный баг: бронь 990→792 junior + 158 bitchcard показывалась как «junior −36 %»).
+  juniorDiscount: { percent: number; discountKc: number } | null;
+  // Погашенная награда bitchcard (коллекция redemption, к брони цепляется отдельно).
+  redemption: { discountKc: number; title: string } | null;
   // Дозапись (rebook, s133): бронь со скидкой −15 % сразу после визита.
   isRebook: boolean; // discount.type==='rebook' — штамп «Dozápis»
   rebookDiscount: { percent: number; discountKc: number; originalPrice: number } | null; // только пока скидка applied
@@ -119,11 +127,21 @@ const viewFromBookingDoc = (booking): BookingNotifyView => {
   const services = Array.isArray(booking.services) ? booking.services : [];
   const svc = services[0] || null;
   const price = booking.totalPrice != null ? Number(booking.totalPrice) : null;
-  // Junior-скидка: только у junior-мастера И когда сумма senior-цен реально выше
-  // итога (двойной чек — админский priceOverride у senior не даёт ложной «слевы»)
+  // Две суммы каталожного снапшота брони: `price` позиции — цена ПО ТИРУ мастера
+  // (у junior уже −20 %), `seniorPrice` — та же услуга по полному прайсу. Разница
+  // между ними и есть junior-скидка; всё остальное (bitchcard, dozápis) снимается
+  // уже с каталожной суммы и в снапшоте не отражено.
+  const catalogTotal = services.reduce((sum, s) => sum + Number(s?.price ?? s?.seniorPrice ?? 0), 0);
   const seniorTotal = services.reduce((sum, s) => sum + Number(s?.seniorPrice ?? s?.price ?? 0), 0);
-  const isJuniorDiscount =
-    booking.employee?.tier === 'junior' && price != null && seniorTotal > price + 0.5;
+  // Junior-скидка: только у junior-мастера И когда senior-цена реально выше
+  // каталожной (у зеркальных Noona-броней цен в снапшоте нет → скидки нет).
+  const juniorKc =
+    booking.employee?.tier === 'junior' && seniorTotal > catalogTotal + 0.5
+      ? Math.round(seniorTotal - catalogTotal)
+      : 0;
+  const juniorDiscount = juniorKc
+    ? { percent: Math.round((1 - catalogTotal / seniorTotal) * 100), discountKc: juniorKc }
+    : null;
   // Дозапись: скидка живёт в booking.discount (json). Штамп «Dozápis» — по type;
   // строка со скидкой — только пока applied (админ мог её снять из drawer календаря).
   const disc = booking.discount;
@@ -136,6 +154,18 @@ const viewFromBookingDoc = (booking): BookingNotifyView => {
           originalPrice: Number(disc.originalPrice),
         }
       : null;
+  // Погашенная награда bitchcard: цепляется к брони в loadBooking/attachRedemptions
+  // (в самой брони её нет — сумма живёт в отдельной коллекции redemption).
+  const redemptionKc = Math.max(0, Math.round(Number(booking.__redemptionKc) || 0));
+  const redemption = redemptionKc
+    ? { discountKc: redemptionKc, title: String(booking.__redemptionTitle || '') }
+    : null;
+  // Сверка: разбивка показывается ТОЛЬКО если оплаченная сумма и все известные
+  // скидки складываются в senior-каталог. Не сошлось (ручная цена админа) → о
+  // скидках молчим и печатаем один итог.
+  const discountsKc = juniorKc + (rebookDiscount?.discountKc || 0) + redemptionKc;
+  const reconciles =
+    price != null && seniorTotal > 0 && Math.abs(price + discountsKc - seniorTotal) <= 1;
   const serviceTitles = services.map((s) => s?.title).filter(Boolean);
   return {
     bookingId: booking.documentId,
@@ -150,9 +180,11 @@ const viewFromBookingDoc = (booking): BookingNotifyView => {
     serviceTitles,
     employeeName: booking.employee?.name || booking.employeeNameRaw || '',
     price,
-    seniorPrice: isJuniorDiscount ? Math.round(seniorTotal) : null,
+    fullPrice: reconciles && discountsKc > 0.5 ? Math.round(seniorTotal) : null,
+    juniorDiscount: reconciles ? juniorDiscount : null,
+    redemption: reconciles ? redemption : null,
     isRebook,
-    rebookDiscount,
+    rebookDiscount: reconciles ? rebookDiscount : null,
     clientName: booking.client?.name || booking.clientNameRaw || '',
     clientEmail: booking.client?.email || '',
     clientPhone: booking.client?.phone || '',
@@ -199,6 +231,15 @@ const detailRow = (label, value) => `
   <tr>
     <td style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#bdbdbd;padding:4px 0;">
       <strong style="color:#ffffff;">${esc(label)}:</strong> ${esc(value)}
+    </td>
+  </tr>`;
+
+// То же, но значение — уже готовый HTML (многострочная разбивка скидок).
+// Экранирует ВЫЗЫВАЮЩИЙ: сюда попадают только собранные нами строки.
+const detailRowHtml = (label, valueHtml) => `
+  <tr>
+    <td style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#bdbdbd;padding:4px 0;">
+      <strong style="color:#ffffff;">${esc(label)}:</strong> ${valueHtml}
     </td>
   </tr>`;
 
@@ -291,18 +332,48 @@ const renderEmail = ({ heading, intro, rows, note, ctaLabel, ctaUrl, secondaryHt
   </body>
 </html>`;
 
+// Разбивка скидок брони — ЕДИНЫЙ источник для письма клиенту и Telegram салону
+// (иначе две копии расчёта неминуемо разъезжаются). Пусто, когда сумма не сошлась
+// (ручная цена админа) — тогда ни письмо, ни TG про скидки ничего не утверждают.
+// Текст НЕ экранирован — экранирует рендерер (в title награды приходят данные из CM).
+const discountParts = (v: BookingNotifyView): { icon: string; text: string }[] => {
+  const out: { icon: string; text: string }[] = [];
+  if (v.juniorDiscount) {
+    out.push({
+      icon: '🎓',
+      text: `Junior mistrová −${v.juniorDiscount.percent} % (−${fmtKc(v.juniorDiscount.discountKc)})`,
+    });
+  }
+  if (v.redemption) {
+    out.push({
+      icon: '🎟',
+      text: `Bitchcard${v.redemption.title ? ` — ${v.redemption.title}` : ''} (−${fmtKc(v.redemption.discountKc)})`,
+    });
+  }
+  if (v.rebookDiscount) {
+    out.push({
+      icon: '🏷',
+      text: `Sleva za dozápis ${v.rebookDiscount.percent} % (−${fmtKc(v.rebookDiscount.discountKc)})`,
+    });
+  }
+  return out;
+};
+
+const discountRow = (v: BookingNotifyView) => {
+  const parts = discountParts(v);
+  if (!parts.length) return '';
+  const lines = parts.map((p) => esc(p.text));
+  if (v.fullPrice != null) lines.push(`běžná cena ${esc(fmtKc(v.fullPrice))}`);
+  return detailRowHtml('Sleva', lines.join('<br>'));
+};
+
 const bookingRows = (v: BookingNotifyView) =>
   [
     detailRow('Datum', `${v.dateLabel} v ${v.time}`),
     detailRow('Služba', v.serviceTitle),
     detailRow('Mistrová', v.employeeName),
     v.price != null ? detailRow('Cena', `${v.price} Kč (platba na pobočce)`) : '',
-    v.seniorPrice != null && v.price != null
-      ? detailRow(
-          'Sleva',
-          `junior mistrová −${Math.round((1 - v.price / v.seniorPrice) * 100)} % (běžná cena ${v.seniorPrice} Kč)`
-        )
-      : '',
+    discountRow(v),
     detailRow('Adresa', SALON_ADDRESS),
   ].join('');
 
@@ -416,19 +487,16 @@ export default {
     // услуги (каждая отдельной строкой; для доп. строк лёгкий отступ под текст)
     const titles = v.serviceTitles.length ? v.serviceTitles : v.serviceTitle ? [v.serviceTitle] : [];
     titles.forEach((t, i) => L.push(i === 0 ? `💅 ${esc(t)}` : `       ${esc(t)}`));
-    // цена (+ скидка)
+    // цена + КАЖДАЯ скидка отдельной строкой (их может быть несколько сразу:
+    // junior-тир + bitchcard + дозапись). Зачёркнутая рядом с итогом — полная
+    // senior-цена; её нет, когда разбивка не сошлась (цена задана админом руками).
     if (v.price != null) {
-      const rd = v.rebookDiscount;
-      if (rd && rd.originalPrice > v.price) {
-        L.push(`💰 <b>${fmtKc(v.price)}</b>  <s>${fmtKc(rd.originalPrice)}</s>`);
-        L.push(`🏷 Sleva za dozápis ${rd.percent} % (−${fmtKc(rd.discountKc)})`);
-      } else if (!rd && v.seniorPrice != null && v.seniorPrice > v.price) {
-        const pct = Math.round((1 - v.price / v.seniorPrice) * 100);
-        L.push(`💰 <b>${fmtKc(v.price)}</b>  <s>${fmtKc(v.seniorPrice)}</s>`);
-        L.push(`🎓 Junior mistrová −${pct} %`);
-      } else {
-        L.push(`💰 <b>${fmtKc(v.price)}</b>`);
-      }
+      L.push(
+        v.fullPrice != null && v.fullPrice > v.price
+          ? `💰 <b>${fmtKc(v.price)}</b>  <s>${fmtKc(v.fullPrice)}</s>`
+          : `💰 <b>${fmtKc(v.price)}</b>`
+      );
+      for (const p of discountParts(v)) L.push(`${p.icon} ${esc(p.text)}`);
     }
     // клиент (без телефона)
     if (v.clientName) L.push(`👤 ${esc(v.clientName)}`);
@@ -725,17 +793,46 @@ export default {
 
   async loadBooking(bookingDocId) {
     try {
-      return await strapi.documents(BOOKING_UID).findOne({
+      const booking = await strapi.documents(BOOKING_UID).findOne({
         documentId: bookingDocId,
         populate: {
           employee: { fields: ['name', 'tier'] },
           client: { fields: ['name', 'email', 'phone'] },
         },
       });
+      return booking ? (await this.attachRedemptions([booking]))[0] : booking;
     } catch (e) {
       strapi.log.error(`booking-notify loadBooking(${bookingDocId}): ${e.message}`);
       return null;
     }
+  },
+
+  // Погашенная награда bitchcard лежит в ОТДЕЛЬНОЙ коллекции redemption — в самой
+  // брони от неё только уменьшенный totalPrice. Без этого junior-скидке
+  // приписывалась и сумма bitchcard («junior −36 %» вместо −20 % + 158 Kč).
+  // Берём ГОТОВУЮ пачечную карту лояльности (bookingDocId → {code, discountKc,
+  // rewardTitle}), которой уже пользуется кабинет клиента — один запрос на пачку
+  // (крон напоминаний берёт до 500 броней за прогон).
+  // Сбой чтения НИКОГДА не роняет нотификацию: без сумм скидок разбивка просто
+  // не сойдётся и письмо/TG напечатают один итог, без утверждений о скидках.
+  // При выключенном LOYALTY_ENABLED карта пустая — то же безопасное поведение.
+  async attachRedemptions(bookings) {
+    const ids = (bookings || []).map((b) => b?.documentId).filter(Boolean);
+    if (!ids.length) return bookings;
+    try {
+      const map = (await strapi.service('api::loyalty.loyalty').usedRedemptionsForBookings(ids)) || {};
+      for (const b of bookings) {
+        const hit = b?.documentId ? map[b.documentId] : null;
+        const kc = Number(hit?.discountKc) || 0;
+        if (kc > 0) {
+          b.__redemptionKc = kc;
+          b.__redemptionTitle = hit.rewardTitle || '';
+        }
+      }
+    } catch (e) {
+      strapi.log.error(`booking-notify attachRedemptions: ${e.message}`);
+    }
+    return bookings;
   },
 
   // ── reminder T−24ч (cron, идемпотентно по remindersSent) ──
@@ -755,11 +852,14 @@ export default {
         cancelToken: { $notNull: true },
       },
       populate: {
-        employee: { fields: ['name'] },
+        // tier обязателен: без него напоминание не покажет junior-скидку, хотя
+        // подтверждение той же брони её показало (расхождение в двух письмах).
+        employee: { fields: ['name', 'tier'] },
         client: { fields: ['name', 'email', 'phone'] },
       },
       limit: 500,
     });
+    await this.attachRedemptions(candidates);
 
     let sent = 0;
     for (const booking of candidates) {
