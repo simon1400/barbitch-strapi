@@ -30,4 +30,32 @@ export default {
       ctx.body = { error: { status: 500, code: 'internal', message: 'Internal error' } };
     }
   },
+
+  // POST /api/campaign/voucher-confirmation {email, buyerName, recipientName, voucherId, validUntil}
+  // Письмо «voucher zaplacen» одному покупателю. До s182 админка стучалась прямо
+  // в client-роут, открытый в интернет без авторизации.
+  async voucherConfirmation(ctx) {
+    const session = verifySession(tokenFromCtx(ctx));
+    if (!session || session.role !== 'owner') {
+      ctx.status = 401;
+      ctx.body = {
+        error: { status: 401, code: 'owner_only', message: 'Potvrzení voucheru může odeslat jen majitel' },
+      };
+      return;
+    }
+    try {
+      ctx.body = await strapi
+        .service('api::campaign.campaign')
+        .sendVoucherConfirmation(ctx.request.body || {}, session);
+    } catch (e) {
+      if (e instanceof CampaignError) {
+        ctx.status = e.status;
+        ctx.body = { error: { status: e.status, code: e.code, message: e.message } };
+        return;
+      }
+      strapi.log.error('voucher confirmation error:', e);
+      ctx.status = 500;
+      ctx.body = { error: { status: 500, code: 'internal', message: 'Internal error' } };
+    }
+  },
 };

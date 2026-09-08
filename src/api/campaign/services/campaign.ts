@@ -166,4 +166,51 @@ export default {
       requireConsent,
     };
   },
+
+  // Письмо «voucher zaplacen» одному покупателю (страница «Potvrzení voucheru»).
+  // Тот же прокси, что у рассылок: браузер сюда, отсюда — в client-роут с
+  // серверным секретом. Отписка/чёрный список тут НЕ проверяются намеренно:
+  // это транзакционное письмо об оплаченном покупателем ваучере, а не маркетинг.
+  async sendVoucherConfirmation(payload, session) {
+    const { email, buyerName, recipientName, voucherId, validUntil } = payload || {};
+    const addr = String(email || '').trim();
+    if (!EMAIL_RE.test(addr)) {
+      throw new CampaignError(400, 'invalid_email', 'Neplatná e-mailová adresa');
+    }
+    for (const [key, value] of Object.entries({ buyerName, recipientName, voucherId, validUntil })) {
+      if (!String(value || '').trim()) {
+        throw new CampaignError(400, 'missing_field', `Chybí pole ${key}`);
+      }
+    }
+
+    const secret = process.env.CAMPAIGN_SEND_SECRET;
+    if (!secret) {
+      throw new CampaignError(503, 'not_configured', 'CAMPAIGN_SEND_SECRET není nastaven');
+    }
+
+    const res = await fetch(`${CLIENT_URL}/api/send-confirmation-voucher`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-campaign-secret': secret },
+      body: JSON.stringify({
+        email: addr,
+        buyerName: String(buyerName).trim(),
+        recipientName: String(recipientName).trim(),
+        voucherId: String(voucherId).trim(),
+        validUntil: String(validUntil).trim(),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new CampaignError(
+        res.status === 403 ? 500 : res.status || 500,
+        'send_failed',
+        data?.error || `Odeslání selhalo (${res.status})`
+      );
+    }
+
+    strapi.log.info(
+      `voucher confirmation by ${session?.username || '?'}: ${String(voucherId).trim()} → ${addr}`
+    );
+    return { success: true };
+  },
 };

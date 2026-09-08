@@ -83,3 +83,21 @@ export const tokenFromCtx = (ctx: any): string | null => {
   const m = auth.match(/^Bearer\s+(.+)$/i)
   return m ? m[1].trim() : null
 }
+
+/**
+ * Гейт «только владелец» для кастомных ручек с `auth: false` (s182).
+ * Возвращает сессию либо null — и во втором случае сам пишет 401 в ctx,
+ * контроллеру остаётся `if (!session) return`. Формат ответа тот же, что у
+ * campaign.send, чтобы админка одинаково показывала причину.
+ */
+export const requireOwner = (ctx: any): VerifiedSession | null => {
+  const session = verifySession(tokenFromCtx(ctx))
+  if (!session || session.role !== 'owner') {
+    ctx.status = 401
+    ctx.body = {
+      error: { status: 401, code: 'owner_only', message: 'Tuto akci může provést jen majitel' },
+    }
+    return null
+  }
+  return session
+}
