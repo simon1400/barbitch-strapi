@@ -47,6 +47,10 @@ export default {
     admin('GET', '/engine/admin/calendar/day', 'booking-engine.adminCalendarDay'),
     admin('GET', '/engine/admin/calendar/week', 'booking-engine.adminCalendarWeek'),
     admin('GET', '/engine/admin/clients/history', 'booking-engine.adminClientHistory'),
+    // аналитика: вся история броней и список клиентов одним сжатым ответом вместо
+    // десятка постраничных запросов админки к /api/bookings и /api/clients
+    admin('GET', '/engine/admin/analytics/history', 'booking-engine.adminAnalyticsHistory'),
+    admin('GET', '/engine/admin/analytics/clients', 'booking-engine.adminAnalyticsClients'),
     admin('POST', '/engine/admin/bookings', 'booking-engine.adminCreateBooking'),
     admin('PATCH', '/engine/admin/bookings/:id', 'booking-engine.adminPatchBooking'),
     admin('DELETE', '/engine/admin/bookings/:id', 'booking-engine.adminDeleteBooking'),

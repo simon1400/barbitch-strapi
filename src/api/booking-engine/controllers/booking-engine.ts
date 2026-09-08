@@ -59,6 +59,7 @@ const requireStaff = (ctx) => {
 
 const pushSvc = () => strapi.service('api::booking-engine.push-notify');
 const visitCloseSvc = () => strapi.service('api::booking-engine.visit-close');
+const analyticsSvc = () => strapi.service('api::booking-engine.admin-analytics');
 
 // personal.documentId по имени сотрудника (session.username = полное имя = personal.name)
 const resolvePersonalByName = async (name) => {
@@ -299,6 +300,24 @@ export default {
         session,
       })
     );
+  },
+
+  // GET /api/engine/admin/analytics/history
+  // ВСЯ история броней для табов аналитики, колоночно (см. services/admin-analytics).
+  // Раньше админка собирала это сама десятком запросов к /api/bookings.
+  async adminAnalyticsHistory(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => analyticsSvc().history());
+  },
+
+  // GET /api/engine/admin/analytics/clients?contacts=0|1
+  // Клиенты колоночно. contacts=0 — только ключ и имя (нужно сверке смены).
+  async adminAnalyticsClients(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    const withContacts = String(ctx.query?.contacts ?? '1') !== '0';
+    await handle(ctx, () => analyticsSvc().clients({ withContacts }));
   },
 
   // GET /api/engine/admin/clients/history?clientDocId=…|clientName=…
