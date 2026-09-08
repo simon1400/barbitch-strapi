@@ -39,6 +39,28 @@ import { tokenFromCtx, verifySession } from '../utils/admin-jwt';
 // второе — от чужого токена с тем же секретом на прикладных маршрутах.
 const STAFF_ROLES = new Set(['owner', 'administrator', 'master']);
 
+// 🟥 Коллекции, закрытые для роли MASTER (s182).
+//
+// До этого любая сессия сотрудника получала права full-access токена, поэтому
+// мастер мог запросить `/api/bookings` без фильтров и вытащить e-mail, телефоны
+// и суммы ВСЕХ броней салона — в интерфейсе это было скрыто, но данные лежали
+// в браузере и брались из DevTools одной строкой.
+//
+// Всё, что мастеру действительно нужно, теперь приходит через ручки движка
+// (`/api/engine/admin/calendar/day|week`, `/api/engine/admin/clients/history`),
+// где сервер сам режет чужие деньги и контакты. Прямые коллекции ему больше
+// не нужны:
+//   bookings    — календарь и история идут через движок;
+//   clients     — поиск клиента и блэклист есть только у администратора;
+//   redemptions — суммы bitchcard теперь приходят внутри ответа движка.
+// Панель Strapi и ручки движка тут не задеты: проверка только на /api/<коллекция>.
+const MASTER_DENIED = new Set(['bookings', 'clients', 'redemptions']);
+
+const deniedForMaster = (path: string): boolean => {
+  const seg = path.slice('/api/'.length).split(/[/?]/)[0];
+  return MASTER_DENIED.has(seg);
+};
+
 export default (_config: unknown, { strapi }: { strapi: any }) => {
   let warned = false;
   return async (ctx: any, next: () => Promise<void>) => {
@@ -54,6 +76,17 @@ export default (_config: unknown, { strapi }: { strapi: any }) => {
         // сохраняем ДО подмены — иначе гейты собственных ручек ослепнут
         ctx.state.adminJwt = raw;
         ctx.state.adminSession = session;
+        if (session.role === 'master' && deniedForMaster(path)) {
+          ctx.status = 403;
+          ctx.body = {
+            error: {
+              status: 403,
+              code: 'forbidden_for_master',
+              message: 'Tato data jsou dostupná jen přes kalendář',
+            },
+          };
+          return;
+        }
         const proxyToken = process.env.ADMIN_PROXY_API_TOKEN;
         if (proxyToken) {
           ctx.request.header.authorization = `Bearer ${proxyToken}`;

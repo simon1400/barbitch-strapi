@@ -41,6 +41,12 @@ export default {
     pub('GET', '/engine/push/vapid', 'booking-engine.pushVapid'),
     admin('POST', '/engine/push/subscribe', 'booking-engine.pushSubscribe'),
     admin('POST', '/engine/push/unsubscribe', 'booking-engine.pushUnsubscribe'),
+    // день календаря: единственный источник броней для сетки. Для роли master
+    // сервер вырезает контакты клиентов и деньги ЧУЖИХ броней — раньше админка
+    // тянула /api/bookings напрямую и всё это приезжало в браузер мастера.
+    admin('GET', '/engine/admin/calendar/day', 'booking-engine.adminCalendarDay'),
+    admin('GET', '/engine/admin/calendar/week', 'booking-engine.adminCalendarWeek'),
+    admin('GET', '/engine/admin/clients/history', 'booking-engine.adminClientHistory'),
     admin('POST', '/engine/admin/bookings', 'booking-engine.adminCreateBooking'),
     admin('PATCH', '/engine/admin/bookings/:id', 'booking-engine.adminPatchBooking'),
     admin('DELETE', '/engine/admin/bookings/:id', 'booking-engine.adminDeleteBooking'),

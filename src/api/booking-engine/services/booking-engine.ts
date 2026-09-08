@@ -2026,6 +2026,134 @@ export default {
     return { rescheduled: true, ...this.manageInfo(freshRows[0] || booking) };
   },
 
+  // ── день календаря с фильтрацией по роли (s182) ──
+
+  // Брони дня для сетки календаря админки.
+  //
+  // 🟥 ЗАЧЕМ. Раньше админка тянула /api/bookings напрямую, и мастеру приезжали
+  // e-mail, телефон и суммы ВСЕХ броней дня — скрытие жило только в рендере
+  // (`hidePrice`, `readOnly`), то есть открывалось из DevTools одной строкой.
+  // Здесь тот же список режется НА СЕРВЕРЕ: что не отдали, то не утечёт.
+  //
+  // Правило видимости повторяет то, что и так показывает интерфейс:
+  //   owner / administrator — всё как раньше, байт в байт;
+  //   master — дневной график всего салона (кто, когда, какая услуга), но
+  //            контакты клиентов не приходят вообще, а деньги и снапшот цен —
+  //            только по СВОИМ броням.
+  // noonaEmployeeId мастера из сессии (session.username = personal.name — тот же
+  // матч, что у push-подписки и кабинета мастера). null = мастер не найден в
+  // каталоге: тогда своих броней у него нет и деньги не показываются нигде.
+  async _ownNoonaIdForSession(session) {
+    if (!session || session.role !== 'master') return null;
+    try {
+      const mine = await strapi.documents('api::personal.personal').findMany({
+        filters: { name: { $eqi: String(session.username || '').trim() } },
+        fields: ['name', 'noonaEmployeeId'],
+        limit: 1,
+      });
+      return mine[0]?.noonaEmployeeId || null;
+    } catch (e) {
+      strapi.log.error('booking-engine: personal lookup for session failed', e);
+      return null;
+    }
+  },
+
+  // Сумма применённой награды bitchcard по броням — раньше её отдельным
+  // запросом добирала админка (`/api/redemptions`). Считаем на сервере, чтобы
+  // мастеру не приходили скидки чужих броней и чтобы коллекцию можно было
+  // закрыть для его сессии целиком.
+  async _redemptionKcByBooking(docIds) {
+    if (!docIds.length) return {};
+    try {
+      const map = await strapi.service('api::loyalty.loyalty').usedRedemptionsForBookings(docIds);
+      const out = {};
+      for (const [docId, r] of Object.entries(map || {})) {
+        if (r && r.discountKc != null) out[docId] = Number(r.discountKc);
+      }
+      return out;
+    } catch (e) {
+      // лояльность выключена / сбой — считаем без bitchcard-скидок, как раньше
+      return {};
+    }
+  },
+
+  // Урезание брони под роль. Мастер видит расписание всего салона, но:
+  //   контакты клиента — не приходят вообще (интерфейс их мастеру и не рисует);
+  //   деньги и снапшот цен — только по СВОИМ броням.
+  _scopeBookingForMaster(b, ownNoonaId) {
+    const own = !!ownNoonaId && b.noonaEmployeeId === ownNoonaId;
+    const out = { ...b, client: undefined };
+    if (own) return out;
+    const services = Array.isArray(b.services)
+      ? b.services.map((it) => {
+          if (!it || typeof it !== 'object') return it;
+          const { price, seniorPrice, priceOverride, ...rest } = it;
+          return rest;
+        })
+      : b.services;
+    return { ...out, totalPrice: null, priceOverride: null, discount: null, redemptionKc: null, services };
+  },
+
+  async calendarDayForSession({ date, session }) {
+    const rows = await strapi.documents(BOOKING_UID).findMany({
+      filters: { date },
+      sort: 'startsAt:asc',
+      populate: { client: { fields: ['name', 'email', 'phone', 'blacklisted'] } },
+      pagination: { pageSize: 200 },
+    });
+    const list = Array.isArray(rows) ? rows : [];
+    const kc = await this._redemptionKcByBooking(list.map((b) => b.documentId).filter(Boolean));
+    const withKc = list.map((b) => (kc[b.documentId] ? { ...b, redemptionKc: kc[b.documentId] } : b));
+    if (!session || session.role !== 'master') return withKc;
+    const ownNoonaId = await this._ownNoonaIdForSession(session);
+    return withKc.map((b) => this._scopeBookingForMaster(b, ownNoonaId));
+  },
+
+  // Неделя одного мастера. Мастеру чужую неделю не отдаём вообще: запрошенный
+  // employee подменяется на его собственного (раньше фильтр ставила админка, то
+  // есть подмена id в запросе показывала бы чужие брони с ценами).
+  async calendarWeekForSession({ monday, sunday, employee, session }) {
+    let empId = employee;
+    if (session?.role === 'master') {
+      const own = await this._ownNoonaIdForSession(session);
+      if (!own) return [];
+      empId = own;
+    }
+    if (!empId) return [];
+    const rows = await strapi.documents(BOOKING_UID).findMany({
+      filters: { date: { $gte: monday, $lte: sunday }, noonaEmployeeId: { $eq: empId } },
+      sort: 'startsAt:asc',
+      populate: { client: { fields: ['name', 'email', 'phone', 'blacklisted'] } },
+      pagination: { pageSize: 300 },
+    });
+    const list = Array.isArray(rows) ? rows : [];
+    const kc = await this._redemptionKcByBooking(list.map((b) => b.documentId).filter(Boolean));
+    const withKc = list.map((b) => (kc[b.documentId] ? { ...b, redemptionKc: kc[b.documentId] } : b));
+    if (session?.role !== 'master') return withKc;
+    return withKc.map((b) => ({ ...b, client: undefined }));
+  },
+
+  // История визитов клиента для drawer. Мастеру — только его собственные визиты
+  // с этим клиентом: ограничение переехало из query админки на сервер.
+  async clientHistoryForSession({ clientDocId, clientName, session }) {
+    const filters = {};
+    if (clientDocId) filters.client = { documentId: { $eq: clientDocId } };
+    else if (clientName) filters.clientNameRaw = { $eq: clientName };
+    else return [];
+    if (session?.role === 'master') {
+      const own = await this._ownNoonaIdForSession(session);
+      if (!own) return [];
+      filters.noonaEmployeeId = { $eq: own };
+    }
+    const rows = await strapi.documents(BOOKING_UID).findMany({
+      filters,
+      sort: 'startsAt:desc',
+      fields: ['date', 'startsAt', 'status', 'employeeNameRaw', 'services', 'totalPrice'],
+      pagination: { pageSize: 200 },
+    });
+    return Array.isArray(rows) ? rows : [];
+  },
+
   // ── крон: чистка протухших холдов ──
 
   async cleanupHolds() {

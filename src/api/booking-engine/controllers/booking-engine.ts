@@ -258,6 +258,63 @@ export default {
     await handle(ctx, () => pushSvc().unsubscribe(b.endpoint));
   },
 
+  // GET /api/engine/admin/calendar/day?date=YYYY-MM-DD
+  // Брони дня для сетки календаря. Отдаёт МАССИВ той же формы, что раньше
+  // приходил из /api/bookings, — админка подменила только источник.
+  //
+  // 🟥 Зачем ручка: мастеру нужен дневной график ВСЕГО салона (кто когда занят),
+  // но не чужие деньги и не контакты чужих клиентов. Раньше фильтрация была
+  // только в рендере: e-mail, телефон и суммы всех броней дня уже лежали в
+  // браузере мастера и доставались из DevTools одной строкой.
+  async adminCalendarDay(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    const date = String(ctx.query?.date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      ctx.status = 400;
+      ctx.body = { error: { status: 400, code: 'bad_date', message: 'Očekáván formát YYYY-MM-DD' } };
+      return;
+    }
+    await handle(ctx, () => svc().calendarDayForSession({ date, session }));
+  },
+
+  // GET /api/engine/admin/calendar/week?monday=YYYY-MM-DD&employee=<noonaEmployeeId>
+  // Неделя одного мастера. Для роли master employee игнорируется и подставляется
+  // его собственный — чужую неделю с ценами получить нельзя.
+  async adminCalendarWeek(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    const monday = String(ctx.query?.monday || '').trim();
+    const sunday = String(ctx.query?.sunday || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(monday) || !/^\d{4}-\d{2}-\d{2}$/.test(sunday)) {
+      ctx.status = 400;
+      ctx.body = { error: { status: 400, code: 'bad_date', message: 'Očekáván formát YYYY-MM-DD' } };
+      return;
+    }
+    await handle(ctx, () =>
+      svc().calendarWeekForSession({
+        monday,
+        sunday,
+        employee: String(ctx.query?.employee || '').trim() || null,
+        session,
+      })
+    );
+  },
+
+  // GET /api/engine/admin/clients/history?clientDocId=…|clientName=…
+  // История визитов клиента. Мастеру отдаются только ЕГО визиты с этим клиентом.
+  async adminClientHistory(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      svc().clientHistoryForSession({
+        clientDocId: String(ctx.query?.clientDocId || '').trim() || null,
+        clientName: String(ctx.query?.clientName || '').trim() || null,
+        session,
+      })
+    );
+  },
+
   // POST /api/engine/admin/bookings
   // {employee, date, time, services:[{service, variant?, modifiers?, priceOverride?}],
   //  clientDocId? | client:{name, phone, email?}, priceOverride?, comment?, notify?}
