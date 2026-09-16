@@ -1,14 +1,14 @@
 // @ts-nocheck
 // Дозапись с thank-you страницы (rebook): после создания брони предлагаем клиенту
 // услуги ДРУГИХ категорий у мастеров, у которых свободное окно начинается сразу
-// после конца его визита (≤REBOOK_GAP_TOLERANCE_MIN), со скидкой −15%.
+// после конца его визита (≤UPSELL_GAP_TOLERANCE_MIN из upsell-core), со скидкой −15%.
 //
 // Аутентификация — cancelToken исходной брони (паттерн /engine/manage/:token).
 // Предложение живёт REBOOK_OFFER_TTL_MIN минут от создания исходной брони —
 // сервер валидирует окно и при выдаче offers, и при создании дозаписи.
 //
-// Классификация категорий — порт classifyTitle из admin windowCrossSell (s86):
-// строка salon-service.category ненадёжна (эмодзи), бакеты по ключевым словам.
+// Классификация категорий, отсев «не базовых» услуг и окно мастера — общее ядро
+// upsell-core.ts (им же пользуется админский модуль «Дозаписи», s197).
 
 import crypto from 'crypto';
 import {
@@ -17,9 +17,9 @@ import {
   pragueDateOf,
   pragueMinOf,
   pragueMinToUtcIso,
-  subtractIntervals,
   utcToPragueMinClamped,
 } from './slots-core';
+import { BUCKETS, classifyTitle, isExcludedOfferService, windowAfter } from './upsell-core';
 import { EngineError } from './booking-engine';
 
 const BOOKING_UID = 'api::booking.booking';
@@ -31,47 +31,14 @@ const PG_EXCLUSION_VIOLATION = '23P01';
 export const REBOOK_DISCOUNT_PERCENT = 15;
 // сколько минут после создания исходной брони действует предложение (таймер на thank-you)
 export const REBOOK_OFFER_TTL_MIN = 15;
-// окно мастера должно начинаться не позже, чем через N минут после конца брони клиента
-const REBOOK_GAP_TOLERANCE_MIN = 15;
 // суммарный лимит предлагаемых услуг, лимит карточек мастеров и услуг на карточку
 // (при 2 карточках × 6 услуг суммарный потолок практически не режет — страховка)
 const MAX_OFFER_SERVICES = 12;
 const MAX_MASTER_CARDS = 2;
 const MAX_SERVICES_PER_MASTER = 6;
 
-// ── классификация категорий (порт classifyTitle из admin windowCrossSell) ──
-
-const BUCKETS = ['manicure', 'brows', 'lashes'];
-
 // подпись специализации на карточке мастера («Lash specialistka»)
 const BUCKET_SPECIALIST_CS = { manicure: 'Nail', brows: 'Brow', lashes: 'Lash' };
-
-// Порядок важен: «řas» (ресницы) до «obočí», маникюр последним.
-// ⚠️ При новых категориях каталога — дополнить ключевые слова (синхронно с admin).
-const classifyTitle = (raw) => {
-  const t = String(raw || '').toLowerCase();
-  if (t.includes('řas') || t.includes('rias') || t.includes('lash')) return 'lashes';
-  if (
-    t.includes('obočí') ||
-    t.includes('oboci') ||
-    t.includes('brow') ||
-    t.includes('barvení a péče') ||
-    t.includes('laminace') ||
-    t.includes('úprava tvaru') ||
-    t.includes('uprava tvaru')
-  )
-    return 'brows';
-  const nailKeys = ['nehty', 'manikúra', 'manikura', 'gel lak', 'prodloužení neht', 'nano', 'sundání', 'hygienick', 'ibx'];
-  if (nailKeys.some((k) => t.includes(k))) return 'manicure';
-  return null;
-};
-
-// Не предлагаем снятия/доливы/коррекции — только самостоятельные базовые услуги.
-const NON_BASE_KEYWORDS = ['sundání', 'sundani', 'odstranění', 'odstraneni', 'doplnění', 'doplneni', 'korekce'];
-const isExcludedOfferService = (title) => {
-  const t = String(title || '').toLowerCase();
-  return NON_BASE_KEYWORDS.some((k) => t.includes(k));
-};
 
 const genDocumentId = () => {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -171,20 +138,7 @@ export default {
   // Свободное окно мастера, начинающееся сразу после конца якоря.
   // Возвращает { startMin, availMin } либо null.
   _masterWindow(hourRow, busyList, anchorEndMin, isToday, nowMin) {
-    const openMin = hourRow?.openMin ?? null;
-    const closeMin = hourRow?.closeMin ?? null;
-    if (openMin == null || closeMin == null || closeMin <= openMin) return null;
-    const free = subtractIntervals({ startMin: openMin, endMin: closeMin }, busyList);
-    for (const gap of free) {
-      if (gap.endMin <= anchorEndMin) continue;
-      const startMin = Math.max(gap.startMin, anchorEndMin);
-      if (startMin > anchorEndMin + REBOOK_GAP_TOLERANCE_MIN) return null; // free отсортирован — дальше только позже
-      if (isToday && startMin < nowMin) return null; // якорь уже в прошлом — дозапись не предлагаем
-      const availMin = gap.endMin - startMin;
-      if (availMin <= 0) continue;
-      return { startMin, availMin };
-    }
-    return null;
+    return windowAfter(hourRow, busyList, anchorEndMin, isToday, nowMin);
   },
 
   // ── GET /engine/rebook/:token/offers ──
@@ -214,7 +168,7 @@ export default {
     for (const s of catalog) {
       const bucket = classifyTitle(s.category) ?? classifyTitle(s.title);
       if (!bucket || ctx.excludedBuckets.has(bucket)) continue;
-      if (isExcludedOfferService(s.title)) continue;
+      if (isExcludedOfferService(s.title, s.price)) continue;
       if (!s.durationMin || s.durationMin <= 0) continue;
       offerable.set(s.documentId, { svc: s, bucket });
     }
@@ -327,7 +281,7 @@ export default {
     const svc = await engine().resolveService(serviceDocId);
     if (svc.onlineBookable === false) throw new EngineError(404, 'service_not_bookable', 'Služba není dostupná');
     const bucket = classifyTitle(svc.category) ?? classifyTitle(svc.title);
-    if (!bucket || ctx.excludedBuckets.has(bucket) || isExcludedOfferService(svc.title)) {
+    if (!bucket || ctx.excludedBuckets.has(bucket) || isExcludedOfferService(svc.title, svc.price)) {
       throw new EngineError(409, 'rebook_unavailable', 'Tuto službu nelze dozarezervovat');
     }
 
@@ -519,7 +473,7 @@ export default {
     if (!anchorDocId) return 0;
     const knex = strapi.db.connection;
     const rows = await knex('bookings')
-      .select('document_id')
+      .select('document_id', knex.raw(`discount->>'source' as source`))
       .where('status', 'active')
       .whereRaw(`discount->>'type' = 'rebook'`)
       .whereRaw(`discount->>'applied' = 'true'`)
@@ -528,6 +482,8 @@ export default {
       try {
         await this._toggleDiscount(r.document_id, false);
         strapi.log.info(`booking-engine: rebook discount revoked on ${r.document_id} (anchor ${anchorDocId} gone)`);
+        // админская дозапись (s197): без скидки нет и комиссии администратору
+        if (r.source === 'admin') await this._dropAdminCommission(r.document_id);
       } catch (e) {
         strapi.log.error(`rebook revoke for ${r.document_id} failed: ${e.message}`);
       }
@@ -545,6 +501,19 @@ export default {
     if (!d || d.type !== 'rebook' || !d.applied || booking.status !== 'active') return false;
     await this._toggleDiscount(bookingDocId, false);
     strapi.log.info(`booking-engine: rebook discount revoked on ${bookingDocId} (booking rescheduled by client)`);
+    if (d.source === 'admin') await this._dropAdminCommission(bookingDocId);
     return true;
+  },
+
+  // Решение владельца (s197): админская дозапись ведёт себя как thank-you — если
+  // основная бронь отменена/удалена/перенесена клиентом, дозапись остаётся, но
+  // скидка снимается И черновик комиссии администратору удаляется. Опубликованную
+  // комиссию (смена уже закрыта) dropCommissionDraft не трогает.
+  async _dropAdminCommission(bookingDocId) {
+    try {
+      await strapi.service('api::booking-engine.upsell').dropCommissionDraft(bookingDocId);
+    } catch (e) {
+      strapi.log.error(`upsell commission drop for ${bookingDocId} failed: ${e.message}`);
+    }
   },
 };

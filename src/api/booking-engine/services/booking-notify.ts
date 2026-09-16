@@ -696,6 +696,17 @@ export default {
     });
   },
 
+  // Дозапись администратора (модуль «Дозаписи», s197): клиент стоит рядом —
+  // письма нет, только Telegram салону с именем администратора.
+  async notifyUpsellCreated(bookingDocId, adminUsername) {
+    const booking = await this.loadBooking(bookingDocId);
+    if (!booking) return;
+    const v = viewFromBookingDoc(booking);
+    const who = adminUsername ? ` (admin: ${esc(adminUsername)})` : '';
+    const tg = `🟢 <b>Nová rezervace</b> · 🔁 <b>Dozápis</b>${who}\n` + this.buildBookingTgBody(v);
+    await this.sendTelegram(tg);
+  },
+
   async notifyBookingCancelled(bookingDocId, reason) {
     const booking = await this.loadBooking(bookingDocId);
     if (!booking) return;

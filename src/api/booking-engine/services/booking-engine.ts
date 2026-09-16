@@ -1186,6 +1186,19 @@ export default {
         .catch((e) => strapi.log.error(`rebook revoke on admin-cancel failed: ${e.message}`));
     }
 
+    // отмена/неявка админской дозаписи (s197): неопубликованная комиссия
+    // администратору удаляется (fire-and-forget, как снятие скидок выше)
+    if (
+      (patch.status === 'cancelled' || patch.status === 'noshow') &&
+      booking.status !== patch.status &&
+      booking.discount?.source === 'admin'
+    ) {
+      strapi
+        .service('api::booking-engine.upsell')
+        .dropCommissionDraft(bookingDocId)
+        .catch((e) => strapi.log.error(`upsell commission drop on admin-${patch.status} failed: ${e.message}`));
+    }
+
     // push мастеру всегда (независимо от чекбоксов): отмена > перенос
     const pushKind = patch.status === 'cancelled' ? 'cancel' : moving ? 'reschedule' : null;
     if (pushKind) {
@@ -1366,6 +1379,15 @@ export default {
       await strapi.service('api::booking-engine.visit-close').removeDraftForBooking(bookingDocId);
     } catch (e) {
       strapi.log.error(`visit-close cleanup on delete failed: ${e.message}`);
+    }
+    // комиссия администратору за эту дозапись (s197) — до удаления брони,
+    // иначе связь add-money → booking уже не найти
+    if (booking.discount?.source === 'admin') {
+      try {
+        await strapi.service('api::booking-engine.upsell').dropCommissionDraft(bookingDocId);
+      } catch (e) {
+        strapi.log.error(`upsell commission drop on delete failed: ${e.message}`);
+      }
     }
     await strapi.documents(BOOKING_UID).delete({ documentId: bookingDocId });
     strapi.log.info(
@@ -1850,6 +1872,14 @@ export default {
       .service('api::booking-engine.rebook')
       .revokeDiscountsForAnchor(booking.documentId)
       .catch((e) => strapi.log.error(`rebook revoke on cancel failed: ${e.message}`));
+
+    // клиент отменил САМУ админскую дозапись (s197) — комиссия администратору уходит
+    if (booking.discount?.source === 'admin') {
+      strapi
+        .service('api::booking-engine.upsell')
+        .dropCommissionDraft(booking.documentId)
+        .catch((e) => strapi.log.error(`upsell commission drop on cancel failed: ${e.message}`));
+    }
 
     // письмо клиенту + Telegram салону (fire-and-forget — отмена уже применена)
     strapi

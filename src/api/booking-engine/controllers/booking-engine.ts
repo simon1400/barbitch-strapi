@@ -60,6 +60,7 @@ const requireStaff = (ctx) => {
 const pushSvc = () => strapi.service('api::booking-engine.push-notify');
 const visitCloseSvc = () => strapi.service('api::booking-engine.visit-close');
 const analyticsSvc = () => strapi.service('api::booking-engine.admin-analytics');
+const upsellSvc = () => strapi.service('api::booking-engine.upsell');
 
 // personal.documentId по имени сотрудника (session.username = полное имя = personal.name)
 const resolvePersonalByName = async (name) => {
@@ -482,6 +483,38 @@ export default {
       );
       return result;
     });
+  },
+
+  // ── модуль «Дозаписи администраторов» (s197) ──
+
+  // GET /api/engine/admin/upsell/day?date=YYYY-MM-DD — клиенты дня и варианты дозаписи
+  async adminUpsellDay(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => upsellSvc().dayCandidates({ date: String(ctx.query?.date || '').trim() || null }));
+  },
+
+  // POST /api/engine/admin/upsell {anchorBooking, service, employee, mode:'after'|'before'}
+  async adminUpsellCreate(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    const b = ctx.request.body || {};
+    await handle(ctx, () =>
+      upsellSvc().create({
+        session,
+        anchorBookingDocId: b.anchorBooking,
+        serviceDocId: b.service,
+        employeeDocId: b.employee,
+        mode: b.mode,
+      })
+    );
+  },
+
+  // GET /api/engine/admin/upsell/mine?month=YYYY-MM — администратору свои, владельцу все
+  async adminUpsellMine(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => upsellSvc().mine({ session, month: String(ctx.query?.month || '').trim() }));
   },
 
   // POST /api/engine/admin/blocks {employee, date, startMin, endMin, title?}

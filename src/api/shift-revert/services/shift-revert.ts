@@ -20,7 +20,7 @@ export default {
     }
     const result = {
       date,
-      unpublished: { cashs: 0, 'services-provided': 0, 'work-times': 0, payrolls: 0 },
+      unpublished: { cashs: 0, 'services-provided': 0, 'work-times': 0, payrolls: 0, 'add-moneys': 0 },
       errors: [] as string[],
     };
 
@@ -29,6 +29,9 @@ export default {
       { key: 'services-provided', uid: 'api::service-provided.service-provided', filters: { date } },
       { key: 'work-times', uid: 'api::work-time.work-time', filters: { date } },
       { key: 'payrolls', uid: 'api::payroll.payroll', filters: { date } },
+      // комиссии администраторов за дозаписи (s197); ручные записи владельца
+      // (без source) закрытие смены не публикует — и откат их не трогает
+      { key: 'add-moneys', uid: 'api::add-money.add-money', filters: { date, source: 'upsell' } },
     ];
 
     for (const c of collections) {

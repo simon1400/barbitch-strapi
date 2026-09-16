@@ -50,7 +50,7 @@ const isoToMinPrague = (iso: string): number => hhmmToMin(pragueTime(iso));
 const minToHHMM = (min: number): string =>
   `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(Math.round(min % 60)).padStart(2, '0')}`;
 
-// Категория услуги по названию (порт classifyTitle из admin/windowCrossSell.ts):
+// Категория услуги по названию (копия classifyTitle из booking-engine/services/upsell-core.ts):
 // «řas»→ресницы (проверяем ПЕРВЫМ), «obočí»/laminace…→брови, ногтевые ключи→ногти.
 // ⚠️ При новых категориях в Noona — дополнить ключевые слова.
 const NAIL_KEYS = ['nehty', 'manikúra', 'manikura', 'gel lak', 'prodloužení neht', 'nano', 'sundání', 'hygienick', 'ibx'];

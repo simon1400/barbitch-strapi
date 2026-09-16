@@ -1,5 +1,5 @@
 // @ts-nocheck
-// Отправка маркетинговых кампаний (win-back, birthday, window cross-sell).
+// Отправка маркетинговых кампаний (win-back, birthday; письма «дозапись в окно» удалены в s197).
 //
 // ЗАЧЕМ ЭТОТ СЛОЙ (s175). Раньше админка ходила напрямую в client-роут
 // POST /api/send-bulk-email, который был открыт в интернет без авторизации:
@@ -29,8 +29,6 @@ const CLIENT_UID = 'api::client.client';
 const TEMPLATES = new Set([
   'win-back',
   'birthday-discount',
-  'window-cross-sell',
-  'window-cross-sell-junior',
 ]);
 
 const MAX_RECIPIENTS = 1000;

@@ -28,6 +28,14 @@
     "sum": {
       "type": "string",
       "required": true
+    },
+    "source": {
+      "type": "string"
+    },
+    "booking": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::booking.booking"
     }
   }
 }
