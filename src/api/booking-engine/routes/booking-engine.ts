@@ -71,6 +71,8 @@ export default {
     admin('GET', '/engine/admin/upsell/day', 'booking-engine.adminUpsellDay'),
     admin('POST', '/engine/admin/upsell', 'booking-engine.adminUpsellCreate'),
     admin('GET', '/engine/admin/upsell/mine', 'booking-engine.adminUpsellMine'),
+    admin('POST', '/engine/admin/upsell/result', 'booking-engine.adminUpsellResult'),
+    admin('GET', '/engine/admin/upsell/report', 'booking-engine.adminUpsellReport'),
     admin('POST', '/engine/admin/blocks', 'booking-engine.adminCreateBlock'),
     admin('GET', '/engine/admin/blocks/pending', 'booking-engine.adminPendingBlocks'),
     admin('POST', '/engine/admin/blocks/:id/approval', 'booking-engine.adminSetBlockApproval'),

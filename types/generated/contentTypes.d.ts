@@ -2758,6 +2758,43 @@ export interface ApiTimeOffTimeOff extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiUpsellAttemptUpsellAttempt
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'upsell_attempts';
+  info: {
+    description: 'Result of upsell offer per client per day';
+    displayName: 'Upsell attempt';
+    pluralName: 'upsell-attempts';
+    singularName: 'upsell-attempt';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    adminUsername: Schema.Attribute.String;
+    client: Schema.Attribute.Relation<'manyToOne', 'api::client.client'>;
+    clientName: Schema.Attribute.String;
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::upsell-attempt.upsell-attempt'
+    > &
+      Schema.Attribute.Private;
+    outcome: Schema.Attribute.Enumeration<['declined', 'not_offered']> &
+      Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    reason: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiVaucherPageVaucherPage extends Struct.SingleTypeSchema {
   collectionName: 'vaucher_pages';
   info: {
@@ -3483,6 +3520,7 @@ declare module '@strapi/strapi' {
       'api::tax.tax': ApiTaxTax;
       'api::time-block.time-block': ApiTimeBlockTimeBlock;
       'api::time-off.time-off': ApiTimeOffTimeOff;
+      'api::upsell-attempt.upsell-attempt': ApiUpsellAttemptUpsellAttempt;
       'api::vaucher-page.vaucher-page': ApiVaucherPageVaucherPage;
       'api::voucher.voucher': ApiVoucherVoucher;
       'api::work-time.work-time': ApiWorkTimeWorkTime;

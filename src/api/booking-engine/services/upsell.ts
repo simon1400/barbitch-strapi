@@ -20,6 +20,13 @@
 // общая с thank-you.
 //
 // Классификация и окна — общее ядро upsell-core.ts.
+//
+// Результат предложения (s199). По каждому клиенту, который СЕГОДНЯ уже пришёл,
+// администратор обязан закрыть состояние: дозапись создана (берётся из брони, не
+// хранится отдельно) · отказ + причина · не предлагали + причина. Отказы и
+// «не предлагали» лежат в коллекции upsell-attempt — одна запись на клиента в день.
+// Владелец видит отчёт за месяц: сколько было в салоне, кому предложили, причины,
+// сколько осталось без отметки и кто был на смене по графику.
 
 import crypto from 'crypto';
 import {
@@ -37,6 +44,8 @@ const BOOKING_UID = 'api::booking.booking';
 const SALON_SERVICE_UID = 'api::salon-service.salon-service';
 const PERSONAL_UID = 'api::personal.personal';
 const ADD_MONEY_UID = 'api::add-money.add-money';
+const ATTEMPT_UID = 'api::upsell-attempt.upsell-attempt';
+const SHIFT_UID = 'api::shift.shift';
 
 const PG_EXCLUSION_VIOLATION = '23P01';
 
@@ -44,6 +53,13 @@ export const UPSELL_DISCOUNT_PERCENT = 10;
 export const UPSELL_COMMISSION_PERCENT = 5;
 // «сразу перед»: минимум минут от «сейчас» до начала дозаписи (администратор звонит клиенту)
 export const UPSELL_BEFORE_LEAD_MIN = 30;
+
+/** Причины результата. Ключи хранятся в базе, подписи — в админке (labels.ts). */
+export const UPSELL_RESULT_REASONS = {
+  declined: ['no_time', 'price', 'not_interested', 'own_master', 'later', 'other'],
+  not_offered: ['no_slots', 'client_busy', 'admin_busy', 'client_left', 'other'],
+};
+const RESULT_COMMENT_MAX = 500;
 
 const ACTIVE = 'active';
 const CHECKED_OUT = 'checkedOut';
@@ -201,6 +217,56 @@ export const masterOffers = ({ mode, master, offerable, excludedBuckets, hourRow
   });
 };
 
+/** Клиент уже пришёл: хотя бы один его визит дня (active/checkedOut) начался. Только сегодня. */
+export const clientArrived = (bookings, date, nowMin) =>
+  nowMin != null &&
+  bookings.some(
+    (b) => (b.status === ACTIVE || b.status === CHECKED_OUT) && b.startsAt && utcToPragueMinClamped(b.startsAt, date) <= nowMin
+  );
+
+/**
+ * Результат по клиенту за день. Чистая функция.
+ *   booked — есть живая админская дозапись (из брони, не из журнала);
+ *   site   — дозаписалась сама на сайте (thank-you) — предлагать было нечего;
+ *   declined / not_offered — отметка администратора из upsell-attempt;
+ *   null   — не отмечено.
+ * bookings — брони клиента за день; учитываются только active/checkedOut.
+ */
+export const clientDayResult = (bookings, attempt) => {
+  let site = null;
+  for (const b of bookings) {
+    if (b.status !== ACTIVE && b.status !== CHECKED_OUT) continue;
+    const d = jsonObj(b.discount);
+    if (d?.type !== 'rebook') continue;
+    if (d.source === 'admin') {
+      return { outcome: 'booked', reason: null, comment: '', adminUsername: d.adminUsername || '', updatedAt: null, bookingDocId: b.documentId };
+    }
+    site = { outcome: 'site', reason: null, comment: '', adminUsername: '', updatedAt: null, bookingDocId: b.documentId };
+  }
+  if (site) return site;
+  if (!attempt) return null;
+  return {
+    outcome: attempt.outcome,
+    reason: attempt.reason || null,
+    comment: attempt.comment || '',
+    adminUsername: attempt.adminUsername || '',
+    updatedAt: attempt.updatedAt || null,
+    bookingDocId: null,
+  };
+};
+
+const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const ymdParts = (ymd) => ymd.split('-').map(Number);
+const dowOf = (ymd) => {
+  const [y, m, d] = ymdParts(ymd);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+};
+const addDays = (ymd, n) => {
+  const [y, m, d] = ymdParts(ymd);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+};
+const mondayOf = (ymd) => addDays(ymd, -((dowOf(ymd) + 6) % 7));
+
 export default {
   // ── общие загрузки ──
 
@@ -268,6 +334,8 @@ export default {
       discountPercent: UPSELL_DISCOUNT_PERCENT,
       commissionPercent: UPSELL_COMMISSION_PERCENT,
       clients: [],
+      // сегодня: клиенты, чьи визиты уже закончились, но результат по ним нужен
+      leftClients: [],
     };
     if (day < todayPrague) return { ...shell, past: true };
 
@@ -288,14 +356,18 @@ export default {
       : { hoursByDate: new Map(), busy: new Map() };
     const hourRow = hoursByDate.get(day);
     const busyOf = (docId) => busy.get(day)?.get(docId) || [];
+    const attempts = isToday ? await this._attempts(day, day) : new Map();
 
     const clients = [];
+    const leftClients = [];
     for (const [clientDocId, list] of byClient) {
       const ctx = clientDayContext(list, day, nowMin);
-      if (!ctx.hasFutureVisit) continue; // визиты закончились или закрыты
+      const arrived = clientArrived(list, day, nowMin);
+      const left = !ctx.hasFutureVisit; // визиты закончились или закрыты
+      if (left && !arrived) continue;
       const first = list[0];
       const offers = [];
-      if (!ctx.alreadyRebooked) {
+      if (!ctx.alreadyRebooked && !left) {
         for (const mode of ['after', 'before']) {
           const anchor = mode === 'after' ? ctx.anchorAfter : ctx.anchorBefore;
           if (!anchor) continue;
@@ -325,11 +397,16 @@ export default {
         }
         offers.sort((a, b) => a.startMin - b.startMin || a.employeeName.localeCompare(b.employeeName));
       }
-      clients.push({
+      const result = arrived ? clientDayResult(list, attempts.get(`${day}|${clientDocId}`)) : null;
+      (left ? leftClients : clients).push({
         clientDocId,
         clientName: first.client?.name || first.clientNameRaw || '',
         phone: first.client?.phone || '',
         inSalon: ctx.inSalon,
+        arrived,
+        left,
+        result,
+        needsResult: arrived && !result,
         alreadyRebooked: ctx.alreadyRebooked,
         firstStartMin: Math.min(...list.map((b) => utcToPragueMinClamped(b.startsAt, day))),
         bookings: list.map((b) => ({
@@ -344,7 +421,11 @@ export default {
       });
     }
     clients.sort((a, b) => a.firstStartMin - b.firstStartMin || a.clientName.localeCompare(b.clientName));
-    return { ...shell, clients };
+    // ушедшие: сначала те, по кому результат ещё не отмечен
+    leftClients.sort(
+      (a, b) => Number(b.needsResult) - Number(a.needsResult) || a.firstStartMin - b.firstStartMin || a.clientName.localeCompare(b.clientName)
+    );
+    return { ...shell, clients, leftClients };
   },
 
   // карточка администратора — по строке имени (инвариант s194: personal.name = username)
@@ -655,6 +736,211 @@ export default {
         .sort((a, b) => a.adminUsername.localeCompare(b.adminUsername));
     }
     return out;
+  },
+
+  // ── результат предложения (s199) ──
+
+  // отметки администраторов за период: ключ `date|clientDocId`
+  async _attempts(from, to) {
+    const rows = await strapi.documents(ATTEMPT_UID).findMany({
+      filters: { date: { $gte: from, $lte: to } },
+      fields: ['date', 'outcome', 'reason', 'comment', 'adminUsername', 'clientName', 'updatedAt'],
+      populate: { client: { fields: ['name'] } },
+      limit: 10000,
+    });
+    const map = new Map();
+    for (const r of rows) {
+      const id = r.client?.documentId;
+      if (!id) continue;
+      map.set(`${String(r.date).slice(0, 10)}|${id}`, r);
+    }
+    return map;
+  },
+
+  // POST /engine/admin/upsell/result {client, outcome, reason, comment}
+  async saveResult({ session, clientDocId, outcome, reason, comment, now = new Date() }) {
+    const reasons = UPSELL_RESULT_REASONS[outcome];
+    if (!reasons) throw new EngineError(400, 'bad_outcome', 'outcome: declined | not_offered');
+    if (!reasons.includes(reason)) throw new EngineError(400, 'bad_reason', 'Neznámý důvod');
+    const text = String(comment ?? '').trim().slice(0, RESULT_COMMENT_MAX);
+    if (reason === 'other' && !text) throw new EngineError(400, 'comment_required', 'Napište, co se stalo');
+    if (!clientDocId) throw new EngineError(400, 'client_required', 'Chybí klientka');
+
+    // только сегодня и только по клиенту, который уже пришёл
+    const date = pragueDateOf(now);
+    const nowMin = pragueMinOf(now);
+    const list = await this._dayBookings(date, clientDocId);
+    if (!clientArrived(list, date, nowMin)) {
+      throw new EngineError(409, 'result_not_arrived', 'Výsledek lze zapsat jen u klientky, která už dnes přišla');
+    }
+    if (clientDayResult(list, null)) {
+      throw new EngineError(409, 'result_auto', 'Klientka už dozápis má — výsledek se zapsal sám');
+    }
+
+    const username = String(session?.username || '').trim();
+    const clientName = list[0]?.client?.name || list[0]?.clientNameRaw || '';
+    const existing = await strapi.documents(ATTEMPT_UID).findMany({
+      filters: { date, client: { documentId: { $eq: clientDocId } } },
+      fields: ['outcome'],
+      limit: 1,
+    });
+    const data = { date, clientName, outcome, reason, comment: text, adminUsername: username };
+    const saved = existing[0]
+      ? await strapi.documents(ATTEMPT_UID).update({ documentId: existing[0].documentId, data })
+      : await strapi.documents(ATTEMPT_UID).create({ data: { ...data, client: rel(clientDocId) } });
+
+    strapi.log.info(
+      `booking-engine: upsell result ${outcome}/${reason} for client ${clientDocId} by ${username || '?'} (${existing[0] ? 'updated' : 'created'})`
+    );
+    return {
+      clientDocId,
+      result: {
+        outcome,
+        reason,
+        comment: text,
+        adminUsername: username,
+        updatedAt: saved?.updatedAt || now.toISOString(),
+        bookingDocId: null,
+      },
+    };
+  },
+
+  // дежурный администратор по графику (коллекция shift, свободный текст «Вика»), см. s115
+  async _dutyByDate(from, to) {
+    const mondays = new Set();
+    for (let d = from; d <= to; d = addDays(d, 1)) mondays.add(mondayOf(d));
+    const shifts = await strapi.documents(SHIFT_UID).findMany({
+      status: 'draft',
+      filters: { from: { $in: [...mondays] } },
+      fields: ['from'],
+      populate: { days: true },
+      limit: 20,
+    });
+    const byMonday = new Map(shifts.map((sh) => [String(sh.from).slice(0, 10), sh.days || {}]));
+    const out = new Map();
+    for (let d = from; d <= to; d = addDays(d, 1)) {
+      out.set(d, String(byMonday.get(mondayOf(d))?.[DAY_KEYS[dowOf(d)]] || '').trim());
+    }
+    return out;
+  },
+
+  // ── GET /engine/admin/upsell/report?month=YYYY-MM — только владелец ──
+  async report({ month, now = new Date() }) {
+    if (!isMonthStr(month)) throw new EngineError(400, 'bad_month', 'month должен быть YYYY-MM');
+    const [y, m] = month.split('-').map(Number);
+    const from = `${month}-01`;
+    const to = `${month}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
+    const today = pragueDateOf(now);
+    const nowMin = pragueMinOf(now);
+    const totals = {
+      visited: 0,
+      site: 0,
+      required: 0,
+      marked: 0,
+      booked: 0,
+      declined: 0,
+      notOffered: 0,
+      missing: 0,
+      conversionPct: null,
+      coveragePct: null,
+    };
+    if (from > today) return { month, today, totals, byAdmin: [], reasons: [], days: [], rows: [] };
+    const end = to < today ? to : today;
+
+    const [bookings, attempts, duty] = await Promise.all([
+      strapi.documents(BOOKING_UID).findMany({
+        filters: { date: { $gte: from, $lte: end }, status: { $in: [ACTIVE, CHECKED_OUT] } },
+        sort: 'startsAt:asc',
+        fields: ['date', 'startsAt', 'endsAt', 'status', 'services', 'discount', 'clientNameRaw', 'employeeNameRaw'],
+        populate: { client: { fields: ['name'] }, employee: { fields: ['name'] } },
+        limit: 10000,
+      }),
+      this._attempts(from, end),
+      this._dutyByDate(from, end),
+    ]);
+
+    const groups = new Map(); // date|client → брони клиента за день
+    for (const b of bookings) {
+      const id = b.client?.documentId;
+      if (!id) continue;
+      const date = String(b.date).slice(0, 10);
+      const k = `${date}|${id}`;
+      if (!groups.has(k)) groups.set(k, { date, clientDocId: id, list: [] });
+      groups.get(k).list.push(b);
+    }
+
+    const KEY = { booked: 'booked', declined: 'declined', not_offered: 'notOffered', site: 'site', missing: 'missing' };
+    const days = new Map();
+    const dayRow = (date) => {
+      if (!days.has(date)) {
+        days.set(date, { date, duty: duty.get(date) || '', visited: 0, site: 0, booked: 0, declined: 0, notOffered: 0, missing: 0 });
+      }
+      return days.get(date);
+    };
+    const admins = new Map();
+    const adminRow = (name) => {
+      const k = name || '—';
+      if (!admins.has(k)) admins.set(k, { adminUsername: k, booked: 0, declined: 0, notOffered: 0 });
+      return admins.get(k);
+    };
+    const reasons = new Map();
+    const rows = [];
+
+    for (const { date, clientDocId, list } of groups.values()) {
+      // прошлые дни: пришла, раз визит не отменён и не неявка; сегодня — визит уже начался
+      if (!(date < today || clientArrived(list, date, nowMin))) continue;
+      const result = clientDayResult(list, attempts.get(`${date}|${clientDocId}`));
+      const outcome = result?.outcome || 'missing';
+      const d = dayRow(date);
+      d.visited += 1;
+      d[KEY[outcome]] += 1;
+      totals.visited += 1;
+      totals[KEY[outcome]] += 1;
+      if (outcome === 'booked' || outcome === 'declined' || outcome === 'not_offered') {
+        adminRow(result.adminUsername)[KEY[outcome]] += 1;
+      }
+      if (result?.reason) {
+        const rk = `${outcome}|${result.reason}`;
+        reasons.set(rk, (reasons.get(rk) || 0) + 1);
+      }
+      const first = list[0];
+      rows.push({
+        date,
+        time: first.startsAt ? minToHHMM(utcToPragueMinClamped(first.startsAt, date)) : '',
+        clientDocId,
+        clientName: first.client?.name || first.clientNameRaw || '',
+        employees: [...new Set(list.map((b) => b.employee?.name || b.employeeNameRaw || '').filter(Boolean))],
+        services: list.flatMap((b) => svcTitles(b.services)),
+        outcome,
+        reason: result?.reason || null,
+        comment: result?.comment || '',
+        adminUsername: result?.adminUsername || '',
+        updatedAt: result?.updatedAt || null,
+        duty: duty.get(date) || '',
+      });
+    }
+
+    totals.required = totals.visited - totals.site;
+    totals.marked = totals.required - totals.missing;
+    const offered = totals.booked + totals.declined;
+    totals.conversionPct = offered ? Math.round((totals.booked * 100) / offered) : null;
+    totals.coveragePct = totals.required ? Math.round((totals.marked * 100) / totals.required) : null;
+
+    rows.sort((a, b) => b.date.localeCompare(a.date) || a.time.localeCompare(b.time) || a.clientName.localeCompare(b.clientName));
+    return {
+      month,
+      today,
+      totals,
+      byAdmin: [...admins.values()].sort((a, b) => a.adminUsername.localeCompare(b.adminUsername)),
+      reasons: [...reasons.entries()]
+        .map(([k, count]) => {
+          const [outcome, reason] = k.split('|');
+          return { outcome, reason, count };
+        })
+        .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason)),
+      days: [...days.values()].sort((a, b) => b.date.localeCompare(a.date)),
+      rows,
+    };
   },
 
   // ── хуки: отмена/неявка/удаление дозаписи убирают неопубликованную комиссию ──

@@ -517,6 +517,30 @@ export default {
     await handle(ctx, () => upsellSvc().mine({ session, month: String(ctx.query?.month || '').trim() }));
   },
 
+  // POST /api/engine/admin/upsell/result {client, outcome:'declined'|'not_offered', reason, comment?}
+  // — результат предложения по клиенту, который сегодня уже пришёл (s199)
+  async adminUpsellResult(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    const b = ctx.request.body || {};
+    await handle(ctx, () =>
+      upsellSvc().saveResult({
+        session,
+        clientDocId: b.client,
+        outcome: b.outcome,
+        reason: b.reason,
+        comment: b.comment,
+      })
+    );
+  },
+
+  // GET /api/engine/admin/upsell/report?month=YYYY-MM — контроль предложений, только владелец
+  async adminUpsellReport(ctx) {
+    const session = requireOwner(ctx);
+    if (!session) return;
+    await handle(ctx, () => upsellSvc().report({ month: String(ctx.query?.month || '').trim() }));
+  },
+
   // POST /api/engine/admin/blocks {employee, date, startMin, endMin, title?}
   async adminCreateBlock(ctx) {
     const session = requireAdmin(ctx);

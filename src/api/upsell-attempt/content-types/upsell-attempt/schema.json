@@ -1,0 +1,43 @@
+{
+  "kind": "collectionType",
+  "collectionName": "upsell_attempts",
+  "info": {
+    "singularName": "upsell-attempt",
+    "pluralName": "upsell-attempts",
+    "displayName": "Дозаписи: результат предложения",
+    "description": "Что администратор отметил по клиенту, который был в салоне: отказ или не предлагали (+ причина). Одна запись на клиента в день. Дозапись созданная — не хранится здесь, берётся из брони."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "date": {
+      "type": "date",
+      "required": true
+    },
+    "client": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::client.client"
+    },
+    "clientName": {
+      "type": "string"
+    },
+    "outcome": {
+      "type": "enumeration",
+      "enum": ["declined", "not_offered"],
+      "required": true
+    },
+    "reason": {
+      "type": "string",
+      "required": true
+    },
+    "comment": {
+      "type": "text"
+    },
+    "adminUsername": {
+      "type": "string"
+    }
+  }
+}
