@@ -110,6 +110,12 @@
     },
     "discount": {
       "type": "json"
+    },
+    "attribution": {
+      "type": "json"
+    },
+    "isNewClient": {
+      "type": "boolean"
     }
   }
 }

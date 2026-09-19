@@ -137,7 +137,8 @@ export default {
     await handle(ctx, () => svc().getHold(ctx.params.id));
   },
 
-  // POST /api/engine/bookings {holdId, name, phone, email?, customerComment?}
+  // POST /api/engine/bookings {holdId, name, phone, email?, customerComment?, attribution?}
+  // attribution — откуда пришёл клиент (first/last касание), чистится в сервисе (s200)
   async createBooking(ctx) {
     const b = ctx.request.body || {};
     await handle(ctx, () =>
@@ -147,6 +148,7 @@ export default {
         phone: b.phone,
         email: b.email,
         customerComment: b.customerComment,
+        attribution: b.attribution,
       })
     );
   },
@@ -539,6 +541,22 @@ export default {
     const session = requireOwner(ctx);
     if (!session) return;
     await handle(ctx, () => upsellSvc().report({ month: String(ctx.query?.month || '').trim() }));
+  },
+
+  // GET /api/engine/admin/attribution/report?from=&to=&basis=created|visit&touch=first|last
+  // «Источники броней» (s200) — только владелец
+  async adminAttributionReport(ctx) {
+    const session = requireOwner(ctx);
+    if (!session) return;
+    const q = ctx.query || {};
+    await handle(ctx, () =>
+      strapi.service('api::booking-engine.attribution').report({
+        from: String(q.from || '').trim(),
+        to: String(q.to || '').trim(),
+        basis: String(q.basis || 'created'),
+        touch: String(q.touch || 'first'),
+      })
+    );
   },
 
   // POST /api/engine/admin/blocks {employee, date, startMin, endMin, title?}

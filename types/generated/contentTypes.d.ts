@@ -911,6 +911,7 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
   };
   attributes: {
     arrived: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    attribution: Schema.Attribute.JSON;
     bsChannel: Schema.Attribute.String;
     bsGroup: Schema.Attribute.String;
     cancelToken: Schema.Attribute.String;
@@ -928,6 +929,7 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     employeeNameRaw: Schema.Attribute.String;
     endsAt: Schema.Attribute.DateTime;
     engineEmployeeId: Schema.Attribute.String;
+    isNewClient: Schema.Attribute.Boolean;
     label: Schema.Attribute.JSON;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<

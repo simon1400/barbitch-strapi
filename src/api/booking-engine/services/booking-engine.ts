@@ -30,6 +30,7 @@ import {
   selectEmployee,
   utcToPragueMinClamped,
 } from './slots-core';
+import { sanitizeAttribution } from './attribution-core';
 
 const SALON_SERVICE_UID = 'api::salon-service.salon-service';
 const SLOT_HOLD_UID = 'api::slot-hold.slot-hold';
@@ -672,9 +673,31 @@ export default {
     return rows;
   },
 
+  // Новый клиент (s200): у человека нет ни одной прошлой брони, кроме отменённых. Ищем
+  // по телефону ИЛИ e-mail, а не по id клиента — у одного человека бывают дубли карточек.
+  // Считается ДО вставки, поэтому текущая бронь в выборку не попадает.
+  async isNewClientRaw(trx, clientRow) {
+    if (!clientRow) return null;
+    const [c] = await trx('clients').select('phone', 'email').where('id', clientRow.id);
+    const phone = String(c?.phone || '').trim();
+    const email = String(c?.email || '').trim().toLowerCase();
+    const prior = await trx('bookings as b')
+      .join('bookings_client_lnk as bc', 'bc.booking_id', 'b.id')
+      .join('clients as c', 'c.id', 'bc.client_id')
+      .where((q) => {
+        q.where('c.id', clientRow.id);
+        if (phone) q.orWhere('c.phone', phone);
+        if (email) q.orWhereRaw('lower(trim(c.email)) = ?', [email]);
+      })
+      .whereNot('b.status', 'cancelled')
+      .first('b.id');
+    return !prior;
+  },
+
   async insertBookingRaw(trx, { documentId, clientRow, personalRowList, data }) {
     const now = new Date();
     const pub = personalRowList.find((r) => r.published_at) || personalRowList[0];
+    const isNewClient = await this.isNewClientRaw(trx, clientRow);
     const [inserted] = await trx('bookings')
       .insert({
         document_id: documentId,
@@ -702,6 +725,9 @@ export default {
         // true только для админских броней поверх занятого времени (см. adminCreateBooking);
         // брони с сайта всегда false → остаются под защитой EXCLUDE-constraint
         overlap_allowed: Boolean(data.overlapAllowed),
+        // источник брони с сайта (first/last касание) — отчёт «Источники броней», s200
+        attribution: data.attribution ? JSON.stringify(data.attribution) : null,
+        is_new_client: isNewClient,
         created_at: now,
         updated_at: now,
         published_at: now,
@@ -728,7 +754,7 @@ export default {
 
   // ── бронь с сайта: hold → booking ──
 
-  async createBooking({ holdId, name, phone, email, customerComment }) {
+  async createBooking({ holdId, name, phone, email, customerComment, attribution }) {
     const hold = await strapi.documents(SLOT_HOLD_UID).findOne({ documentId: holdId });
     if (!hold) throw new EngineError(404, 'hold_not_found', 'Резервация не найдена');
     if (new Date(hold.expiresAt).getTime() < Date.now()) {
@@ -762,6 +788,7 @@ export default {
             origin: 'site',
             cancelToken,
             employeeDocId: hold.employeeDocId,
+            attribution: sanitizeAttribution(attribution),
           },
         });
         await trx('slot_holds').where('document_id', hold.documentId).del();

@@ -358,6 +358,8 @@ export default {
             employeeDocId: emp.documentId,
             priceOverride: true,
             discount,
+            // дозапись с thank-you — тот же заход на сайт, источник наследуется от исходной брони (s200)
+            attribution: ctx.base.attribution ? { ...ctx.base.attribution, inheritedFrom: ctx.base.documentId } : null,
           },
         });
       });
