@@ -30,8 +30,17 @@ jobs:
             echo "Pulling latest changes..."
             git pull origin main
 
-            echo "Installing dependencies..."
-            NODE_ENV=development npm ci
+            # npm ci сносит node_modules и ставит ~1700 пакетов заново — это ~4.5 из ~5.5 минут деплоя.
+            # Переустанавливаем только если изменились зависимости или postinstall-патчи (patches/
+            # правят node_modules). Отпечаток лежит ВНУТРИ node_modules: удалили папку — установка пойдёт сама.
+            DEPS_HASH=$(cat package-lock.json patches/*.js | sha256sum | cut -d' ' -f1)
+            if [ -d node_modules ] && [ "$(cat node_modules/.deploy-deps-hash 2>/dev/null)" = "$DEPS_HASH" ]; then
+              echo "Dependencies unchanged — skipping npm ci"
+            else
+              echo "Installing dependencies..."
+              NODE_ENV=development npm ci
+              echo "$DEPS_HASH" > node_modules/.deploy-deps-hash
+            fi
 
             echo "Cleaning old build artifacts..."
             rm -rf dist
