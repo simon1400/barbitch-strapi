@@ -90,7 +90,7 @@ export default {
         status: 'active',
         client: { documentId: { $eq: base.client.documentId } },
       },
-      fields: ['date', 'startsAt', 'endsAt', 'services', 'engineEmployeeId', 'discount'],
+      fields: ['date', 'startsAt', 'endsAt', 'services', 'engineEmployeeId', 'discount', 'totalPrice'],
       populate: { employee: { fields: ['name'] } },
       limit: 50,
     });
@@ -101,6 +101,17 @@ export default {
     // тоже режется — create проверяет ctx.available)
     if (all.some((b) => b.discount?.type === 'rebook')) {
       return { base, baseInfo, expiresAtMs, available: false, reason: 'already_rebooked' };
+    }
+
+    // Скидку даёт только ПЛАТНЫЙ визит (решение владельца, s201). Без этого бронь
+    // бесплатной услуги («Korekce do 5 dnů», 0 Kč) работала якорем и открывала −15 %
+    // на любую дорогую процедуру другой категории — визит за 0 Kč давал скидку.
+    // Считаем по ВСЕМ активным броням дня, а не по одному якорю: «маникюр + бесплатная
+    // коррекция после него» — платный визит, скидка заслужена (якорем при этом
+    // остаётся коррекция, потому что окно ищется после конца последней брони).
+    const paidKc = all.reduce((sum, b) => sum + (Number(b.totalPrice) || 0), 0);
+    if (paidKc <= 0) {
+      return { base, baseInfo, expiresAtMs, available: false, reason: 'unpaid_visit' };
     }
 
     // якорь — бронь с самым поздним концом; исключённые бакеты — со ВСЕХ броней дня

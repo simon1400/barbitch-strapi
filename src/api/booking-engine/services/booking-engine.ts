@@ -1173,6 +1173,10 @@ export default {
       }
     }
 
+    // перенос на другой календарный день (а не сдвиг времени / смена мастера) —
+    // от него зависит судьба скидки за дозапись, см. блок после транзакции
+    const movedToAnotherDay = moving && upd.date != null && String(upd.date) !== String(booking.date);
+
     const bookingRow = (await knex('bookings').select('id').where('document_id', bookingDocId))[0];
     try {
       await knex.transaction(async (trx) => {
@@ -1211,6 +1215,25 @@ export default {
         .service('api::booking-engine.rebook')
         .revokeDiscountsForAnchor(bookingDocId)
         .catch((e) => strapi.log.error(`rebook revoke on admin-cancel failed: ${e.message}`));
+    }
+
+    // Перенос САМОЙ дозаписи админом на ДРУГОЙ день (решение владельца, s201):
+    // −15 % давались за окно «hned po vás», на другом дне его уже нет → скидка
+    // снимается, цена возвращается к полной (у админской дозаписи revokeOwnDiscount
+    // снимает и черновик комиссии). Если перенос по вине салона, админ оставляет
+    // скидку галочкой в окне переноса → приходит keepRebookDiscount:true.
+    // Перенос ВНУТРИ дня скидку не трогает. Ждём результат, а не fire-and-forget:
+    // ответ этой же ручки несёт свежую цену, календарь рисует её сразу.
+    let rebookDiscountRevoked = false;
+    const hadAppliedRebook = booking.discount?.type === 'rebook' && Boolean(booking.discount?.applied);
+    if (movedToAnotherDay && hadAppliedRebook && patch.keepRebookDiscount !== true) {
+      try {
+        rebookDiscountRevoked = await strapi
+          .service('api::booking-engine.rebook')
+          .revokeOwnDiscount(bookingDocId);
+      } catch (e) {
+        strapi.log.error(`rebook revoke on admin-move failed: ${e.message}`);
+      }
     }
 
     // отмена/неявка админской дозаписи (s197): неопубликованная комиссия
@@ -1280,6 +1303,12 @@ export default {
           from: { date: fmtDay(fromInfo.date), time: fromInfo.time, employee: fromInfo.employeeName },
           to: { date: fmtDay(newDate), time: newTime, employee: newEmp },
         };
+        // что стало со скидкой за дозапись при переносе на другой день
+        if (hadAppliedRebook && movedToAnotherDay) {
+          logDetails['sleva'] = rebookDiscountRevoked
+            ? 'Sleva za dozápis zrušena (přesun na jiný den)'
+            : 'Sleva za dozápis ponechána (přesun kvůli salonu)';
+        }
         // цену пересчитал переход senior↔junior — пишем «старое → новое»
         if (repricing?.applied) {
           logDetails['cena'] = `${arrowLog(fmtKcLog(repricing.from), fmtKcLog(repricing.to))} (${repricing.tier})`;
