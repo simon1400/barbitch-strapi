@@ -59,6 +59,9 @@ export default {
     const rows = await knex('bookings as b')
       .leftJoin('bookings_client_lnk as l', 'l.booking_id', 'b.id')
       .leftJoin('clients as c', 'c.id', 'l.client_id')
+      // интерные брони (s203) в клиентскую аналитику не идут; coalesce обязателен —
+      // у старых броней колонка NULL, и `<> true` выкинул бы их все
+      .whereRaw('coalesce(b.internal, false) = false')
       .select(
         knex.raw("to_char(b.date, 'YYYY-MM-DD') as date"),
         'b.client_name_raw',

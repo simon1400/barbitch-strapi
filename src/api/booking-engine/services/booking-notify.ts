@@ -18,6 +18,7 @@ import {
 // только для превью письма-просьбы об отзыве (сборка ссылки из GOOGLE_PLACE_ID);
 // модуль на загрузке ничего не делает, кроме чтения env — цикла импорта нет
 import { reviewUrl } from '../../review-request/services/review-request';
+import { withoutInternal } from './booking-kind';
 
 const BOOKING_UID = 'api::booking.booking';
 
@@ -856,12 +857,13 @@ export default {
     const nowIso = new Date(now).toISOString();
 
     const candidates = await strapi.documents(BOOKING_UID).findMany({
-      filters: {
+      // интерная бронь (s203) — сотрудник, адресата письма нет
+      filters: withoutInternal({
         status: 'active',
         startsAt: { $gt: nowIso, $lte: windowEnd },
         noonaEventId: { $null: true },
         cancelToken: { $notNull: true },
-      },
+      }),
       populate: {
         // tier обязателен: без него напоминание не покажет junior-скидку, хотя
         // подтверждение той же брони её показало (расхождение в двух письмах).

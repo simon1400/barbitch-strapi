@@ -107,6 +107,9 @@ export default {
         where bc.booking_id = b.id limit 1
       ) cl on true
       where ${periodExpr} between ?::date and ?::date
+        -- интерные брони (s203) — не клиентский канал. Именно coalesce, а не
+        -- сравнение с true: у броней, созданных до появления колонки, она NULL
+        and coalesce(b.internal, false) = false
       order by coalesce(b.noona_created_at, b.created_at)
       `,
       [from, to]
@@ -126,7 +129,7 @@ export default {
               and coalesce(b2.noona_created_at, b2.created_at) < coalesce(b.noona_created_at, b.created_at)
           ) as is_new
         from bookings b join bookings_client_lnk bc on bc.booking_id = b.id
-        where b.id = any(?)
+        where b.id = any(?) and coalesce(b.internal, false) = false
         `,
         [ids]
       );
@@ -176,6 +179,7 @@ export default {
         select bc.client_id, count(*)::int as visits, coalesce(sum(b.total_price), 0)::float as revenue
         from bookings b join bookings_client_lnk bc on bc.booking_id = b.id
         where bc.client_id = any(?) and b.status = 'checkedOut'
+          and coalesce(b.internal, false) = false
         group by bc.client_id
         `,
         [newClientIds]

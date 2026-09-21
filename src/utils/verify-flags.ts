@@ -18,6 +18,9 @@
 //   sleva_bez_karty 🎟 информационный: у записи есть скидка, но у клиента нет
 //               погашенной награды bitchcard → скидка дана мимо программы
 //               (ставится вызывающим кодом, здесь не вычисляется — нужен async-lookup)
+//   cena_rucne  💰 (s203) цена визита изменена РУКАМИ: (оплачено + известные системные
+//               скидки) ≠ Σ каталожных цен снапшота брони. Дельта хранится в
+//               service-provided.manualDeltaKc (< 0 занизили, > 0 завысили)
 
 export type VerifyFlag =
   | 'ok'
@@ -27,7 +30,8 @@ export type VerifyFlag =
   | 'mistr_up'
   | 'mistr_down'
   | 'internal'
-  | 'sleva_bez_karty';
+  | 'sleva_bez_karty'
+  | 'cena_rucne';
 
 export const FLAG_EMOJI: Record<VerifyFlag, string> = {
   ok: '🟩',
@@ -38,6 +42,7 @@ export const FLAG_EMOJI: Record<VerifyFlag, string> = {
   mistr_down: '🟨',
   internal: '🤝',
   sleva_bez_karty: '🎟',
+  cena_rucne: '💰',
 };
 
 // Приоритет для легаси-поля `verify` (одна доминирующая эмодзи), highest first
@@ -46,6 +51,7 @@ export const FLAG_PRIORITY: VerifyFlag[] = [
   'salon_up',
   'mistr_down',
   'mistr_up',
+  'cena_rucne',
   'internal',
   'sleva_bez_karty',
   'sleva',
@@ -111,6 +117,7 @@ export const computeFlagsCore = ({
   salonSalaries,
   internal,
   hasSale,
+  manualDeltaKc = 0,
 }: {
   fullPrice: number;
   paidExpected: number;
@@ -119,6 +126,8 @@ export const computeFlagsCore = ({
   salonSalaries: number;
   internal: boolean;
   hasSale: boolean;
+  /** (оплачено + системные скидки) − каталожная цена брони; ≠ 0 → 💰 cena_rucne */
+  manualDeltaKc?: number;
 }): VerifyFlag[] => {
   const mustStaff = fullPrice * (ratePercent / 100);
 
@@ -133,6 +142,7 @@ export const computeFlagsCore = ({
     const flags: VerifyFlag[] = ['internal'];
     if (rStaff > rMustStaff) flags.push('mistr_up');
     if (rStaff < rMustStaff) flags.push('mistr_down');
+    if (Math.round(manualDeltaKc) !== 0) flags.push('cena_rucne');
     return flags;
   }
 
@@ -145,6 +155,7 @@ export const computeFlagsCore = ({
   if (rSalon > rMustSalon) flags.push('salon_up');
   if (rSalon < rMustSalon) flags.push('ztrata');
   if (hasSale) flags.push('sleva');
+  if (Math.round(manualDeltaKc) !== 0) flags.push('cena_rucne');
 
   if (flags.length === 0) flags.push('ok');
   return flags;
@@ -194,16 +205,15 @@ export const rebookDiscountKc = (booking: BookingLike | null | undefined): numbe
  * 🟥 priceOverride НЕ означает «цену задал админ» (баг s152): этот флаг взводят и
  * СИСТЕМНЫЕ скидки — bitchcard-redemption (loyalty.ts) и дозапись −15 % (rebook.ts)
  * снижают total_price + ставят price_override, оставляя в снапшоте полные цены услуг.
- * Старая ветка `priceOverride ? total` схлопывала полную цену к оплаченной → подсказка
- * и флаги делили мастеру процент от суммы СО скидкой (1390 → 990), т.е. скидку ел
- * мастер, а не салон (нарушение правила s47).
  *
- * Правильно: fullPrice = total + ИЗВЕСТНЫЕ системные скидки (rebook — из
- * booking.discount синхронно; bitchcard `redemptionKc` передаёт вызывающий — нужен
- * async-lookup по redemptions). Ручной override БЕЗ системных скидок остаётся
- * реальной ценой визита (админ договорился о цене — мастер делит именно её),
- * а override + системная скидка корректно разворачивается до полной цены.
- * Без override полная цена = Σ снапшота (как раньше).
+ * s203 (решение владельца, вариант «а»): полная цена = Σ снапшота ВСЕГДА (у юниора
+ * это уже юниор-цена); ручная цена НЕ меняет базу процента мастера — разницу ест
+ * салон (правило s47). Ручное изменение = manualDeltaKc = (total + известные
+ * системные скидки) − Σ снапшота: < 0 занизили, > 0 завысили → флаг 💰 cena_rucne.
+ * Системные скидки: rebook — из booking.discount синхронно; bitchcard `redemptionKc`
+ * передаёт вызывающий (async-lookup). priceOverride на расчёт больше не влияет.
+ * До s203 при override база была total + systemKc (договорная цена — мастер делил её).
+ * Снапшот без цен (легаси) → полная цена = total + systemKc, дельта 0.
  */
 export const bookingPricing = (
   booking: BookingLike | null | undefined,
@@ -224,18 +234,20 @@ export const bookingPricing = (
   const total = parseMoney(booking?.totalPrice);
   const sum = list.reduce((acc, s) => acc + parseMoney(s?.price), 0);
   const systemKc = rebookDiscountKc(booking) + Math.max(0, opts?.redemptionKc || 0);
-  // priceOverride → снапшот может не отражать реальную цену (админ задал руками);
-  // реальная полная цена = оплачено + системные скидки. Без override — Σ снапшота.
-  const fullPrice = booking?.priceOverride ? total + systemKc : sum > 0 ? sum : total + systemKc;
+  const fullPrice = sum > 0 ? sum : total + systemKc;
+  const manualDeltaKc = sum > 0 ? Math.round(total + systemKc - sum) : 0;
 
   const discountRate = parseSaleRate(sale, fullPrice);
   const saleKc = fullPrice * discountRate;
   return {
     fullPrice,
+    catalogPrice: sum,
     paidExpected: Math.max(0, total - saleKc),
     saleKc,
     hasSale: discountRate > 0,
-    systemDiscountKc: Math.max(0, fullPrice - total),
+    // только ИЗВЕСТНЫЕ системные скидки (rebook + bitchcard); ручная разница — отдельно
+    systemDiscountKc: systemKc,
+    manualDeltaKc,
   };
 };
 
@@ -258,7 +270,7 @@ export const computeBookingFlags = ({
   /** Σ discountKc погашенных bitchcard-наград этой брони (async-lookup вызывающего). */
   redemptionKc?: number;
 }): VerifyFlag[] => {
-  const { fullPrice, paidExpected, hasSale, systemDiscountKc } = bookingPricing(booking, sale, {
+  const { fullPrice, paidExpected, hasSale, systemDiscountKc, manualDeltaKc } = bookingPricing(booking, sale, {
     redemptionKc,
   });
   return computeFlagsCore({
@@ -272,5 +284,6 @@ export const computeBookingFlags = ({
     // визит со скидкой по программе выглядел бы как обычный 🟩 без пометки.
     // Гейт 🎟 у вызывающих завязан на hasManualSale(sale), НЕ на этот флаг.
     hasSale: hasSale || systemDiscountKc > 0,
+    manualDeltaKc,
   });
 };

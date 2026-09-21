@@ -11,6 +11,7 @@
 // utils/verify-flags), поэтому пересохранение в CM даёт идентичный результат.
 
 import {
+  bookingPricing,
   computeBookingFlags,
   computeOfferFlags,
   dominantEmoji,
@@ -104,6 +105,8 @@ async function validateOfferMoney(event: any) {
     const flags: VerifyFlag[] = booking
       ? computeBookingFlags({ booking, ratePercent, staffSalaries, salonSalaries, sale: saleRaw, internal, redemptionKc })
       : computeOfferFlags(Number(offer.price), ratePercent, staffSalaries, salonSalaries, saleRaw, internal)
+    // 💰 разница ручной цены (s203) — хранится в записи; у legacy-пути (оффер) её нет
+    const manualDeltaKc = booking ? bookingPricing(booking, saleRaw, { redemptionKc }).manualDeltaKc : null
 
     // K4 informational flag: sale present, but no used bitchcard redemption on the
     // client's bookings of that day → the discount was given outside the program.
@@ -112,7 +115,7 @@ async function validateOfferMoney(event: any) {
     // redemptions used с usedInBookingDocId среди них.
     // Гейт по РУЧНОЙ скидке, не по флагу 🟦: sleva теперь ставится и системными
     // скидками booking-пути (bitchcard/rebook), а они «по программе» — 🎟 не про них.
-    if (hasManualSale(saleRaw) && process.env.LOYALTY_ENABLED === 'true') {
+    if ((hasManualSale(saleRaw) || (manualDeltaKc != null && manualDeltaKc < 0)) && process.env.LOYALTY_ENABLED === 'true') {
       try {
         let hasRedemption = false
         if (booking?.documentId) {
@@ -152,6 +155,7 @@ async function validateOfferMoney(event: any) {
 
     event.params.data.verifyFlags = flags
     event.params.data.verify = dominantEmoji(flags)
+    if (booking) event.params.data.manualDeltaKc = manualDeltaKc
 }
 
 export default {

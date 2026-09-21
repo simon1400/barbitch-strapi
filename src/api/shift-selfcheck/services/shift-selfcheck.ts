@@ -60,7 +60,7 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
  *   • legacy-путь: полная цена = offer.price, скидка вычитается из неё же.
  * null — цену взять неоткуда (нет ни брони, ни оффера) → сравнивать нечего.
  */
-const pricingOf = (item: any, redemptionKc = 0): { fullPrice: number; paidExpected: number; hasSale: boolean } | null => {
+const pricingOf = (item: any, redemptionKc = 0): { fullPrice: number; paidExpected: number; hasSale: boolean; manualDeltaKc: number } | null => {
   const b = item?.booking;
   if (b) {
     const list = Array.isArray(b?.services) ? b.services : [];
@@ -73,13 +73,17 @@ const pricingOf = (item: any, redemptionKc = 0): { fullPrice: number; paidExpect
     const d = b?.discount;
     const rebookKc = d && d.type === 'rebook' && d.applied ? Math.max(0, toNum(d.discountKc)) : 0;
     const systemKc = rebookKc + Math.max(0, redemptionKc);
-    const fullPrice = b?.priceOverride ? total + systemKc : sum > 0 ? sum : total + systemKc;
+    // s203 (вариант «а»): полная цена = Σ снапшота ВСЕГДА; ручная цена = дельта
+    // (total + systemKc) − Σ снапшота → 💰 cena_rucne. Зеркало verify-flags.ts.
+    const fullPrice = sum > 0 ? sum : total + systemKc;
     if (!(fullPrice > 0)) return null;
+    const manualDeltaKc = sum > 0 ? Math.round(total + systemKc - sum) : 0;
     const discountRate = parseSaleRate(item?.sale, fullPrice);
     return {
       fullPrice,
       paidExpected: Math.max(0, total - fullPrice * discountRate),
-      hasSale: discountRate > 0,
+      hasSale: discountRate > 0 || systemKc > 0,
+      manualDeltaKc,
     };
   }
   const offerPrice = Number(item?.offer?.price);
@@ -89,6 +93,7 @@ const pricingOf = (item: any, redemptionKc = 0): { fullPrice: number; paidExpect
     fullPrice: offerPrice,
     paidExpected: offerPrice * (1 - discountRate),
     hasSale: discountRate > 0,
+    manualDeltaKc: 0,
   };
 };
 
@@ -101,10 +106,10 @@ const computeMustValues = (
   return { mustStaff, mustSalonNow: pricing.paidExpected - mustStaff };
 };
 
-type VerifyFlag = 'ok' | 'sleva' | 'ztrata' | 'salon_up' | 'mistr_up' | 'mistr_down' | 'internal';
+type VerifyFlag = 'ok' | 'sleva' | 'ztrata' | 'salon_up' | 'mistr_up' | 'mistr_down' | 'internal' | 'cena_rucne';
 
 // Проблемные флаги, которые админу нужно проверить (без ok/sleva/internal).
-const PROBLEM_FLAGS: VerifyFlag[] = ['ztrata', 'salon_up', 'mistr_up', 'mistr_down'];
+const PROBLEM_FLAGS: VerifyFlag[] = ['ztrata', 'salon_up', 'mistr_up', 'mistr_down', 'cena_rucne'];
 
 const FLAG_META: Record<VerifyFlag, { emoji: string; label: string }> = {
   ok: { emoji: '🟩', label: 'OK' },
@@ -114,10 +119,11 @@ const FLAG_META: Record<VerifyFlag, { emoji: string; label: string }> = {
   mistr_up: { emoji: '🟨', label: 'Mistr dostal víc' },
   mistr_down: { emoji: '🟨', label: 'Mistr dostal míň' },
   internal: { emoji: '🤝', label: 'Interní služba' },
+  cena_rucne: { emoji: '💰', label: 'Cena změněna ručně' },
 };
 
 const computeFlags = (
-  pricing: { fullPrice: number; paidExpected: number; hasSale: boolean },
+  pricing: { fullPrice: number; paidExpected: number; hasSale: boolean; manualDeltaKc?: number },
   ratePercent: number,
   staffSalaries: number,
   salonSalaries: number,
@@ -131,6 +137,7 @@ const computeFlags = (
     const f: VerifyFlag[] = ['internal'];
     if (rStaff > rMustStaff) f.push('mistr_up');
     if (rStaff < rMustStaff) f.push('mistr_down');
+    if (Math.round(pricing.manualDeltaKc || 0) !== 0) f.push('cena_rucne');
     return f;
   }
   const rSalon = r2(salonSalaries);
@@ -141,6 +148,7 @@ const computeFlags = (
   if (rSalon > rMustSalon) f.push('salon_up');
   if (rSalon < rMustSalon) f.push('ztrata');
   if (hasSale) f.push('sleva');
+  if (Math.round(pricing.manualDeltaKc || 0) !== 0) f.push('cena_rucne');
   if (f.length === 0) f.push('ok');
   return f;
 };

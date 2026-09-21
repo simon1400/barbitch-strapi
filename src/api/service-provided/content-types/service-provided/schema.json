@@ -81,6 +81,9 @@
     "internal": {
       "type": "boolean",
       "default": false
+    },
+    "manualDeltaKc": {
+      "type": "integer"
     }
   }
 }

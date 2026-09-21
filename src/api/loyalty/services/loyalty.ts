@@ -22,6 +22,7 @@
 import crypto from 'crypto';
 
 import { pragueDateOf } from '../../booking-engine/services/slots-core';
+import { withoutInternal } from '../../booking-engine/services/booking-kind';
 
 const BOOKING_UID = 'api::booking.booking';
 const TX_UID = 'api::loyalty-transaction.loyalty-transaction';
@@ -164,11 +165,13 @@ export default {
     const PAGE = 500;
     for (let start = 0; ; start += PAGE) {
       const rows = await strapi.documents(BOOKING_UID).findMany({
-        filters: {
+        // 🟥 интерные брони (s203): прежняя практика «бронь на карточку клиента-сотрудника»
+        // заставляла этот крон начислять Kč на bitchcard самим сотрудникам
+        filters: withoutInternal({
           status: { $eq: 'checkedOut' },
           date: { $gte: fromDate, $lte: toDate },
           client: { documentId: { $notNull: true } },
-        },
+        }),
         fields: ['date', 'totalPrice'],
         populate: { client: { fields: ['name'] } },
         sort: 'date:asc',

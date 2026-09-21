@@ -31,6 +31,14 @@ import {
   utcToPragueMinClamped,
 } from './slots-core';
 import { sanitizeAttribution } from './attribution-core';
+import { occupancyFilters } from './booking-kind';
+import { isFreeKorekceItem, isQualifyingVisit, korekceWindowStart } from './korekce-core';
+import { classifyTitle } from './upsell-core';
+import {
+  internalPayrollComment,
+  internalPayrollSum,
+  internalServiceTitles,
+} from './internal-payroll';
 
 const SALON_SERVICE_UID = 'api::salon-service.salon-service';
 const SLOT_HOLD_UID = 'api::slot-hold.slot-hold';
@@ -42,6 +50,15 @@ const TIME_BLOCK_UID = 'api::time-block.time-block';
 
 const MAX_RANGE_DAYS = 120; // потолок окна availability за один запрос (сайт просит ~3,5 месяца, как в Noona-флоу)
 const PG_EXCLUSION_VIOLATION = '23P01';
+
+// Имя join-таблицы и её колонок берём из МЕТАДАННЫХ Strapi, а не хардкодом:
+// длинные идентификаторы Strapi укорачивает с хэшем, и угаданное имя молча
+// разошлось бы с реальной схемой (insert упал бы только в рантайме на проде).
+const joinTableOf = (uid, attrName) => {
+  const jt = strapi.db.metadata.get(uid)?.attributes?.[attrName]?.joinTable;
+  if (!jt?.name || !jt?.joinColumn?.name || !jt?.inverseJoinColumn?.name) return null;
+  return { table: jt.name, sourceCol: jt.joinColumn.name, targetCol: jt.inverseJoinColumn.name };
+};
 const OWN_BLOCK_PREFIX = 'own|'; // noonaKey engine-блоков — реконсайл зеркала их не трогает
 // Блоки, заведённые администратором, вступают в силу только после подтверждения владельцем.
 // approvalStatus: approved (действует) | pending (ждёт владельца) | rejected (отклонён).
@@ -331,7 +348,8 @@ export default {
     const p = await strapi.documents(PERSONAL_UID).findOne({
       documentId: employeeDocId,
       status: 'published',
-      fields: ['name', 'tier', 'bookingPriority', 'noonaEmployeeId', 'isActive'],
+      // ratePercent — доля мастера; нужна для списания с зарплаты за интерную услугу (s203)
+      fields: ['name', 'tier', 'bookingPriority', 'noonaEmployeeId', 'isActive', 'ratePercent'],
     });
     if (!p || p.isActive === false) throw new EngineError(404, 'employee_not_found', 'Мастер не найден или неактивен');
     return p;
@@ -361,7 +379,7 @@ export default {
         limit: 10000,
       }),
       strapi.documents(BOOKING_UID).findMany({
-        filters: { date: { $gte: fromDate, $lte: toDate }, status: 'active' },
+        filters: occupancyFilters({ date: { $gte: fromDate, $lte: toDate } }),
         fields: ['date', 'startsAt', 'endsAt', 'noonaEmployeeId', 'engineEmployeeId'],
         populate: { employee: { fields: ['documentId'] } },
         limit: 10000,
@@ -501,7 +519,7 @@ export default {
     const fromDate = addDays(centerDate, -LOAD_WINDOW_RADIUS_DAYS);
     const toDate = addDays(centerDate, LOAD_WINDOW_RADIUS_DAYS);
     const bookings = await strapi.documents(BOOKING_UID).findMany({
-      filters: { date: { $gte: fromDate, $lte: toDate }, status: 'active' },
+      filters: occupancyFilters({ date: { $gte: fromDate, $lte: toDate } }),
       fields: ['noonaEmployeeId', 'engineEmployeeId'],
       populate: { employee: { fields: ['documentId'] } },
       limit: 10000,
@@ -635,6 +653,45 @@ export default {
 
   // ── клиенты ──
 
+  // s202: бесплатную «Korekce do 5 dnů» с сайта даём только клиенту, у которого за
+  // последние KOREKCE_WINDOW_DAYS дней (считая от даты коррекции) был визит той же
+  // категории — к ЛЮБОМУ мастеру (гарантия салона). Клиента ищем как isNewClientRaw:
+  // по id, телефону или e-mail (дубли карточек). Платный вариант (150 Kč) и брони
+  // из админки гейт не проходят. Иначе 409 korekce_no_visit → сайт: «zavolejte».
+  async assertFreeKorekceAllowed(hold, client) {
+    const item = Array.isArray(hold.services) ? hold.services[0] : null;
+    if (!isFreeKorekceItem(item, hold.totalPrice)) return;
+
+    const svc = item.serviceDocId
+      ? await strapi.documents(SALON_SERVICE_UID).findOne({ documentId: item.serviceDocId, fields: ['title', 'category'] })
+      : null;
+    const bucket = classifyTitle(svc?.category) ?? classifyTitle(item.base || item.title);
+
+    const knex = strapi.db.connection;
+    const phone = String(client.phone || '').trim();
+    const email = String(client.email || '').trim().toLowerCase();
+    const rows = await knex('bookings as b')
+      .join('bookings_client_lnk as bc', 'bc.booking_id', 'b.id')
+      .join('clients as c', 'c.id', 'bc.client_id')
+      // категория услуги — из каталога по serviceDocId снапшота (легаси без него → по названию)
+      .leftJoin('salon_services as s', knex.raw("s.document_id = b.services->0->>'serviceDocId'"))
+      .where((q) => {
+        q.where('c.document_id', client.documentId);
+        if (phone) q.orWhere('c.phone', phone);
+        if (email) q.orWhereRaw('lower(trim(c.email)) = ?', [email]);
+      })
+      .where('b.date', '>=', korekceWindowStart(String(hold.date)))
+      .select(
+        'b.status',
+        'b.starts_at as startsAt',
+        knex.raw("coalesce(s.title, b.services->0->>'base', b.services->0->>'title') as \"serviceTitle\""),
+        's.category as serviceCategory',
+      );
+    const now = Date.now();
+    if (rows.some((r) => isQualifyingVisit(r, bucket, now))) return;
+    throw new EngineError(409, 'korekce_no_visit', 'Bezplatnou korekci lze rezervovat jen do 5 dnů po návštěvě');
+  },
+
   async findOrCreateClient({ name, phone, email }) {
     const normPhone = normalizePhone(phone);
     if (!normPhone) throw new EngineError(400, 'phone_required', 'Телефон обязателен');
@@ -728,6 +785,9 @@ export default {
         // источник брони с сайта (first/last касание) — отчёт «Источники броней», s200
         attribution: data.attribution ? JSON.stringify(data.attribution) : null,
         is_new_client: isNewClient,
+        // интерная бронь (Interní rezervace, s203): время мастера НЕ занимает —
+        // см. booking-kind.ts, фильтр занятости и предикат DB EXCLUDE
+        internal: Boolean(data.internal),
         created_at: now,
         updated_at: now,
         published_at: now,
@@ -749,6 +809,15 @@ export default {
     for (const p of personalRowList) {
       await trx('bookings_employee_lnk').insert({ booking_id: bookingId, personal_id: p.id });
     }
+    // получатель интерной услуги (кого обслуживают) — линк на ОБЕ версии personal,
+    // как у employee выше
+    if (data.internal && data.internalForRowList?.length) {
+      const jt = joinTableOf(BOOKING_UID, 'internalFor');
+      if (!jt) throw new Error('internalFor join table not found in strapi metadata');
+      for (const r of data.internalForRowList) {
+        await trx(jt.table).insert({ [jt.sourceCol]: bookingId, [jt.targetCol]: r.id });
+      }
+    }
     return bookingId;
   },
 
@@ -764,6 +833,8 @@ export default {
     const client = await this.findOrCreateClient({ name, phone, email });
     // серверный блэклист — дыра s94 закрывается по построению
     if (client.blacklisted) throw new EngineError(403, 'blacklisted', 'Rezervaci nelze vytvořit');
+    // бесплатная коррекция — только после визита за последние 5 дней (s203)
+    await this.assertFreeKorekceAllowed(hold, client);
 
     const knex = strapi.db.connection;
     const clientRow = (await knex('clients').select('id').where('document_id', client.documentId))[0];
@@ -826,7 +897,7 @@ export default {
 
   // ── админ: прямая бронь (без hold) ──
 
-  async adminCreateBooking({ session, employee, date, time, serviceItems, client, clientDocId, priceOverride, comment, notify = false, sendMinLead = false }) {
+  async adminCreateBooking({ session, employee, date, time, serviceItems, client, clientDocId, priceOverride, comment, notify = false, sendMinLead = false, internal = false, internalFor = null }) {
     if (!isDateStr(date)) throw new EngineError(400, 'bad_date', 'date должен быть YYYY-MM-DD');
     if (!/^\d{2}:\d{2}$/.test(String(time || ''))) throw new EngineError(400, 'bad_time', 'time должен быть HH:MM');
     if (!Array.isArray(serviceItems) || !serviceItems.length) {
@@ -869,14 +940,36 @@ export default {
     const busyList = busy.get(date)?.get(emp.documentId) || [];
     const overlapAllowed = busyList.some((b) => b.startMin < startMin + totalDuration && startMin < b.endMin);
 
-    const clientDoc = clientDocId
-      ? await strapi.documents(CLIENT_UID).findOne({ documentId: clientDocId })
-      : await this.findOrCreateClient(client || {});
-    if (!clientDoc) throw new EngineError(404, 'client_not_found', 'Клиент не найден');
+    // Интерная бронь (s203) — запись СОТРУДНИКА, карточки клиента у неё нет:
+    // client остаётся NULL, и она сама выпадает из bitchcard, кабинета, дублей,
+    // писем и напоминаний — там везде матч идёт по client.
+    const isInternal = internal === true;
+    let recipient = null;
+    if (isInternal) {
+      if (!internalFor) throw new EngineError(400, 'internal_for_required', 'Vyberte zaměstnance');
+      recipient = await strapi.documents(PERSONAL_UID).findOne({
+        documentId: internalFor,
+        status: 'published',
+        fields: ['name', 'isActive'],
+      });
+      if (!recipient || recipient.isActive === false) {
+        throw new EngineError(404, 'internal_for_not_found', 'Zaměstnanec nenalezen nebo není aktivní');
+      }
+    }
+    const clientDoc = isInternal
+      ? null
+      : clientDocId
+        ? await strapi.documents(CLIENT_UID).findOne({ documentId: clientDocId })
+        : await this.findOrCreateClient(client || {});
+    if (!isInternal && !clientDoc) throw new EngineError(404, 'client_not_found', 'Клиент не найден');
+    const bookingName = isInternal ? recipient.name : clientDoc.name;
 
     const knex = strapi.db.connection;
-    const clientRow = (await knex('clients').select('id').where('document_id', clientDoc.documentId))[0];
+    const clientRow = isInternal
+      ? null
+      : (await knex('clients').select('id').where('document_id', clientDoc.documentId))[0];
     const personalRowList = await this.personalRows(emp.documentId);
+    const internalForRowList = isInternal ? await this.personalRows(recipient.documentId) : null;
     const documentId = genDocumentId();
     const cancelToken = crypto.randomUUID();
 
@@ -887,7 +980,7 @@ export default {
           clientRow,
           personalRowList,
           data: {
-            clientName: clientDoc.name,
+            clientName: bookingName,
             date,
             startsAt,
             endsAt,
@@ -899,7 +992,11 @@ export default {
             employeeDocId: emp.documentId,
             createdByName: session?.username || '',
             priceOverride: priceOverride != null || serviceItems.some((i) => i.priceOverride != null),
-            overlapAllowed,
+            // Интерная бронь всегда вне EXCLUDE-индекса: предикат constraint её исключает
+            // (миграция шага 3), а флаг страхует промежуток между деплоем и миграцией.
+            overlapAllowed: isInternal ? true : overlapAllowed,
+            internal: isInternal,
+            internalForRowList,
           },
         });
       });
@@ -908,9 +1005,44 @@ export default {
       throw e;
     }
 
+    // Списание с зарплаты получателя (решение владельца §1а.2): салон с интерной
+    // услуги не берёт ничего, мастеру — её процент, и ровно эта сумма сразу уходит
+    // получателю черновиком `payroll`. Владелец публикует его на закрытии смены.
+    // Ждём результат: бронь без записи списания салону не нужна — при сбое
+    // откатываем её целиком (тот же приём, что у комиссии за дозапись, s197).
+    let internalPayroll = null;
+    if (isInternal) {
+      const sum = internalPayrollSum({ price: totalPrice, ratePercent: emp.ratePercent });
+      try {
+        const res = await strapi.service('api::booking-engine.internal-payroll').createDraft({
+          bookingDocId: documentId,
+          recipientDocId: recipient.documentId,
+          date,
+          sum,
+          comment: internalPayrollComment({
+            serviceTitle: internalServiceTitles(snapshot),
+            masterName: emp.name,
+            date,
+          }),
+        });
+        internalPayroll = res.created ? { kc: sum, payrollDocId: res.documentId } : null;
+      } catch (e) {
+        strapi.log.error(
+          `internal-payroll: draft failed for ${documentId}, booking rolled back: ${e.message}`
+        );
+        try {
+          await strapi.documents(BOOKING_UID).delete({ documentId });
+        } catch (e2) {
+          strapi.log.error(`internal-payroll: rollback of booking ${documentId} failed: ${e2.message}`);
+        }
+        throw new EngineError(500, 'internal_payroll_failed', 'Odpis ze mzdy se nepodařilo založit — rezervace nevytvořena');
+      }
+    }
+
     // чекбокс «отправить подтверждение» (роадмап §4.3): только письмо клиенту,
-    // fire-and-forget — сбой письма не роняет уже созданную бронь
-    if (notify) {
+    // fire-and-forget — сбой письма не роняет уже созданную бронь.
+    // У интерной брони адресата нет (client = NULL) — письмо не шлём никогда.
+    if (notify && !isInternal) {
       strapi
         .service('api::booking-engine.booking-notify')
         .notifyBookingCreatedByAdmin(documentId)
@@ -930,21 +1062,37 @@ export default {
         entityType: 'booking',
         actorName: session?.username || '',
         entityDocId: documentId,
-        clientName: clientDoc.name,
+        clientName: bookingName,
         employeeName: emp.name,
-        summary: `Nová rezervace: ${clientDoc.name} · ${fmtDay(date)} ${time} · ${emp.name}`,
+        summary: isInternal
+          ? `Interní rezervace: ${bookingName} u ${emp.name} · ${fmtDay(date)} ${time}`
+          : `Nová rezervace: ${bookingName} · ${fmtDay(date)} ${time} · ${emp.name}`,
         details: {
           datum: fmtDay(date),
           čas: time,
           mistr: emp.name,
-          klient: clientDoc.name,
+          ...(isInternal ? { 'pro (interní)': bookingName } : { klient: bookingName }),
           služba: svcTitlesOf(snapshot) || '—',
           cena: fmtKcLog(totalPrice),
+          ...(isInternal ? { 'odpis ze mzdy': internalPayroll ? fmtKcLog(internalPayroll.kc) : '—' } : {}),
         },
       })
       .catch((e) => strapi.log.error(`calendar-log create failed: ${e.message}`));
 
-    return { bookingId: documentId, date, time, startsAt, endsAt, totalPrice, services: snapshot, employee: { documentId: emp.documentId, name: emp.name }, client: { documentId: clientDoc.documentId, name: clientDoc.name } };
+    return {
+      bookingId: documentId,
+      date,
+      time,
+      startsAt,
+      endsAt,
+      totalPrice,
+      services: snapshot,
+      employee: { documentId: emp.documentId, name: emp.name },
+      client: isInternal ? null : { documentId: clientDoc.documentId, name: clientDoc.name },
+      internal: isInternal,
+      internalFor: isInternal ? { documentId: recipient.documentId, name: recipient.name } : null,
+      internalPayroll,
+    };
   },
 
   // ── админ: изменение брони (перенос / статус / коммент / цена) ──
@@ -1128,8 +1276,14 @@ export default {
         (b) => !(booking.startsAt && b.startMin === utcToPragueMinClamped(booking.startsAt, date) && b.endMin === utcToPragueMinClamped(booking.endsAt, date))
       );
       // флаг пересчитывается на каждом переносе: уехали на свободное время → снова false
-      // (бронь возвращается под защиту constraint)
-      upd.overlap_allowed = busyList.some((b) => b.startMin < startMin + durationMin && startMin < b.endMin);
+      // (бронь возвращается под защиту constraint).
+      // 🟥 Интерная бронь — исключение: она не занимает время и обязана оставаться ВНЕ
+      // EXCLUDE-индекса. Иначе перенос вернул бы ей флаг false, строка попала бы под
+      // constraint, и следующая бронь клиента поверх неё упала бы с 23P01 → клиент
+      // увидел бы «slot_taken» на слоте, который календарь показывает свободным.
+      upd.overlap_allowed = booking.internal === true
+        ? true
+        : busyList.some((b) => b.startMin < startMin + durationMin && startMin < b.endMin);
 
       // Смена мастера senior↔junior → пересчёт цены по СНАПШОТУ услуг брони: в нём
       // у каждой позиции лежит seniorPrice, поэтому цены каталога на момент брони
@@ -1247,6 +1401,30 @@ export default {
         .service('api::booking-engine.upsell')
         .dropCommissionDraft(bookingDocId)
         .catch((e) => strapi.log.error(`upsell commission drop on admin-${patch.status} failed: ${e.message}`));
+    }
+
+    // Интерная бронь (s203): черновик списания с зарплаты живёт вместе с ней.
+    //  • отмена/неявка — снимаем, услуги не было и списывать не за что;
+    //  • перенос / смена услуги / цены / мастера — пересчитываем сумму, описание и ДАТУ
+    //    (владелец публикует черновики дня на закрытии смены, поэтому дата обязана
+    //    ехать вместе с бронью, иначе списание осталось бы в чужом дне).
+    // Опубликованный черновик (смена уже закрыта) не трогается — см. internal-payroll.
+    // ⚠️ Возврат отменённой брони в active черновик НЕ воскрешает — та же односторонность,
+    // что у комиссии за дозапись выше; такие случаи владелец правит руками в CM.
+    if (booking.internal === true) {
+      const internalPayrollSvc = strapi.service('api::booking-engine.internal-payroll');
+      if (
+        (patch.status === 'cancelled' || patch.status === 'noshow') &&
+        booking.status !== patch.status
+      ) {
+        internalPayrollSvc
+          .dropDraft(bookingDocId)
+          .catch((e) => strapi.log.error(`internal-payroll drop on admin-${patch.status} failed: ${e.message}`));
+      } else if (moving || patch.totalPrice != null || patch.serviceItems != null) {
+        internalPayrollSvc
+          .resyncForBooking(bookingDocId)
+          .catch((e) => strapi.log.error(`internal-payroll resync on admin-patch failed: ${e.message}`));
+      }
     }
 
     // push мастеру всегда (независимо от чекбоксов): отмена > перенос
@@ -1443,6 +1621,15 @@ export default {
         await strapi.service('api::booking-engine.upsell').dropCommissionDraft(bookingDocId);
       } catch (e) {
         strapi.log.error(`upsell commission drop on delete failed: ${e.message}`);
+      }
+    }
+    // списание с зарплаты за интерную услугу (s203) — тоже ДО удаления брони,
+    // иначе связь payroll → booking уже не найти
+    if (booking.internal === true) {
+      try {
+        await strapi.service('api::booking-engine.internal-payroll').dropDraft(bookingDocId);
+      } catch (e) {
+        strapi.log.error(`internal-payroll drop on delete failed: ${e.message}`);
       }
     }
     await strapi.documents(BOOKING_UID).delete({ documentId: bookingDocId });
@@ -2184,7 +2371,11 @@ export default {
     const rows = await strapi.documents(BOOKING_UID).findMany({
       filters: { date },
       sort: 'startsAt:asc',
-      populate: { client: { fields: ['name', 'email', 'phone', 'blacklisted'] } },
+      populate: {
+        client: { fields: ['name', 'email', 'phone', 'blacklisted'] },
+        // кого обслуживают по интерной брони — бейдж «🤝 Interní · pro: …» в шторке
+        internalFor: { fields: ['name'] },
+      },
       pagination: { pageSize: 200 },
     });
     const list = Array.isArray(rows) ? rows : [];

@@ -38,6 +38,7 @@ import {
   utcToPragueMinClamped,
 } from './slots-core';
 import { classifyTitle, isExcludedOfferService, windowAfter, windowBefore } from './upsell-core';
+import { withoutInternal } from './booking-kind';
 import { EngineError } from './booking-engine';
 
 const BOOKING_UID = 'api::booking.booking';
@@ -309,10 +310,10 @@ export default {
 
   // брони клиента(ов) дня, которые участвуют в правилах: active + checkedOut
   async _dayBookings(date, clientDocId = null) {
-    const filters = { date, status: { $in: [ACTIVE, CHECKED_OUT] } };
+    const filters: Record<string, any> = { date, status: { $in: [ACTIVE, CHECKED_OUT] } };
     if (clientDocId) filters.client = { documentId: { $eq: clientDocId } };
     return strapi.documents(BOOKING_UID).findMany({
-      filters,
+      filters: withoutInternal(filters),
       sort: 'startsAt:asc',
       fields: ['date', 'startsAt', 'endsAt', 'status', 'services', 'discount', 'clientNameRaw', 'employeeNameRaw', 'engineEmployeeId'],
       populate: { client: { fields: ['name', 'phone'] }, employee: { fields: ['name'] } },
@@ -849,7 +850,7 @@ export default {
 
     const [bookings, attempts, duty] = await Promise.all([
       strapi.documents(BOOKING_UID).findMany({
-        filters: { date: { $gte: from, $lte: end }, status: { $in: [ACTIVE, CHECKED_OUT] } },
+        filters: withoutInternal({ date: { $gte: from, $lte: end }, status: { $in: [ACTIVE, CHECKED_OUT] } }),
         sort: 'startsAt:asc',
         fields: ['date', 'startsAt', 'endsAt', 'status', 'services', 'discount', 'clientNameRaw', 'employeeNameRaw'],
         populate: { client: { fields: ['name'] }, employee: { fields: ['name'] } },

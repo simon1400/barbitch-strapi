@@ -71,6 +71,8 @@ export const reviewUrl = () => {
   return `https://search.google.com/local/writereview?placeid=${encodeURIComponent(placeId)}`;
 };
 
+import { withoutInternal } from '../../booking-engine/services/booking-kind';
+
 export default {
   // dry=true — собрать кандидатов БЕЗ отправки и БЕЗ записи в лог
   async run({ dry = false } = {}) {
@@ -86,7 +88,8 @@ export default {
     const windowFrom = shiftDays(today, -(DELAY_DAYS + WINDOW_DAYS - 1));
 
     const visits = await strapi.documents(BOOKING_UID).findMany({
-      filters: { status: 'checkedOut', date: { $gte: windowFrom, $lte: windowTo } },
+      // интерные визиты сотрудников отзывов не приносят и в счёт визитов не идут (s203)
+      filters: withoutInternal({ status: 'checkedOut', date: { $gte: windowFrom, $lte: windowTo } }),
       populate: {
         client: { fields: ['name', 'email', 'reminderOptOut', 'blacklisted'] },
         employee: { fields: ['name'] },

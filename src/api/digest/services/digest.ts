@@ -87,6 +87,8 @@ const subtractBusy = (
   return free;
 };
 
+import { withoutInternal } from '../../booking-engine/services/booking-kind';
+
 export default {
   async buildDigest(): Promise<string> {
     const today = pragueDateStr(0);
@@ -109,7 +111,8 @@ export default {
 
     const yearAgo = pragueDateStr(-365);
     const bookingsRaw = await strapi.documents('api::booking.booking').findMany({
-      filters: { date: { $gte: yearAgo, $lte: dayAfterWeekEnd } },
+      // интерные брони не клиенты: иначе сотрудник попадёт в «новые» и в VIP (s203)
+      filters: withoutInternal({ date: { $gte: yearAgo, $lte: dayAfterWeekEnd } }),
       fields: [
         'clientNameRaw',
         'noonaEmployeeId',

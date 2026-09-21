@@ -42,6 +42,8 @@ const shiftDays = (dateStr, days) => {
   return d.toISOString().slice(0, 10);
 };
 
+import { withoutInternal } from '../../booking-engine/services/booking-kind';
+
 export default {
   // dry=true — собрать кандидатов и ссылки БЕЗ отправки и БЕЗ записи в лог
   async run({ dry = false } = {}) {
@@ -51,7 +53,8 @@ export default {
     const windowFrom = shiftDays(today, -(DAYS_AFTER + WINDOW_DAYS - 1));
 
     const visits = await strapi.documents(BOOKING_UID).findMany({
-      filters: { status: 'checkedOut', date: { $gte: windowFrom, $lte: windowTo } },
+      // интерный визит сотрудника не делает его «клиентом, которого пора вернуть» (s203)
+      filters: withoutInternal({ status: 'checkedOut', date: { $gte: windowFrom, $lte: windowTo } }),
       populate: {
         client: { fields: ['name', 'email', 'reminderOptOut', 'blacklisted'] },
         employee: { fields: ['name'] },

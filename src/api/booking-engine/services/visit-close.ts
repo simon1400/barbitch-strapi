@@ -42,6 +42,8 @@ const BOOKING_FIELDS = [
   'discount',
   'clientNameRaw',
   'employeeNameRaw',
+  // интерная бронь (s203): предзаполняет галку «Interní» и обнуляет подсказку mustSalon
+  'internal',
 ];
 
 /** Пустая строка/пробелы → null (чтобы не писать «» в необязательные поля). */
@@ -120,6 +122,8 @@ export default {
       comment: rec.comment || '',
       verify: rec.verify || '',
       verifyFlags: Array.isArray(rec.verifyFlags) ? rec.verifyFlags : [],
+      // 💰 разница ручной цены (s203); null у записей до внедрения
+      manualDeltaKc: rec.manualDeltaKc == null ? null : Number(rec.manualDeltaKc),
       published: Boolean(published),
       personalName: rec.personal?.name || '',
       voucher: rec.voucher
@@ -157,17 +161,26 @@ export default {
     const published = rec ? await this._isPublished(rec.documentId) : false;
     const ratePercent = Number(booking.employee?.ratePercent) || 0;
     const redemptionKc = await this._redemptionKc(bookingDocId);
-    const { fullPrice, paidExpected, systemDiscountKc } = bookingPricing(booking, null, { redemptionKc });
+    const { fullPrice, paidExpected, systemDiscountKc, manualDeltaKc, catalogPrice } = bookingPricing(booking, null, { redemptionKc });
     const mustStaff = Math.round(fullPrice * (ratePercent / 100) * 100) / 100;
+    // Интерная услуга: салон себе не берёт ничего — подсказка mustSalon = 0.
+    // (В CM-хинте ServiceMoneyHint.tsx:161 так было всегда, а ручка drawer'а
+    // обнуления не делала — форма предлагала админу положить салону разницу.)
+    const isInternalBooking = booking.internal === true;
     return {
       checkout: this._shape(rec, published),
       hint: {
         fullPrice,
         paidExpected,
         systemDiscountKc,
+        manualDeltaKc,
+        catalogPrice,
         ratePercent,
         mustStaff,
-        mustSalon: Math.round((paidExpected - mustStaff) * 100) / 100,
+        mustSalon: isInternalBooking ? 0 : Math.round((paidExpected - mustStaff) * 100) / 100,
+        // предзаполнение галки «Interní (mistr mistrové)» в форме закрытия визита;
+        // админ может её снять — решение владельца §1а.5
+        internal: isInternalBooking,
       },
     };
   },
@@ -196,13 +209,17 @@ export default {
       redemptionKc,
     });
 
-    // 🎟 только при РУЧНОЙ скидке (hasManualSale, не flags.includes('sleva') —
-    // 🟦 теперь ставится и системными скидками, а те по определению «по программе»).
-    if (hasManualSale(sale) && process.env.LOYALTY_ENABLED === 'true') {
+    // 💰 ручная цена (s203): дельта хранится в записи, чтобы админка показывала сумму
+    // без пересчёта (redemptionKc в браузере недоступен).
+    const { manualDeltaKc } = bookingPricing(booking, sale, { redemptionKc });
+
+    // 🎟 при РУЧНОЙ скидке (поле sale) ИЛИ ручном занижении цены (не flags.includes('sleva') —
+    // 🟦 ставится и системными скидками, а те по определению «по программе»).
+    if ((hasManualSale(sale) || manualDeltaKc < 0) && process.env.LOYALTY_ENABLED === 'true') {
       const hasRebook = booking.discount?.type === 'rebook' && booking.discount?.applied;
       if (!hasRebook && redemptionKc <= 0) flags.push('sleva_bez_karty');
     }
-    return flags;
+    return { flags, manualDeltaKc };
   },
 
   /** Ваучер должен быть оплачен и ещё не реализован (тот же фильтр, что в relation-picker). */
@@ -260,9 +277,11 @@ export default {
     this._validateMoney(body);
     const voucherDocId = await this._resolveVoucher(body.voucherDocId);
 
-    const internal = body.internal === true;
+    // галка приходит из формы уже предзаполненной из брони (hint.internal), но
+    // последнее слово за админом: если в теле её нет вовсе — берём признак брони
+    const internal = 'internal' in body ? body.internal === true : booking.internal === true;
     const sale = orNull(body.sale);
-    const flags = await this._flagsFor(booking, {
+    const { flags, manualDeltaKc } = await this._flagsFor(booking, {
       staffSalaries: body.staffSalaries,
       salonSalaries: body.salonSalaries,
       sale,
@@ -292,6 +311,7 @@ export default {
         comment: orNull(body.comment),
         verifyFlags: flags,
         verify: dominantEmoji(flags),
+        manualDeltaKc,
       },
     });
 
@@ -300,6 +320,16 @@ export default {
       await strapi
         .service('api::booking-engine.booking-engine')
         .adminPatchBooking(bookingDocId, { status: 'checkedOut' }, session);
+    }
+
+    // Интерная услуга (s203): списание с зарплаты получателя выравниваем по ФАКТИЧЕСКИ
+    // введённой доле мастера — при создании брони сумма считалась от каталожной цены,
+    // а на закрытии админ мог ввести другую. Опубликованный черновик не трогается.
+    if (booking.internal === true) {
+      await strapi
+        .service('api::booking-engine.internal-payroll')
+        .syncDraft(bookingDocId, { sum: Math.round(parseMoney(body.staffSalaries) || 0) })
+        .catch((e) => strapi.log.error(`internal-payroll sync on checkout failed: ${e.message}`));
     }
 
     strapi.log.info(
@@ -334,7 +364,7 @@ export default {
       internal: 'internal' in body ? body.internal === true : Boolean(rec.internal),
     };
     this._validateMoney(merged);
-    const flags = await this._flagsFor(booking, merged);
+    const { flags, manualDeltaKc } = await this._flagsFor(booking, merged);
 
     const data: Record<string, unknown> = {
       staffSalaries: moneyStr(merged.staffSalaries),
@@ -343,6 +373,7 @@ export default {
       internal: merged.internal,
       verifyFlags: flags,
       verify: dominantEmoji(flags),
+      manualDeltaKc,
     };
     if ('tip' in body) data.tip = orNull(body.tip) ? moneyStr(body.tip) : null;
     if ('cash' in body) data.cash = body.cash !== false;
@@ -352,6 +383,14 @@ export default {
     }
 
     await strapi.documents(SP_UID).update({ documentId: spDocId, status: 'draft', data });
+
+    // правка суммы у интерного визита тянет за собой списание с зарплаты (s203)
+    if (booking.internal === true) {
+      await strapi
+        .service('api::booking-engine.internal-payroll')
+        .syncDraft(bookingDocId, { sum: Math.round(parseMoney(merged.staffSalaries) || 0) })
+        .catch((e) => strapi.log.error(`internal-payroll sync on checkout patch failed: ${e.message}`));
+    }
 
     strapi.log.info(
       `visit-close: admin ${session?.username || '?'} updated checkout ${spDocId} [${flags.join(',')}]`

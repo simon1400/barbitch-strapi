@@ -21,6 +21,7 @@ import {
 } from './slots-core';
 import { BUCKETS, classifyTitle, isExcludedOfferService, windowAfter } from './upsell-core';
 import { EngineError } from './booking-engine';
+import { withoutInternal } from './booking-kind';
 
 const BOOKING_UID = 'api::booking.booking';
 const SALON_SERVICE_UID = 'api::salon-service.salon-service';
@@ -85,11 +86,11 @@ export default {
     }
 
     const dayBookings = await strapi.documents(BOOKING_UID).findMany({
-      filters: {
+      filters: withoutInternal({
         date: base.date,
         status: 'active',
         client: { documentId: { $eq: base.client.documentId } },
-      },
+      }),
       fields: ['date', 'startsAt', 'endsAt', 'services', 'engineEmployeeId', 'discount', 'totalPrice'],
       populate: { employee: { fields: ['name'] } },
       limit: 50,

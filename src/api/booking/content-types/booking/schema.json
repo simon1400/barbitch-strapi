@@ -116,6 +116,15 @@
     },
     "isNewClient": {
       "type": "boolean"
+    },
+    "internal": {
+      "type": "boolean",
+      "default": false
+    },
+    "internalFor": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::personal.personal"
     }
   }
 }

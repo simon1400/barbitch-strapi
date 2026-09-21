@@ -929,6 +929,11 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     employeeNameRaw: Schema.Attribute.String;
     endsAt: Schema.Attribute.DateTime;
     engineEmployeeId: Schema.Attribute.String;
+    internal: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    internalFor: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::personal.personal'
+    >;
     isNewClient: Schema.Attribute.Boolean;
     label: Schema.Attribute.JSON;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
@@ -1807,6 +1812,12 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   pluginOptions: {
+    'content-manager': {
+      visible: false;
+    };
+    'content-type-builder': {
+      visible: false;
+    };
     i18n: {
       localized: true;
     };
@@ -1856,6 +1867,7 @@ export interface ApiPayrollPayroll extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    booking: Schema.Attribute.Relation<'manyToOne', 'api::booking.booking'>;
     comment: Schema.Attribute.Text;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -1869,6 +1881,7 @@ export interface ApiPayrollPayroll extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
+    source: Schema.Attribute.String;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -2218,7 +2231,7 @@ export interface ApiReviewRequestLogReviewRequestLog
   extends Struct.CollectionTypeSchema {
   collectionName: 'review_request_logs';
   info: {
-    description: 'Лог писем-просьб оставить отзыв на Google (через день после визита, только постоянным клиентам). Одна запись = одно отправленное письмо. Ключ дедупликации: clientDocId — повторно просим не раньше чем через REVIEW_REQUEST_COOLDOWN_DAYS (по умолчанию 365 дней).';
+    description: '\u041B\u043E\u0433 \u043F\u0438\u0441\u0435\u043C-\u043F\u0440\u043E\u0441\u044C\u0431 \u043E\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u043E\u0442\u0437\u044B\u0432 \u043D\u0430 Google (\u0447\u0435\u0440\u0435\u0437 \u0434\u0435\u043D\u044C \u043F\u043E\u0441\u043B\u0435 \u0432\u0438\u0437\u0438\u0442\u0430, \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0441\u0442\u043E\u044F\u043D\u043D\u044B\u043C \u043A\u043B\u0438\u0435\u043D\u0442\u0430\u043C). \u041E\u0434\u043D\u0430 \u0437\u0430\u043F\u0438\u0441\u044C = \u043E\u0434\u043D\u043E \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043D\u043E\u0435 \u043F\u0438\u0441\u044C\u043C\u043E. \u041A\u043B\u044E\u0447 \u0434\u0435\u0434\u0443\u043F\u043B\u0438\u043A\u0430\u0446\u0438\u0438: clientDocId \u2014 \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u043E \u043F\u0440\u043E\u0441\u0438\u043C \u043D\u0435 \u0440\u0430\u043D\u044C\u0448\u0435 \u0447\u0435\u043C \u0447\u0435\u0440\u0435\u0437 REVIEW_REQUEST_COOLDOWN_DAYS (\u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E 365 \u0434\u043D\u0435\u0439).';
     displayName: 'Review request logs';
     pluralName: 'review-request-logs';
     singularName: 'review-request-log';
@@ -2392,9 +2405,12 @@ export interface ApiSalonServiceSalonService
       'manyToMany',
       'api::personal.personal'
     >;
-    restrictions: Schema.Attribute.Component<'booking.service-restriction', true>;
     price: Schema.Attribute.Integer & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
+    restrictions: Schema.Attribute.Component<
+      'booking.service-restriction',
+      true
+    >;
     title: Schema.Attribute.String & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -2439,6 +2455,7 @@ export interface ApiServiceProvidedServiceProvided
       'api::service-provided.service-provided'
     > &
       Schema.Attribute.Private;
+    manualDeltaKc: Schema.Attribute.Integer;
     offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'>;
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'> &
       Schema.Attribute.Required;
@@ -2764,8 +2781,8 @@ export interface ApiUpsellAttemptUpsellAttempt
   extends Struct.CollectionTypeSchema {
   collectionName: 'upsell_attempts';
   info: {
-    description: 'Result of upsell offer per client per day';
-    displayName: 'Upsell attempt';
+    description: '\u0427\u0442\u043E \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043E\u0442\u043C\u0435\u0442\u0438\u043B \u043F\u043E \u043A\u043B\u0438\u0435\u043D\u0442\u0443, \u043A\u043E\u0442\u043E\u0440\u044B\u0439 \u0431\u044B\u043B \u0432 \u0441\u0430\u043B\u043E\u043D\u0435: \u043E\u0442\u043A\u0430\u0437 \u0438\u043B\u0438 \u043D\u0435 \u043F\u0440\u0435\u0434\u043B\u0430\u0433\u0430\u043B\u0438 (+ \u043F\u0440\u0438\u0447\u0438\u043D\u0430). \u041E\u0434\u043D\u0430 \u0437\u0430\u043F\u0438\u0441\u044C \u043D\u0430 \u043A\u043B\u0438\u0435\u043D\u0442\u0430 \u0432 \u0434\u0435\u043D\u044C. \u0414\u043E\u0437\u0430\u043F\u0438\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u043D\u043D\u0430\u044F \u2014 \u043D\u0435 \u0445\u0440\u0430\u043D\u0438\u0442\u0441\u044F \u0437\u0434\u0435\u0441\u044C, \u0431\u0435\u0440\u0451\u0442\u0441\u044F \u0438\u0437 \u0431\u0440\u043E\u043D\u0438.';
+    displayName: '\u0414\u043E\u0437\u0430\u043F\u0438\u0441\u0438: \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u044F';
     pluralName: 'upsell-attempts';
     singularName: 'upsell-attempt';
   };

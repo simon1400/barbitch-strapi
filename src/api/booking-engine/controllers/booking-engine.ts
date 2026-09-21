@@ -339,7 +339,11 @@ export default {
 
   // POST /api/engine/admin/bookings
   // {employee, date, time, services:[{service, variant?, modifiers?, priceOverride?}],
-  //  clientDocId? | client:{name, phone, email?}, priceOverride?, comment?, notify?}
+  //  clientDocId? | client:{name, phone, email?}, priceOverride?, comment?, notify?,
+  //  internal?, internalFor?}
+  // internal:true — «Interní rezervace» (s203): запись СОТРУДНИКА, время мастера не
+  // занимает; клиент не нужен и не создаётся, вместо него internalFor = documentId
+  // активного `personal` (кого обслуживают).
   async adminCreateBooking(ctx) {
     const session = requireAdmin(ctx);
     if (!session) return;
@@ -356,6 +360,8 @@ export default {
         priceOverride: b.priceOverride,
         comment: b.comment,
         notify: b.notify === true,
+        internal: b.internal === true,
+        internalFor: b.internalFor || null,
       })
     );
   },
