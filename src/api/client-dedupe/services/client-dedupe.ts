@@ -40,6 +40,28 @@ export class DedupeError extends Error {
   }
 }
 
+// ── причина блокировки (s208) ────────────────────────────────────────────
+// Чёрный список = обработка персональных данных (GDPR čl. 6/1 f): по запросу
+// клиента салон обязан назвать причину, поэтому без неё в blacklist не добавить.
+// Хранится в `blacklist_reason` строкой «<ключ>: <комментарий>» либо только ключом;
+// подписи ключей держит админка в своём словаре. Свободный текст без ключа (старые
+// записи и Content Manager) принимается как есть — он тоже причина.
+export const BLACKLIST_REASON_KEYS = ['noshow', 'late_cancel', 'behaviour', 'other'];
+const BLACKLIST_REASON_MAX = 500;
+
+export const normalizeBlacklistReason = (input) => {
+  const raw = String(input ?? '').trim();
+  if (!raw) throw new DedupeError(400, 'reason_required', 'Укажите причину блокировки');
+  const m = /^([a-z_]+)(?:\s*:\s*([\s\S]*))?$/.exec(raw);
+  if (m && BLACKLIST_REASON_KEYS.includes(m[1])) {
+    const comment = (m[2] || '').trim();
+    if (m[1] === 'other' && !comment)
+      throw new DedupeError(400, 'comment_required', 'Для «Другое» нужен комментарий');
+    return (comment ? `${m[1]}: ${comment}` : m[1]).slice(0, BLACKLIST_REASON_MAX);
+  }
+  return raw.slice(0, BLACKLIST_REASON_MAX);
+};
+
 const stripAccents = (s) =>
   String(s || '')
     .normalize('NFD')
@@ -464,6 +486,18 @@ export default {
     if ('notes' in patch) data.notes = str(patch.notes);
     if ('blacklisted' in patch) data.blacklisted = Boolean(patch.blacklisted);
     if ('blacklistReason' in patch) data.blacklist_reason = str(patch.blacklistReason);
+    // 🟥 Причина обязательна при добавлении в blacklist (переход false→true); у уже
+    // заблокированной карточки без причины (20 старых) пересохранение не ломается.
+    // Снятие флага стирает причину — иначе при повторной блокировке «прилипла» бы старая.
+    if (data.blacklisted === true && !row.blacklisted) {
+      data.blacklist_reason = normalizeBlacklistReason(
+        'blacklistReason' in patch ? patch.blacklistReason : row.blacklist_reason
+      );
+    } else if (data.blacklisted === true && 'blacklistReason' in patch) {
+      data.blacklist_reason = normalizeBlacklistReason(patch.blacklistReason);
+    } else if (data.blacklisted === false) {
+      data.blacklist_reason = null;
+    }
     if (Object.keys(data).length === 0) return { ok: true, renamedBookings: 0 };
     data.updated_at = new Date();
 
@@ -498,6 +532,7 @@ export default {
     }
     if ('blacklisted' in data && Boolean(data.blacklisted) !== Boolean(row.blacklisted)) {
       details.blacklist = data.blacklisted ? 'ano' : 'ne';
+      if (data.blacklisted && data.blacklist_reason) details['důvod'] = data.blacklist_reason;
     }
     // Число переписанных броней — приложение к правке, а не повод для записи:
     // пересохранение карточки без изменений имя в бронях всё равно перезапишет
@@ -534,21 +569,43 @@ export default {
     };
   },
 
-  /** одним махом выставить блэклист всей группе (закрывает обход блокировки через дубль) */
+  /**
+   * Выставить/снять блэклист одной карточке (шторка брони, модал «Hledat klienta»)
+   * или всей группе дублей (закрывает обход блокировки через дубль).
+   * Добавление — только с причиной (400 reason_required), снятие причину стирает.
+   */
   async setBlacklist({ docIds, blacklisted, reason, actorName }) {
     const ids = (docIds || []).filter(Boolean);
     if (!ids.length) throw new DedupeError(400, 'nothing_selected', 'Не выбраны карточки');
+    // причину проверяем ДО чтения базы: без неё запрос бессмыслен при любых карточках
+    const on = Boolean(blacklisted);
+    const cleanReason = on ? normalizeBlacklistReason(reason) : null;
     const rows = await this.rowsByDocIds(ids);
     if (!rows.length) throw new DedupeError(404, 'client_not_found', 'Карточки не найдены');
 
-    const patch = { blacklisted: Boolean(blacklisted), updated_at: new Date() };
-    if (blacklisted) {
-      const r = String(reason || '').trim();
-      if (r) patch.blacklist_reason = r;
-    }
+    const patch = { blacklisted: on, blacklist_reason: cleanReason, updated_at: new Date() };
     const n = await this.knex()('clients')
       .whereIn('id', rows.map((r) => r.id))
       .update(patch);
+
+    // Журнал календаря: кто и почему заблокировал — в том же окне, где правки
+    // контактов (s205). Пишем только по карточкам, у которых флаг реально сменился.
+    for (const r of rows.filter((x) => Boolean(x.blacklisted) !== on)) {
+      const details = { blacklist: on ? 'ano' : 'ne' };
+      if (on) details['důvod'] = cleanReason;
+      strapi
+        .service('api::calendar-log.calendar-log')
+        .write({
+          action: 'client_edit',
+          entityType: 'client',
+          actorName: actorName || '',
+          entityDocId: r.document_id,
+          clientName: r.name,
+          summary: `Úprava klienta: ${r.name} · ${on ? 'blacklist' : 'odebrán z blacklistu'}`,
+          details,
+        })
+        .catch((e) => strapi.log.error(`calendar-log blacklist failed: ${e.message}`));
+    }
 
     await this.log('blacklist', {
       groupKey: groupKeyOf(ids),

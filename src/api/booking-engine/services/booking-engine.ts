@@ -2372,7 +2372,7 @@ export default {
       filters: { date },
       sort: 'startsAt:asc',
       populate: {
-        client: { fields: ['name', 'email', 'phone', 'blacklisted'] },
+        client: { fields: ['name', 'email', 'phone', 'blacklisted', 'blacklistReason'] },
         // кого обслуживают по интерной брони — бейдж «🤝 Interní · pro: …» в шторке
         internalFor: { fields: ['name'] },
       },
@@ -2400,7 +2400,7 @@ export default {
     const rows = await strapi.documents(BOOKING_UID).findMany({
       filters: { date: { $gte: monday, $lte: sunday }, noonaEmployeeId: { $eq: empId } },
       sort: 'startsAt:asc',
-      populate: { client: { fields: ['name', 'email', 'phone', 'blacklisted'] } },
+      populate: { client: { fields: ['name', 'email', 'phone', 'blacklisted', 'blacklistReason'] } },
       pagination: { pageSize: 300 },
     });
     const list = Array.isArray(rows) ? rows : [];
