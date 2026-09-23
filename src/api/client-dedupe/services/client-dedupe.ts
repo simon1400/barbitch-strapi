@@ -18,6 +18,8 @@
  * Группа «надёжная» = связана e-mail'ом или телефоном; «вероятная» = только имя.
  */
 
+import { normalizePhone } from '../../booking-engine/services/booking-engine';
+
 const CLIENT_UID = 'api::client.client';
 const LOG_UID = 'api::client-merge-log.client-merge-log';
 
@@ -245,6 +247,33 @@ export default {
   },
 
   /**
+   * Чужие карточки с ТЕМ ЖЕ телефоном или e-mail (ключи сравнения те же, что у
+   * поиска дублей: последние 9 цифр номера / lowercase e-mail). Правку не
+   * блокирует — админ в календаре видит предупреждение, а слияние живёт в
+   * отдельном модуле «Дубли клиентов».
+   */
+  async contactConflicts(selfId, { phone, email }) {
+    const digits = String(phone || '').replace(/\D/g, '').slice(-9);
+    const mail = String(email || '').trim().toLowerCase();
+    if (digits.length < 9 && !mail) return [];
+    const rows = await this.knex()('clients')
+      .whereNot('id', selfId)
+      .where((q) => {
+        if (digits.length === 9)
+          q.orWhereRaw("right(regexp_replace(coalesce(phone, ''), '\\D', '', 'g'), 9) = ?", [digits]);
+        if (mail) q.orWhereRaw("lower(trim(coalesce(email, ''))) = ?", [mail]);
+      })
+      .select('document_id', 'name', 'phone', 'email')
+      .limit(5);
+    return rows.map((r) => ({
+      documentId: r.document_id,
+      name: r.name,
+      phone: r.phone || null,
+      email: r.email || null,
+    }));
+  },
+
+  /**
    * Слияние: все связи дублей переезжают на primary, скаляры домерживаются,
    * дубли удаляются. Необратимо — снимок удалённых карточек уходит в лог.
    */
@@ -412,7 +441,20 @@ export default {
       if (!n) throw new DedupeError(400, 'name_required', 'Имя не может быть пустым');
       data.name = n;
     }
-    if ('phone' in patch) data.phone = str(patch.phone);
+    if ('phone' in patch) {
+      const p = str(patch.phone);
+      // 🟥 Телефон храним КАНОНИЧЕСКИ (+420…): движок ищет карточку клиента точным
+      // совпадением (findOrCreateClient → filters.phone = normalizePhone), поэтому
+      // сохранённое «606 878 910» перестало бы находиться и следующая бронь с сайта
+      // завела бы второй карточку того же человека.
+      if (!p) data.phone = null;
+      else {
+        const norm = normalizePhone(p);
+        if (norm.replace(/\D/g, '').length < 9)
+          throw new DedupeError(400, 'bad_phone', 'Некорректный телефон');
+        data.phone = norm;
+      }
+    }
     if ('email' in patch) {
       const e = str(patch.email);
       if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
@@ -445,7 +487,51 @@ export default {
       details: { patch: data, before: { name: row.name, email: row.email, phone: row.phone, blacklisted: Boolean(row.blacklisted) }, renamedBookings: renamed },
     });
 
-    return { ok: true, renamedBookings: renamed };
+    // Журнал календаря: правка контактов доступна администраторам прямо из модала
+    // «Hledat klienta», поэтому владелец должен видеть её там же, где переносы и
+    // отмены броней. Fire-and-forget — сбой лога не отменяет уже применённую правку.
+    const fmtVal = (v) => (v === null || v === undefined || v === '' ? '—' : String(v));
+    const FIELD_LABELS = { name: 'jméno', phone: 'telefon', email: 'e-mail' };
+    const details = {};
+    for (const [key, label] of Object.entries(FIELD_LABELS)) {
+      if (key in data && data[key] !== row[key]) details[label] = `${fmtVal(row[key])} → ${fmtVal(data[key])}`;
+    }
+    if ('blacklisted' in data && Boolean(data.blacklisted) !== Boolean(row.blacklisted)) {
+      details.blacklist = data.blacklisted ? 'ano' : 'ne';
+    }
+    // Число переписанных броней — приложение к правке, а не повод для записи:
+    // пересохранение карточки без изменений имя в бронях всё равно перезапишет
+    // (idempotent), и журнал засоряться этим не должен.
+    const changed = Object.keys(details);
+    if (changed.length && renamed) details['rezervace přepsány'] = renamed;
+    if (changed.length) {
+      strapi
+        .service('api::calendar-log.calendar-log')
+        .write({
+          action: 'client_edit',
+          entityType: 'client',
+          actorName: actorName || '',
+          entityDocId: docId,
+          clientName: data.name || row.name,
+          summary: `Úprava klienta: ${data.name || row.name} · ${changed.join(', ')}`,
+          details,
+        })
+        .catch((e) => strapi.log.error(`calendar-log client-edit failed: ${e.message}`));
+    }
+
+    const duplicates = await this.contactConflicts(row.id, {
+      phone: 'phone' in data && data.phone !== row.phone ? data.phone : null,
+      email: 'email' in data && data.email !== row.email ? data.email : null,
+    });
+
+    // phone возвращаем в том виде, в каком он лёг в базу (нормализованный) —
+    // админка показывает сохранённое значение, а не то, что набрали руками
+    return {
+      ok: true,
+      renamedBookings: renamed,
+      phone: 'phone' in data ? data.phone : row.phone || null,
+      duplicates,
+    };
   },
 
   /** одним махом выставить блэклист всей группе (закрывает обход блокировки через дубль) */
