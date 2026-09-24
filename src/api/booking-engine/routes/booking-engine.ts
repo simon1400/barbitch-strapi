@@ -59,6 +59,8 @@ export default {
     admin('POST', '/engine/admin/bookings/:id/checkout', 'booking-engine.adminCheckoutCreate'),
     admin('PATCH', '/engine/admin/checkout/:id', 'booking-engine.adminCheckoutPatch'),
     admin('DELETE', '/engine/admin/checkout/:id', 'booking-engine.adminCheckoutDelete'),
+    // бесплатная коррекция (s210): визиты клиента для селекта «Korekce po návštěvě»
+    admin('GET', '/engine/admin/bookings/:id/korekce-candidates', 'booking-engine.adminKorekceCandidates'),
     // лояльность bitchcard в календаре: награды клиента брони + применить/снять скидку по коду
     admin('GET', '/engine/admin/bookings/:id/redemptions', 'booking-engine.adminBookingRedemptions'),
     admin('POST', '/engine/admin/bookings/:id/redemption', 'booking-engine.adminApplyRedemption'),

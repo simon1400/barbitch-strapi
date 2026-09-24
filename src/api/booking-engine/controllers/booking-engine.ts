@@ -411,6 +411,14 @@ export default {
     await handle(ctx, () => visitCloseSvc().remove(ctx.params.id, session));
   },
 
+  // GET /api/engine/admin/bookings/:id/korekce-candidates — визиты того же клиента за
+  // 14 дней до брони-коррекции (s210). Владелец + администраторы; мастеру закрыто.
+  async adminKorekceCandidates(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => strapi.service('api::booking-engine.korekce-transfer').candidates(ctx.params.id));
+  },
+
   // ── лояльность bitchcard в календаре (walk-in флоу, К4) ──
 
   // GET /api/engine/admin/bookings/:id/redemptions — награды клиента брони:

@@ -935,6 +935,8 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
       'api::personal.personal'
     >;
     isNewClient: Schema.Attribute.Boolean;
+    korekce: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    korekceOf: Schema.Attribute.Relation<'manyToOne', 'api::booking.booking'>;
     label: Schema.Attribute.JSON;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
@@ -2449,6 +2451,10 @@ export interface ApiServiceProvidedServiceProvided
       Schema.Attribute.Private;
     date: Schema.Attribute.Date & Schema.Attribute.Required;
     internal: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    korekce: Schema.Attribute.JSON;
+    korekceBaseUsedKc: Schema.Attribute.Decimal;
+    korekceSalonAdjKc: Schema.Attribute.Decimal;
+    korekceStaffOutKc: Schema.Attribute.Decimal;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',

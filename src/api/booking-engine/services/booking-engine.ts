@@ -77,6 +77,17 @@ const fmtDay = (d) => {
 };
 const blokPluralCs = (n) => (n === 1 ? 'blok' : n >= 2 && n <= 4 ? 'bloky' : 'bloků');
 
+// Исходный визит бесплатной коррекции (s210) в ответе календаря: поля для карточки
+// «Korekce po návštěvě». Мастеру — без денег (визит может быть чужим).
+const KOREKCE_OF_FIELDS = ['date', 'startsAt', 'employeeNameRaw', 'services', 'totalPrice', 'status'];
+const korekceOfForMaster = (k) => ({
+  documentId: k.documentId,
+  date: k.date,
+  startsAt: k.startsAt,
+  employeeNameRaw: k.employeeNameRaw,
+  status: k.status,
+});
+
 // Названия услуг брони одной строкой «A + B» — для журнала действий.
 // Снапшот приходит и массивом (документ Strapi, json-поле), и строкой (наш upd.services).
 const svcTitlesOf = (raw) => {
@@ -658,9 +669,21 @@ export default {
   // категории — к ЛЮБОМУ мастеру (гарантия салона). Клиента ищем как isNewClientRaw:
   // по id, телефону или e-mail (дубли карточек). Платный вариант (150 Kč) и брони
   // из админки гейт не проходят. Иначе 409 korekce_no_visit → сайт: «zavolejte».
+  // Возвращает documentId ПОСЛЕДНЕГО квалифицирующего визита — к нему бронь коррекции
+  // привязывается (s210: перенос доли мастера). undefined — бронь не бесплатная коррекция.
   async assertFreeKorekceAllowed(hold, client) {
+    const r = await this._qualifyingKorekceVisit(hold, client);
+    if (!r.applies) return undefined;
+    if (r.docId) return r.docId;
+    throw new EngineError(409, 'korekce_no_visit', 'Bezplatnou korekci lze rezervovat jen do 5 dnů po návštěvě');
+  },
+
+  // Общее правило гейта для сайта и календаря: { applies — это бесплатная коррекция,
+  // docId — последний визит той же категории за 5 дней (или null) }.
+  async _qualifyingKorekceVisit(hold, client) {
     const item = Array.isArray(hold.services) ? hold.services[0] : null;
-    if (!isFreeKorekceItem(item, hold.totalPrice)) return;
+    if (!isFreeKorekceItem(item, hold.totalPrice)) return { applies: false, docId: null };
+    if (!client) return { applies: true, docId: null };
 
     const svc = item.serviceDocId
       ? await strapi.documents(SALON_SERVICE_UID).findOne({ documentId: item.serviceDocId, fields: ['title', 'category'] })
@@ -682,14 +705,17 @@ export default {
       })
       .where('b.date', '>=', korekceWindowStart(String(hold.date)))
       .select(
+        'b.document_id as documentId',
         'b.status',
         'b.starts_at as startsAt',
         knex.raw("coalesce(s.title, b.services->0->>'base', b.services->0->>'title') as \"serviceTitle\""),
         's.category as serviceCategory',
       );
     const now = Date.now();
-    if (rows.some((r) => isQualifyingVisit(r, bucket, now))) return;
-    throw new EngineError(409, 'korekce_no_visit', 'Bezplatnou korekci lze rezervovat jen do 5 dnů po návštěvě');
+    const hits = rows
+      .filter((r) => isQualifyingVisit(r, bucket, now))
+      .sort((a, z) => new Date(z.startsAt).getTime() - new Date(a.startsAt).getTime());
+    return { applies: true, docId: hits[0]?.documentId || null };
   },
 
   async findOrCreateClient({ name, phone, email }) {
@@ -788,6 +814,8 @@ export default {
         // интерная бронь (Interní rezervace, s203): время мастера НЕ занимает —
         // см. booking-kind.ts, фильтр занятости и предикат DB EXCLUDE
         internal: Boolean(data.internal),
+        // бесплатная коррекция (s210): перенос доли мастера с исходного визита
+        korekce: Boolean(data.korekce),
         created_at: now,
         updated_at: now,
         published_at: now,
@@ -818,6 +846,13 @@ export default {
         await trx(jt.table).insert({ [jt.sourceCol]: bookingId, [jt.targetCol]: r.id });
       }
     }
+    // исходный визит бесплатной коррекции (s210) — бронь не D&P, одна строка связи
+    if (data.korekce && data.korekceOfDocId) {
+      const jt = joinTableOf(BOOKING_UID, 'korekceOf');
+      if (!jt) throw new Error('korekceOf join table not found in strapi metadata');
+      const [target] = await trx('bookings').select('id').where('document_id', data.korekceOfDocId);
+      if (target) await trx(jt.table).insert({ [jt.sourceCol]: bookingId, [jt.targetCol]: target.id });
+    }
     return bookingId;
   },
 
@@ -833,8 +868,9 @@ export default {
     const client = await this.findOrCreateClient({ name, phone, email });
     // серверный блэклист — дыра s94 закрывается по построению
     if (client.blacklisted) throw new EngineError(403, 'blacklisted', 'Rezervaci nelze vytvořit');
-    // бесплатная коррекция — только после визита за последние 5 дней (s203)
-    await this.assertFreeKorekceAllowed(hold, client);
+    // бесплатная коррекция — только после визита за последние 5 дней (s203);
+    // найденный визит становится исходным для переноса доли мастера (s210)
+    const korekceOfDocId = await this.assertFreeKorekceAllowed(hold, client);
 
     const knex = strapi.db.connection;
     const clientRow = (await knex('clients').select('id').where('document_id', client.documentId))[0];
@@ -860,6 +896,8 @@ export default {
             cancelToken,
             employeeDocId: hold.employeeDocId,
             attribution: sanitizeAttribution(attribution),
+            korekce: korekceOfDocId != null,
+            korekceOfDocId,
           },
         });
         await trx('slot_holds').where('document_id', hold.documentId).del();
@@ -964,6 +1002,13 @@ export default {
     if (!isInternal && !clientDoc) throw new EngineError(404, 'client_not_found', 'Клиент не найден');
     const bookingName = isInternal ? recipient.name : clientDoc.name;
 
+    // Бесплатная «Korekce do 5 dnů» из календаря (s210): признак коррекции ставится
+    // сразу, исходный визит подставляется тем же правилом, что у гейта сайта
+    // (без визита бронь всё равно создаётся — админ выберет визит в шторке).
+    const korekceVisit = isInternal
+      ? { applies: false, docId: null }
+      : await this._qualifyingKorekceVisit({ services: snapshot, totalPrice, date }, clientDoc);
+
     const knex = strapi.db.connection;
     const clientRow = isInternal
       ? null
@@ -997,6 +1042,8 @@ export default {
             overlapAllowed: isInternal ? true : overlapAllowed,
             internal: isInternal,
             internalForRowList,
+            korekce: korekceVisit.applies,
+            korekceOfDocId: korekceVisit.docId,
           },
         });
       });
@@ -1146,10 +1193,45 @@ export default {
     return null;
   },
 
+  // Признак «Korekce» и исходный визит из шторки (s210). Менять можно, только пока
+  // визит не закрыт записью: иначе перенос уже посчитан/применён. Новый исходный
+  // визит обязан быть из списка кандидатов (тот же клиент, 14 дней, не отменён,
+  // не коррекция, раньше этой брони) — один источник правды с селектом.
+  async _resolveKorekcePatch(booking, patch) {
+    const rec = await strapi.service('api::booking-engine.visit-close')._findByBooking(booking.documentId);
+    if (rec) throw new EngineError(409, 'korekce_locked', 'Nejdřív zrušte uzavření návštěvy');
+    if (booking.internal === true) {
+      throw new EngineError(400, 'korekce_internal', 'Interní rezervace nemůže být korekcí');
+    }
+    const korekce = 'korekce' in patch ? patch.korekce === true : booking.korekce === true;
+    const current = booking.korekceOf?.documentId || null;
+    const target = korekce ? ('korekceOf' in patch ? patch.korekceOf || null : current) : null;
+    let targetRowId = null;
+    let targetInfo = null;
+    if (target) {
+      if (target !== current) {
+        const { items } = await strapi.service('api::booking-engine.korekce-transfer').candidates(booking.documentId);
+        targetInfo = items.find((i) => i.documentId === target) || null;
+        if (!targetInfo) {
+          throw new EngineError(400, 'korekce_bad_target', 'Vyberte návštěvu klientky ze seznamu (posledních 14 dní)');
+        }
+      }
+      const [row] = await strapi.db.connection('bookings').select('id').where('document_id', target);
+      targetRowId = row?.id || null;
+    }
+    return {
+      korekce,
+      targetDocId: target,
+      targetRowId,
+      targetInfo,
+      changed: korekce !== (booking.korekce === true) || target !== current,
+    };
+  },
+
   async adminPatchBooking(bookingDocId, patch, session) {
     const booking = await strapi.documents(BOOKING_UID).findOne({
       documentId: bookingDocId,
-      populate: { employee: { fields: ['documentId', 'name'] } },
+      populate: { employee: { fields: ['documentId', 'name'] }, korekceOf: { fields: ['date'] } },
     });
     if (!booking) throw new EngineError(404, 'booking_not_found', 'Бронь не найдена');
 
@@ -1331,6 +1413,13 @@ export default {
     // от него зависит судьба скидки за дозапись, см. блок после транзакции
     const movedToAnotherDay = moving && upd.date != null && String(upd.date) !== String(booking.date);
 
+    // признак «Korekce» и исходный визит (s210)
+    let korekceLink = null;
+    if ('korekce' in patch || 'korekceOf' in patch) {
+      korekceLink = await this._resolveKorekcePatch(booking, patch);
+      upd.korekce = korekceLink.korekce;
+    }
+
     const bookingRow = (await knex('bookings').select('id').where('document_id', bookingDocId))[0];
     try {
       await knex.transaction(async (trx) => {
@@ -1346,6 +1435,14 @@ export default {
           await trx('bookings_employee_lnk').where('booking_id', bookingRow.id).del();
           for (const p of newPersonalRows) {
             await trx('bookings_employee_lnk').insert({ booking_id: bookingRow.id, personal_id: p.id });
+          }
+        }
+        if (korekceLink) {
+          const jt = joinTableOf(BOOKING_UID, 'korekceOf');
+          if (!jt) throw new Error('korekceOf join table not found in strapi metadata');
+          await trx(jt.table).where(jt.sourceCol, bookingRow.id).del();
+          if (korekceLink.targetRowId) {
+            await trx(jt.table).insert({ [jt.sourceCol]: bookingRow.id, [jt.targetCol]: korekceLink.targetRowId });
           }
         }
       });
@@ -1563,9 +1660,44 @@ export default {
       }
     }
 
+    // журнал: признак коррекции / исходный визит (s210), отдельной записью
+    if (korekceLink?.changed) {
+      const cn = booking.clientNameRaw || '';
+      const day = fmtDay(String(booking.date));
+      const ti = korekceLink.targetInfo;
+      const tDay = ti ? fmtDay(ti.date) : booking.korekceOf?.date ? fmtDay(String(booking.korekceOf.date)) : null;
+      strapi
+        .service('api::calendar-log.calendar-log')
+        .write({
+          action: 'korekce_link',
+          entityType: 'korekce',
+          actorName: session?.username || '',
+          entityDocId: bookingDocId,
+          clientName: cn,
+          employeeName: booking.employee?.name || booking.employeeNameRaw || '',
+          summary: !korekceLink.korekce
+            ? `Korekce zrušena: ${cn} · ${day}`
+            : korekceLink.targetDocId
+              ? `Korekce: ${cn} · ${day} po návštěvě ${tDay || '—'}${ti?.master ? ` (${ti.master})` : ''}`
+              : `Korekce: ${cn} · ${day} — bez původní návštěvy`,
+          details: {
+            korekce: korekceLink.korekce ? 'ano' : 'ne',
+            'původní návštěva': ti ? `${fmtDay(ti.date)} · ${ti.master || '—'} · ${ti.services || '—'}` : tDay || '—',
+          },
+        })
+        .catch((e) => strapi.log.error(`calendar-log korekce_link failed: ${e.message}`));
+    }
+
     // + repricing: итог пересчёта цены при смене мастера (null — мастера не меняли),
     // календарь показывает по нему подсказку «Cena přepočítána …»
-    const fresh = await strapi.documents(BOOKING_UID).findOne({ documentId: bookingDocId, populate: { employee: { fields: ['name'] }, client: { fields: ['name', 'phone'] } } });
+    const fresh = await strapi.documents(BOOKING_UID).findOne({
+      documentId: bookingDocId,
+      populate: {
+        employee: { fields: ['name'] },
+        client: { fields: ['name', 'phone'] },
+        korekceOf: { fields: KOREKCE_OF_FIELDS },
+      },
+    });
     return { ...fresh, repricing, discountReprice };
   },
 
@@ -2355,7 +2487,8 @@ export default {
   //   деньги и снапшот цен — только по СВОИМ броням.
   _scopeBookingForMaster(b, ownNoonaId) {
     const own = !!ownNoonaId && b.noonaEmployeeId === ownNoonaId;
-    const out = { ...b, client: undefined };
+    // исходный визит коррекции (s210) мастеру — без денег: это чужой визит
+    const out = { ...b, client: undefined, ...(b.korekceOf ? { korekceOf: korekceOfForMaster(b.korekceOf) } : {}) };
     if (own) return out;
     const services = Array.isArray(b.services)
       ? b.services.map((it) => {
@@ -2375,6 +2508,8 @@ export default {
         client: { fields: ['name', 'email', 'phone', 'blacklisted', 'blacklistReason'] },
         // кого обслуживают по интерной брони — бейдж «🤝 Interní · pro: …» в шторке
         internalFor: { fields: ['name'] },
+        // исходный визит бесплатной коррекции — карточка «Korekce po návštěvě» (s210)
+        korekceOf: { fields: KOREKCE_OF_FIELDS },
       },
       pagination: { pageSize: 200 },
     });
@@ -2400,14 +2535,21 @@ export default {
     const rows = await strapi.documents(BOOKING_UID).findMany({
       filters: { date: { $gte: monday, $lte: sunday }, noonaEmployeeId: { $eq: empId } },
       sort: 'startsAt:asc',
-      populate: { client: { fields: ['name', 'email', 'phone', 'blacklisted', 'blacklistReason'] } },
+      populate: {
+        client: { fields: ['name', 'email', 'phone', 'blacklisted', 'blacklistReason'] },
+        korekceOf: { fields: KOREKCE_OF_FIELDS },
+      },
       pagination: { pageSize: 300 },
     });
     const list = Array.isArray(rows) ? rows : [];
     const kc = await this._redemptionKcByBooking(list.map((b) => b.documentId).filter(Boolean));
     const withKc = list.map((b) => (kc[b.documentId] ? { ...b, redemptionKc: kc[b.documentId] } : b));
     if (session?.role !== 'master') return withKc;
-    return withKc.map((b) => ({ ...b, client: undefined }));
+    return withKc.map((b) => ({
+      ...b,
+      client: undefined,
+      ...(b.korekceOf ? { korekceOf: korekceOfForMaster(b.korekceOf) } : {}),
+    }));
   },
 
   // История визитов клиента для drawer. Мастеру — только его собственные визиты

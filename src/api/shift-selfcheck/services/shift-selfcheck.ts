@@ -106,7 +106,7 @@ const computeMustValues = (
   return { mustStaff, mustSalonNow: pricing.paidExpected - mustStaff };
 };
 
-type VerifyFlag = 'ok' | 'sleva' | 'ztrata' | 'salon_up' | 'mistr_up' | 'mistr_down' | 'internal' | 'cena_rucne';
+type VerifyFlag = 'ok' | 'sleva' | 'ztrata' | 'salon_up' | 'mistr_up' | 'mistr_down' | 'internal' | 'cena_rucne' | 'korekce';
 
 // Проблемные флаги, которые админу нужно проверить (без ok/sleva/internal).
 const PROBLEM_FLAGS: VerifyFlag[] = ['ztrata', 'salon_up', 'mistr_up', 'mistr_down', 'cena_rucne'];
@@ -120,6 +120,41 @@ const FLAG_META: Record<VerifyFlag, { emoji: string; label: string }> = {
   mistr_down: { emoji: '🟨', label: 'Mistr dostal míň' },
   internal: { emoji: '🤝', label: 'Interní služba' },
   cena_rucne: { emoji: '💰', label: 'Cena změněna ručně' },
+  korekce: { emoji: '🔁', label: 'Korekce – převod podílu' },
+};
+
+// Перенос доли при бесплатной коррекции (s210) — зеркало korekceFlagInput из
+// utils/verify-flags.ts (файл без импортов). Запись коррекции: норма мастера =
+// staffInKc, салона 0. Исходная: норма мастера − staffOutKc, салона + salonAdjKc.
+const korekceOf = (item: any): { staffInKc: number | null; staffOutKc: number; salonAdjKc: number } | null => {
+  let j = item?.korekce;
+  if (typeof j === 'string') {
+    try {
+      j = JSON.parse(j);
+    } catch {
+      j = null;
+    }
+  }
+  const correction = !!j && typeof j === 'object' && ['record', 'payroll', 'same_master'].includes(String(j.mode));
+  const staffOutKc = toNum(item?.korekceStaffOutKc);
+  const salonAdjKc = toNum(item?.korekceSalonAdjKc);
+  if (!correction && !staffOutKc && !salonAdjKc) return null;
+  return {
+    staffInKc: correction ? (j.mode === 'same_master' ? 0 : toNum(j.staffInKc)) : null,
+    staffOutKc,
+    salonAdjKc,
+  };
+};
+
+// Нормы записи с учётом переноса: сколько должен получить мастер и салон.
+const mustWithKorekce = (item: any, pricing: { fullPrice: number; paidExpected: number }, ratePercent: number) => {
+  const k = korekceOf(item);
+  const correction = k?.staffInKc != null;
+  const base = correction ? (k!.staffInKc as number) : pricing.fullPrice * (ratePercent / 100);
+  return {
+    mustStaff: base - (k?.staffOutKc || 0),
+    mustSalonNow: (correction ? 0 : pricing.paidExpected - base) + (k?.salonAdjKc || 0),
+  };
 };
 
 const computeFlags = (
@@ -164,13 +199,28 @@ const flagsOf = (item: any, redemptionKc = 0): VerifyFlag[] => {
   const pricing = pricingOf(item, redemptionKc);
   const ratePercent = Number(item?.personal?.ratePercent);
   if (pricing && Number.isFinite(ratePercent)) {
-    return computeFlags(
+    const flags = computeFlags(
       pricing,
       ratePercent,
       toNum(item?.staffSalaries),
       toNum(item?.salonSalaries),
       Boolean(item?.internal),
     );
+    // запись с переносом без сохранённых флагов — редкость (движок пишет их сам);
+    // тогда считаем от норм с переносом, без 🟦/💰 у записи коррекции
+    if (korekceOf(item)) {
+      const { mustStaff, mustSalonNow } = mustWithKorekce(item, pricing, ratePercent);
+      const s = r2(toNum(item?.staffSalaries));
+      const sl = r2(toNum(item?.salonSalaries));
+      const f: VerifyFlag[] = Boolean(item?.internal) ? ['internal'] : [];
+      if (s > r2(mustStaff)) f.push('mistr_up');
+      if (s < r2(mustStaff)) f.push('mistr_down');
+      if (!item?.internal && sl > r2(mustSalonNow)) f.push('salon_up');
+      if (!item?.internal && sl < r2(mustSalonNow)) f.push('ztrata');
+      f.push('korekce');
+      return f;
+    }
+    return flags;
   }
   return [];
 };
@@ -360,7 +410,18 @@ export default {
           // записи чекаута из календаря (D2): услуга/цена живут в брони, оффера нет
           booking: { fields: ['services', 'totalPrice', 'priceOverride', 'discount'] },
         },
-        fields: ['clientName', 'staffSalaries', 'salonSalaries', 'sale', 'internal', 'verifyFlags'],
+        fields: [
+          'clientName',
+          'staffSalaries',
+          'salonSalaries',
+          'sale',
+          'internal',
+          'verifyFlags',
+          // перенос доли при бесплатной коррекции (s210)
+          'korekce',
+          'korekceStaffOutKc',
+          'korekceSalonAdjKc',
+        ],
         pagination: { pageSize: 200 },
       }),
       strapi.documents(CASH_UID).count({ filters: { date }, status: 'draft' }),
@@ -411,7 +472,14 @@ export default {
       const pricing = pricingOf(s, kcOf(s));
       if (!pricing) continue;
       const recorded = toNum(s?.staffSalaries) + toNum(s?.salonSalaries);
-      rozdil += recorded - pricing.paidExpected;
+      // Перенос доли (s210): у записи коррекции ожидается ровно доля исправителя,
+      // у исходной — оплата минус ушедшее (staffOut − salonAdj). Иначе день коррекции
+      // показывал бы «+доля», а день исходного визита — ложную недостачу.
+      const k = korekceOf(s);
+      const expected = k
+        ? (k.staffInKc != null ? k.staffInKc : pricing.paidExpected) - k.staffOutKc + k.salonAdjKc
+        : pricing.paidExpected;
+      rozdil += recorded - expected;
     }
     rozdil = Math.round(rozdil);
     // Правило отображения: только недостача (минус) — проблема.
@@ -434,7 +502,9 @@ export default {
       let staffDelta: number | null = null;
       let salonDelta: number | null = null;
       if (pricing && Number.isFinite(ratePercent)) {
-        const { mustStaff, mustSalonNow } = computeMustValues(pricing, ratePercent);
+        const { mustStaff, mustSalonNow } = korekceOf(s)
+          ? mustWithKorekce(s, pricing, ratePercent)
+          : computeMustValues(pricing, ratePercent);
         staffDelta = r2(toNum(s?.staffSalaries) - mustStaff);
         salonDelta = r2(toNum(s?.salonSalaries) - mustSalonNow);
       }

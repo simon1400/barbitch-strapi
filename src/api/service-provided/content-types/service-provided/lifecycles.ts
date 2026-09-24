@@ -16,6 +16,7 @@ import {
   computeOfferFlags,
   dominantEmoji,
   hasManualSale,
+  korekceFlagInput,
   parseMoney,
   type VerifyFlag,
 } from '../../../../utils/verify-flags';
@@ -101,12 +102,23 @@ async function validateOfferMoney(event: any) {
       }
     }
 
+    // Перенос доли при бесплатной коррекции (s210): json записи коррекции и
+    // аккумуляторы исходной. Без них пересохранение исходной записи в CM вернуло бы
+    // ложный 🟨↓ (доля мастера ушла исправителю), а записи коррекции — 🟨↑.
+    const korekce = korekceFlagInput({
+      korekce: pick('korekce'),
+      korekceStaffOutKc: pick('korekceStaffOutKc'),
+      korekceSalonAdjKc: pick('korekceSalonAdjKc'),
+    })
+    const isCorrection = korekce?.staffInKc != null
+
     // Бронь выигрывает у оффера: у booking-linked записи оффер — легаси-поле
     const flags: VerifyFlag[] = booking
-      ? computeBookingFlags({ booking, ratePercent, staffSalaries, salonSalaries, sale: saleRaw, internal, redemptionKc })
-      : computeOfferFlags(Number(offer.price), ratePercent, staffSalaries, salonSalaries, saleRaw, internal)
-    // 💰 разница ручной цены (s203) — хранится в записи; у legacy-пути (оффер) её нет
-    const manualDeltaKc = booking ? bookingPricing(booking, saleRaw, { redemptionKc }).manualDeltaKc : null
+      ? computeBookingFlags({ booking, ratePercent, staffSalaries, salonSalaries, sale: saleRaw, internal, redemptionKc, korekce })
+      : computeOfferFlags(Number(offer.price), ratePercent, staffSalaries, salonSalaries, saleRaw, internal, korekce)
+    // 💰 разница ручной цены (s203) — хранится в записи; у legacy-пути (оффер) её нет.
+    // У записи бесплатной коррекции 0 Kč — правило, не ручная цена (как в visit-close).
+    const manualDeltaKc = booking ? (isCorrection ? 0 : bookingPricing(booking, saleRaw, { redemptionKc }).manualDeltaKc) : null
 
     // K4 informational flag: sale present, but no used bitchcard redemption on the
     // client's bookings of that day → the discount was given outside the program.
@@ -115,7 +127,7 @@ async function validateOfferMoney(event: any) {
     // redemptions used с usedInBookingDocId среди них.
     // Гейт по РУЧНОЙ скидке, не по флагу 🟦: sleva теперь ставится и системными
     // скидками booking-пути (bitchcard/rebook), а они «по программе» — 🎟 не про них.
-    if ((hasManualSale(saleRaw) || (manualDeltaKc != null && manualDeltaKc < 0)) && process.env.LOYALTY_ENABLED === 'true') {
+    if (!isCorrection && (hasManualSale(saleRaw) || (manualDeltaKc != null && manualDeltaKc < 0)) && process.env.LOYALTY_ENABLED === 'true') {
       try {
         let hasRedemption = false
         if (booking?.documentId) {

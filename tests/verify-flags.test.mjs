@@ -128,6 +128,86 @@ test('computeOfferFlags (легаси-путь) не тронут: те же ф�
   assert.deepEqual(vf.computeOfferFlags(1000, 30, 350, 700, null, false), ['mistr_up']);
 });
 
+// ── s210: перенос доли при бесплатной коррекции ─────────────────────────────
+// Прод-случай Kratochvílové: 20.09 Yana 30 % 1440 Kč → коррекция 23.09 у Zlaty 40 %.
+const ORIG = { services: snap(1440), totalPrice: '1440.00', priceOverride: false, discount: null };
+const KOR = { services: snap(1100), totalPrice: '0.00', priceOverride: true, discount: null };
+const OUT = { korekceStaffOutKc: '432.00', korekceSalonAdjKc: '-144.00' };
+const JSON_IN = { mode: 'record', staffInKc: 576, baseKc: 1440 };
+
+test('korekceFlagInput: нет переноса → null; аккумуляторы и json читаются, json-строка тоже', () => {
+  assert.equal(vf.korekceFlagInput({}), null);
+  assert.equal(vf.korekceFlagInput(null), null);
+  assert.equal(vf.korekceFlagInput({ korekce: { mode: 'weird' } }), null);
+  assert.deepEqual(vf.korekceFlagInput(OUT), { staffInKc: null, staffOutKc: 432, salonAdjKc: -144 });
+  assert.deepEqual(vf.korekceFlagInput({ korekce: JSON_IN }), { staffInKc: 576, staffOutKc: 0, salonAdjKc: 0 });
+  assert.deepEqual(vf.korekceFlagInput({ korekce: JSON.stringify(JSON_IN) }), { staffInKc: 576, staffOutKc: 0, salonAdjKc: 0 });
+  assert.equal(vf.korekceFlagInput({ korekce: { mode: 'same_master', staffInKc: 999 } }).staffInKc, 0);
+  assert.equal(vf.korekceFlagInput({ korekce: { mode: 'payroll', staffInKc: 576 } }).staffInKc, 576);
+});
+
+test('исходная запись после переноса (0 / 864) → только 🔁, без 🟨↓ и 🟥', () => {
+  const k = vf.korekceFlagInput(OUT);
+  assert.deepEqual(
+    vf.computeBookingFlags({ booking: ORIG, ratePercent: 30, staffSalaries: 0, salonSalaries: 864, sale: null, internal: false, korekce: k }),
+    ['korekce'],
+  );
+  // без учёта аккумуляторов та же запись выглядела бы ошибкой — ровно ложный минус s209
+  assert.deepEqual(
+    vf.computeBookingFlags({ booking: ORIG, ratePercent: 30, staffSalaries: 0, salonSalaries: 864, sale: null, internal: false }),
+    ['mistr_down', 'ztrata'],
+  );
+  // админ ввёл старые 432 / 1008 поверх переноса → видно, что мастер получил лишнее
+  assert.deepEqual(
+    vf.computeBookingFlags({ booking: ORIG, ratePercent: 30, staffSalaries: 432, salonSalaries: 1008, sale: null, internal: false, korekce: k }),
+    ['mistr_up', 'salon_up', 'korekce'],
+  );
+});
+
+test('запись коррекции: норма = доля исправителя, салон 0; ни 🟦, ни 💰 за 0 Kč', () => {
+  const k = vf.korekceFlagInput({ korekce: JSON_IN });
+  const f = (staff, salon = 0) =>
+    vf.computeBookingFlags({ booking: KOR, ratePercent: 40, staffSalaries: staff, salonSalaries: salon, sale: null, internal: false, korekce: k });
+  assert.deepEqual(f(576), ['korekce']);
+  assert.deepEqual(f(732), ['mistr_up', 'korekce']);
+  assert.deepEqual(f(500), ['mistr_down', 'korekce']);
+  assert.deepEqual(f(576, 100), ['salon_up', 'korekce']);
+  // без переноса та же бронь за 0 Kč — 💰 и 🟨↑ (как было на проде до модуля)
+  assert.deepEqual(
+    vf.computeBookingFlags({ booking: KOR, ratePercent: 40, staffSalaries: 576, salonSalaries: 0, sale: null, internal: false }),
+    ['mistr_up', 'salon_up', 'cena_rucne'],
+  );
+});
+
+test('частичная коррекция 144 Kč: исходная 388,8 / 993,6 → 🔁', () => {
+  const k = vf.korekceFlagInput({ korekceStaffOutKc: 43.2, korekceSalonAdjKc: -14.4 });
+  assert.deepEqual(
+    vf.computeBookingFlags({ booking: ORIG, ratePercent: 30, staffSalaries: 388.8, salonSalaries: 993.6, sale: null, internal: false, korekce: k }),
+    ['korekce'],
+  );
+});
+
+test('тот же мастер: норма 0 / 0, 🔁 всегда', () => {
+  const k = vf.korekceFlagInput({ korekce: { mode: 'same_master' } });
+  const f = (staff) =>
+    vf.computeBookingFlags({ booking: KOR, ratePercent: 40, staffSalaries: staff, salonSalaries: 0, sale: null, internal: false, korekce: k });
+  assert.deepEqual(f(0), ['korekce']);
+  assert.deepEqual(f(100), ['mistr_up', 'korekce']);
+});
+
+test('легаси-путь тоже понимает аккумуляторы (пересохранение исходной записи в CM)', () => {
+  assert.deepEqual(vf.computeOfferFlags(1440, 30, 0, 864, null, false, vf.korekceFlagInput(OUT)), ['korekce']);
+});
+
+test('реестр: 🔁 информационный — ниже 💰, выше 🤝', () => {
+  assert.equal(vf.FLAG_EMOJI.korekce, '🔁');
+  const pr = vf.FLAG_PRIORITY;
+  assert.equal(pr.indexOf('korekce'), pr.indexOf('cena_rucne') + 1);
+  assert.ok(pr.indexOf('korekce') < pr.indexOf('internal'));
+  assert.equal(vf.dominantEmoji(['korekce']), '🔁');
+  assert.equal(vf.dominantEmoji(['mistr_up', 'korekce']), '🟨');
+});
+
 test('реестр флагов: 💰 в эмодзи и приоритете (выше информационных, ниже денежных ошибок)', () => {
   assert.equal(vf.FLAG_EMOJI.cena_rucne, '💰');
   const pr = vf.FLAG_PRIORITY;

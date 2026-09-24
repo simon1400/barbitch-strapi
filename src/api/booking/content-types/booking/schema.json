@@ -125,6 +125,15 @@
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::personal.personal"
+    },
+    "korekce": {
+      "type": "boolean",
+      "default": false
+    },
+    "korekceOf": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::booking.booking"
     }
   }
 }

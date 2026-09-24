@@ -84,6 +84,18 @@
     },
     "manualDeltaKc": {
       "type": "integer"
+    },
+    "korekce": {
+      "type": "json"
+    },
+    "korekceStaffOutKc": {
+      "type": "decimal"
+    },
+    "korekceSalonAdjKc": {
+      "type": "decimal"
+    },
+    "korekceBaseUsedKc": {
+      "type": "decimal"
     }
   }
 }

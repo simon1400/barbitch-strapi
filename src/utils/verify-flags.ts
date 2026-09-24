@@ -21,6 +21,10 @@
 //   cena_rucne  💰 (s203) цена визита изменена РУКАМИ: (оплачено + известные системные
 //               скидки) ≠ Σ каталожных цен снапшота брони. Дельта хранится в
 //               service-provided.manualDeltaKc (< 0 занизили, > 0 завысили)
+//   korekce     🔁 (s210) бесплатная коррекция — доля мастера перенесена исправителю.
+//               Информационный, ставится на ОБЕИХ записях: у исходной правило
+//               «мастер/салон» сдвинуто аккумуляторами переноса, у записи коррекции
+//               норма = доля исправителя (staffInKc) и салон 0.
 
 export type VerifyFlag =
   | 'ok'
@@ -31,7 +35,8 @@ export type VerifyFlag =
   | 'mistr_down'
   | 'internal'
   | 'sleva_bez_karty'
-  | 'cena_rucne';
+  | 'cena_rucne'
+  | 'korekce';
 
 export const FLAG_EMOJI: Record<VerifyFlag, string> = {
   ok: '🟩',
@@ -43,6 +48,7 @@ export const FLAG_EMOJI: Record<VerifyFlag, string> = {
   internal: '🤝',
   sleva_bez_karty: '🎟',
   cena_rucne: '💰',
+  korekce: '🔁',
 };
 
 // Приоритет для легаси-поля `verify` (одна доминирующая эмодзи), highest first
@@ -52,6 +58,7 @@ export const FLAG_PRIORITY: VerifyFlag[] = [
   'mistr_down',
   'mistr_up',
   'cena_rucne',
+  'korekce',
   'internal',
   'sleva_bez_karty',
   'sleva',
@@ -106,6 +113,57 @@ export const parseSaleRate = (raw: unknown, fullPrice: number): number => {
 };
 
 /**
+ * Перенос доли при бесплатной коррекции (s210) — как он меняет норму записи.
+ *   • запись КОРРЕКЦИИ (staffInKc задан): мастеру-исправителю норма = staffInKc
+ *     (base × его %), салону 0 — клиент за коррекцию не платит;
+ *   • ИСХОДНАЯ запись (аккумуляторы переноса): норма мастера − staffOutKc,
+ *     норма салона + salonAdjKc (base × (rA − rB), отрицательна, когда
+ *     исправитель дороже).
+ * Оба сдвига складываются: запись коррекции тоже может быть чьей-то исходной.
+ */
+export type KorekceFlagInput = {
+  staffInKc?: number | null;
+  staffOutKc?: number | null;
+  salonAdjKc?: number | null;
+};
+
+/** JSON-поле из Strapi приходит объектом, из сырого SQL иногда строкой. */
+export const asKorekceObject = (v: unknown): Record<string, any> | null => {
+  if (v && typeof v === 'object') return v as Record<string, any>;
+  if (typeof v === 'string' && v.trim()) {
+    try {
+      const o = JSON.parse(v);
+      return o && typeof o === 'object' ? o : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+export const KOREKCE_TRANSFER_MODES = ['record', 'payroll', 'same_master'];
+
+/**
+ * Вход для флагов из записи «Оказанная услуга»: json `korekce` (запись коррекции)
+ * + аккумуляторы `korekceStaffOutKc` / `korekceSalonAdjKc` (исходная запись).
+ * null — переноса нет, правило записи обычное.
+ */
+export const korekceFlagInput = (
+  rec: { korekce?: unknown; korekceStaffOutKc?: unknown; korekceSalonAdjKc?: unknown } | null | undefined,
+): KorekceFlagInput | null => {
+  const j = asKorekceObject(rec?.korekce);
+  const correction = !!j && KOREKCE_TRANSFER_MODES.includes(String(j.mode));
+  const staffOutKc = parseMoney(rec?.korekceStaffOutKc);
+  const salonAdjKc = parseMoney(rec?.korekceSalonAdjKc);
+  if (!correction && !staffOutKc && !salonAdjKc) return null;
+  return {
+    staffInKc: correction ? (j!.mode === 'same_master' ? 0 : parseMoney(j!.staffInKc)) : null,
+    staffOutKc,
+    salonAdjKc,
+  };
+};
+
+/**
  * Ядро сравнения. Правило (s47): мастер ВСЕГДА получает свой процент от ПОЛНОЙ цены —
  * скидку съедает салон. Салон сравнивается с фактически ожидаемой оплатой.
  */
@@ -118,6 +176,7 @@ export const computeFlagsCore = ({
   internal,
   hasSale,
   manualDeltaKc = 0,
+  korekce = null,
 }: {
   fullPrice: number;
   paidExpected: number;
@@ -128,12 +187,24 @@ export const computeFlagsCore = ({
   hasSale: boolean;
   /** (оплачено + системные скидки) − каталожная цена брони; ≠ 0 → 💰 cena_rucne */
   manualDeltaKc?: number;
+  /** перенос доли при бесплатной коррекции (s210), см. korekceFlagInput */
+  korekce?: KorekceFlagInput | null;
 }): VerifyFlag[] => {
-  const mustStaff = fullPrice * (ratePercent / 100);
-
   // Округление до копеек ПЕРЕД сравнением: иначе float-шум (1112 * 0.3 =
   // 333.59999999999997) делает точные 333.6 «больше» → ложные mistr_up + ztrata (s66).
   const r = (n: number) => Math.round(n * 100) / 100;
+
+  // Запись коррекции: цена брони 0 Kč по смыслу, поэтому ни 🟦, ни 💰 здесь не про неё.
+  const isCorrection = korekce?.staffInKc != null;
+  const staffOut = parseMoney(korekce?.staffOutKc);
+  const salonAdj = parseMoney(korekce?.salonAdjKc);
+  const hasKorekce = isCorrection || r(staffOut) !== 0 || r(salonAdj) !== 0;
+
+  const mustStaffBase = isCorrection ? parseMoney(korekce!.staffInKc) : fullPrice * (ratePercent / 100);
+  const mustStaff = mustStaffBase - staffOut;
+  const mustSalon = (isCorrection ? 0 : paidExpected - mustStaffBase) + salonAdj;
+  const priceFlag = !isCorrection && Math.round(manualDeltaKc) !== 0;
+
   const rStaff = r(staffSalaries);
   const rMustStaff = r(mustStaff);
 
@@ -142,20 +213,22 @@ export const computeFlagsCore = ({
     const flags: VerifyFlag[] = ['internal'];
     if (rStaff > rMustStaff) flags.push('mistr_up');
     if (rStaff < rMustStaff) flags.push('mistr_down');
-    if (Math.round(manualDeltaKc) !== 0) flags.push('cena_rucne');
+    if (priceFlag) flags.push('cena_rucne');
+    if (hasKorekce) flags.push('korekce');
     return flags;
   }
 
   const rSalon = r(salonSalaries);
-  const rMustSalon = r(paidExpected - mustStaff);
+  const rMustSalon = r(mustSalon);
 
   const flags: VerifyFlag[] = [];
   if (rStaff > rMustStaff) flags.push('mistr_up');
   if (rStaff < rMustStaff) flags.push('mistr_down');
   if (rSalon > rMustSalon) flags.push('salon_up');
   if (rSalon < rMustSalon) flags.push('ztrata');
-  if (hasSale) flags.push('sleva');
-  if (Math.round(manualDeltaKc) !== 0) flags.push('cena_rucne');
+  if (hasSale && !isCorrection) flags.push('sleva');
+  if (priceFlag) flags.push('cena_rucne');
+  if (hasKorekce) flags.push('korekce');
 
   if (flags.length === 0) flags.push('ok');
   return flags;
@@ -169,6 +242,7 @@ export const computeOfferFlags = (
   salonSalaries: number,
   sale: unknown,
   internal: boolean,
+  korekce: KorekceFlagInput | null = null,
 ): VerifyFlag[] => {
   const discountRate = parseSaleRate(sale, offerPrice);
   return computeFlagsCore({
@@ -179,6 +253,7 @@ export const computeOfferFlags = (
     salonSalaries,
     internal,
     hasSale: discountRate > 0,
+    korekce,
   });
 };
 
@@ -260,6 +335,7 @@ export const computeBookingFlags = ({
   sale,
   internal,
   redemptionKc,
+  korekce = null,
 }: {
   booking: BookingLike | null | undefined;
   ratePercent: number;
@@ -269,6 +345,8 @@ export const computeBookingFlags = ({
   internal: boolean;
   /** Σ discountKc погашенных bitchcard-наград этой брони (async-lookup вызывающего). */
   redemptionKc?: number;
+  /** перенос доли при бесплатной коррекции (s210) */
+  korekce?: KorekceFlagInput | null;
 }): VerifyFlag[] => {
   const { fullPrice, paidExpected, hasSale, systemDiscountKc, manualDeltaKc } = bookingPricing(booking, sale, {
     redemptionKc,
@@ -285,5 +363,6 @@ export const computeBookingFlags = ({
     // Гейт 🎟 у вызывающих завязан на hasManualSale(sale), НЕ на этот флаг.
     hasSale: hasSale || systemDiscountKc > 0,
     manualDeltaKc,
+    korekce,
   });
 };
