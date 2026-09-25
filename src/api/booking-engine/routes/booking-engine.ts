@@ -83,6 +83,11 @@ export default {
     admin('GET', '/engine/admin/corrections', 'booking-engine.adminCorrectionsList'),
     admin('POST', '/engine/admin/corrections', 'booking-engine.adminCorrectionCreate'),
     admin('DELETE', '/engine/admin/corrections/:kind/:id', 'booking-engine.adminCorrectionDelete'),
+    // Отпуска / больничные + автоблоки мастеру (s216) — только руководство
+    admin('GET', '/engine/admin/time-offs/conflicts', 'booking-engine.adminTimeOffConflicts'),
+    admin('POST', '/engine/admin/time-offs', 'booking-engine.adminTimeOffCreate'),
+    admin('PATCH', '/engine/admin/time-offs/:id', 'booking-engine.adminTimeOffUpdate'),
+    admin('DELETE', '/engine/admin/time-offs/:id', 'booking-engine.adminTimeOffDelete'),
     admin('POST', '/engine/admin/blocks', 'booking-engine.adminCreateBlock'),
     admin('GET', '/engine/admin/blocks/pending', 'booking-engine.adminPendingBlocks'),
     admin('POST', '/engine/admin/blocks/:id/approval', 'booking-engine.adminSetBlockApproval'),

@@ -42,6 +42,9 @@
     },
     "comment": {
       "type": "text"
+    },
+    "blockSeriesKey": {
+      "type": "string"
     }
   }
 }

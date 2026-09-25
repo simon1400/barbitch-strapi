@@ -62,6 +62,7 @@ const visitCloseSvc = () => strapi.service('api::booking-engine.visit-close');
 const analyticsSvc = () => strapi.service('api::booking-engine.admin-analytics');
 const upsellSvc = () => strapi.service('api::booking-engine.upsell');
 const correctionsSvc = () => strapi.service('api::booking-engine.corrections');
+const timeOffsSvc = () => strapi.service('api::booking-engine.time-offs');
 
 // personal.documentId по имени сотрудника (session.username = полное имя = personal.name)
 const resolvePersonalByName = async (name) => {
@@ -635,6 +636,40 @@ export default {
     await handle(ctx, () =>
       correctionsSvc().remove({ session, kind: ctx.params.kind, documentId: ctx.params.id })
     );
+  },
+
+  // Отпуска / больничные (s216): запись + серия блоков мастеру — руководство
+  // GET /api/engine/admin/time-offs/conflicts?personal=&startDate=&endDate= — брони мастера на эти дни
+  async adminTimeOffConflicts(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    const q = ctx.query || {};
+    await handle(ctx, () =>
+      timeOffsSvc().conflicts({ personal: q.personal, startDate: q.startDate, endDate: q.endDate })
+    );
+  },
+
+  // POST /api/engine/admin/time-offs {personal, type, startDate, endDate, paid, comment}
+  async adminTimeOffCreate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => timeOffsSvc().create({ session, body: ctx.request.body }));
+  },
+
+  // PATCH /api/engine/admin/time-offs/:id — любые поля формы; серия блоков доводится
+  async adminTimeOffUpdate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      timeOffsSvc().update({ session, documentId: ctx.params.id, body: ctx.request.body })
+    );
+  },
+
+  // DELETE /api/engine/admin/time-offs/:id — запись + её блоки
+  async adminTimeOffDelete(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => timeOffsSvc().remove({ session, documentId: ctx.params.id }));
   },
 
   async adminPendingBlocks(ctx) {

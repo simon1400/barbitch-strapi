@@ -2763,6 +2763,7 @@ export interface ApiTimeOffTimeOff extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
+    blockSeriesKey: Schema.Attribute.String;
     comment: Schema.Attribute.Text;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
