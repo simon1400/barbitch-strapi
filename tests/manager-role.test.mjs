@@ -91,6 +91,10 @@ const CASES = [
   ['engine: дашборд «Сегодня»', engine.adminToday, ['owner', 'manager']],
   ['engine: отчёт дозаписей', engine.adminUpsellReport, ['owner', 'manager']],
   ['engine: источники броней', engine.adminAttributionReport, ['owner', 'manager']],
+  // корректировки зарплат (s215) — только руководство, администраторам и мастерам нет
+  ['engine: корректировки — список', engine.adminCorrectionsList, ['owner', 'manager']],
+  ['engine: корректировки — создать', engine.adminCorrectionCreate, ['owner', 'manager']],
+  ['engine: корректировки — удалить', engine.adminCorrectionDelete, ['owner', 'manager']],
   ['engine: блок (админская ручка)', engine.adminCreateBlock, ['owner', 'manager', 'administrator']],
   ['дубли клиентов', dedupe[Object.keys(dedupe)[0]], ['owner', 'manager', 'administrator']],
   ['откат смены', shiftRevert.revert, ['owner', 'manager']],

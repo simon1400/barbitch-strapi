@@ -61,6 +61,7 @@ const pushSvc = () => strapi.service('api::booking-engine.push-notify');
 const visitCloseSvc = () => strapi.service('api::booking-engine.visit-close');
 const analyticsSvc = () => strapi.service('api::booking-engine.admin-analytics');
 const upsellSvc = () => strapi.service('api::booking-engine.upsell');
+const correctionsSvc = () => strapi.service('api::booking-engine.corrections');
 
 // personal.documentId по имени сотрудника (session.username = полное имя = personal.name)
 const resolvePersonalByName = async (name) => {
@@ -608,6 +609,32 @@ export default {
     const session = requireManagement(ctx);
     if (!session) return;
     await handle(ctx, () => strapi.service('api::booking-engine.today').overview({ date: ctx.query?.date }));
+  },
+
+  // Корректировки зарплат (s215): штрафы, доп. заработок, списания, авансы, выплаты — руководство
+  // GET /api/engine/admin/corrections?month=YYYY-MM[&personal=<documentId>]
+  async adminCorrectionsList(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      correctionsSvc().list({ month: ctx.query?.month, personal: ctx.query?.personal })
+    );
+  },
+
+  // POST /api/engine/admin/corrections {kind, personal, date, sum, text}
+  async adminCorrectionCreate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => correctionsSvc().create({ session, body: ctx.request.body }));
+  },
+
+  // DELETE /api/engine/admin/corrections/:kind/:id — только записи без source
+  async adminCorrectionDelete(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      correctionsSvc().remove({ session, kind: ctx.params.kind, documentId: ctx.params.id })
+    );
   },
 
   async adminPendingBlocks(ctx) {

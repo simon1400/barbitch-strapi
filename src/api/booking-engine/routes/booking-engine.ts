@@ -79,6 +79,10 @@ export default {
     admin('GET', '/engine/admin/attribution/report', 'booking-engine.adminAttributionReport'),
     // дашборд «Сегодня» (s214): что требует внимания руководства
     admin('GET', '/engine/admin/today', 'booking-engine.adminToday'),
+    // корректировки зарплат (s215): штрафы, доп. заработок, списания, авансы, выплаты
+    admin('GET', '/engine/admin/corrections', 'booking-engine.adminCorrectionsList'),
+    admin('POST', '/engine/admin/corrections', 'booking-engine.adminCorrectionCreate'),
+    admin('DELETE', '/engine/admin/corrections/:kind/:id', 'booking-engine.adminCorrectionDelete'),
     admin('POST', '/engine/admin/blocks', 'booking-engine.adminCreateBlock'),
     admin('GET', '/engine/admin/blocks/pending', 'booking-engine.adminPendingBlocks'),
     admin('POST', '/engine/admin/blocks/:id/approval', 'booking-engine.adminSetBlockApproval'),
