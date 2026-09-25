@@ -109,7 +109,7 @@ test('normalizeCorrectionInput: валидная форма', () => {
 test('normalizeCorrectionInput: коды ошибок', () => {
   const ok = { kind: 'penalty', personal: P1, date: '2026-10-03', sum: 500, text: 'x' };
   const cases = [
-    [{ kind: 'tax' }, 'bad_kind'],
+    [{ kind: 'taxes' }, 'bad_kind'],
     [{ kind: 'constructor' }, 'bad_kind'],
     [{ kind: '__proto__' }, 'bad_kind'],
     [{ personal: '' }, 'personal_required'],
@@ -136,6 +136,18 @@ test('normalizeCorrectionInput: коды ошибок', () => {
   }
   // ровно на границе будущего — проходит
   assert.equal(C.normalizeCorrectionInput({ ...ok, date: '2026-11-19' }, '2026-10-05').date, '2026-11-19');
+});
+
+test('normalizeCorrectionInput: налог — вид обязателен и из enum схемы', () => {
+  const base = { kind: 'tax', personal: P1, date: '2026-10-03', sum: 5495 };
+  assert.deepEqual(C.normalizeCorrectionInput({ ...base, taxType: 'all' }, '2026-10-05'),
+    { kind: 'tax', personal: P1, date: '2026-10-03', sum: 5495, text: '', taxType: 'all' });
+  for (const bad of [undefined, '', 'vat', 'constructor', '__proto__']) {
+    assert.throws(() => C.normalizeCorrectionInput({ ...base, taxType: bad }, '2026-10-05'),
+      (e) => e.code === 'bad_tax_type' && e.status === 400, String(bad));
+  }
+  // у других типов taxType не появляется и не мешает
+  assert.ok(!('taxType' in C.normalizeCorrectionInput({ ...base, kind: 'avans', taxType: 'vat' }, '2026-10-05')));
 });
 
 test('toRow: поле описания по типу, source только у схем с source', () => {
@@ -176,6 +188,21 @@ test('create: публикует запись в нужную коллекцию
   assert.equal(cr2.uid, 'api::penalty.penalty');
   assert.equal(cr2.q.data.comment, 'pozdě');
   assert.ok(!('title' in cr2.q.data));
+});
+
+test('create: налог пишет вид в поле type, строка его возвращает', async () => {
+  const s = makeStrapi();
+  const { row } = await svc.create({ session: SESSION, body: { kind: 'tax', personal: P1, date: '2026-10-04', sum: 5495, taxType: 'social', text: 'Za září' }, now: new Date('2026-10-05T08:00:00Z') });
+  const cr = s.calls.find((c) => c.op === 'create');
+  assert.equal(cr.uid, 'api::tax.tax');
+  assert.deepEqual(cr.q.data, { date: '2026-10-04', sum: '5495', comment: 'Za září', personal: { documentId: P1 }, type: 'social' });
+  assert.ok(cr.q.fields.includes('type'), 'type запрашивается обратно');
+  assert.equal(row.taxType, 'social');
+  await flush();
+  assert.equal(s.logs[0].details.typ, 'Daně (sociální)');
+  // штраф поле type не получает
+  await svc.create({ session: SESSION, body: { kind: 'penalty', personal: P1, date: '2026-10-04', sum: 1, text: 'x', taxType: 'all' }, now: new Date('2026-10-05T08:00:00Z') });
+  assert.ok(!('type' in s.calls.filter((c) => c.op === 'create')[1].q.data));
 });
 
 test('create: несуществующий сотрудник → 404, ничего не пишется', async () => {
@@ -229,7 +256,7 @@ test('list: фильтр по сотруднику идёт в запрос, а 
   const r = await svc.list({ month: '2026-10', personal: 'per2bbbbbbbbbbbbbbbbbbbb' });
   assert.deepEqual(r.rows.map((x) => x.documentId), ['add1aaaaaaaaaaaaaaaaaaaa']);
   const fm = s.calls.filter((c) => c.op === 'findMany');
-  assert.equal(fm.length, 10, '5 коллекций × (published + draft)');
+  assert.equal(fm.length, 12, '6 коллекций × (published + draft)');
   for (const c of fm) assert.deepEqual(c.q.filters.personal, { documentId: { $eq: 'per2bbbbbbbbbbbbbbbbbbbb' } });
   await expectErr(() => svc.list({ month: '2026-10', personal: "x'--" }), 400, 'personal_not_found');
 });
@@ -257,7 +284,7 @@ test('remove: чужой тип / нет записи / мусорный id', as
   makeStrapi(seed());
   // штраф по адресу аванса — не найдётся (коллекция определяется типом)
   await expectErr(() => svc.remove({ session: SESSION, kind: 'avans', documentId: 'pen1aaaaaaaaaaaaaaaaaaaa' }), 404, 'correction_not_found');
-  await expectErr(() => svc.remove({ session: SESSION, kind: 'tax', documentId: 'pen1aaaaaaaaaaaaaaaaaaaa' }), 400, 'bad_kind');
+  await expectErr(() => svc.remove({ session: SESSION, kind: 'taxes', documentId: 'pen1aaaaaaaaaaaaaaaaaaaa' }), 400, 'bad_kind');
   await expectErr(() => svc.remove({ session: SESSION, kind: 'penalty', documentId: '../x' }), 404, 'correction_not_found');
 });
 
@@ -271,4 +298,6 @@ test('инварианты: у каждой коллекции поле опис
     assert.ok(schema.attributes.personal && schema.attributes.date && schema.attributes.sum, kind);
     assert.equal(schema.options.draftAndPublish, true, `${kind}: draftAndPublish`);
   }
+  const tax = JSON.parse(fs.readFileSync(path.join(root, 'tax', 'content-types', 'tax', 'schema.json'), 'utf8'));
+  assert.deepEqual([...tax.attributes.type.enum].sort(), Object.keys(C.TAX_TYPES).sort(), 'виды налога = enum схемы');
 });

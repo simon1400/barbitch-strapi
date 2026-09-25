@@ -1,7 +1,7 @@
 // @ts-nocheck
 /**
  * Корректировки зарплат из админки (s215, Фаза C плана «Управляющая»):
- * штрафы, доп. заработок, списания, авансы и выплаты. Раньше — только Strapi CM.
+ * штрафы, доп. заработок, списания, авансы, выплаты и налоги. Раньше — только Strapi CM.
  *
  * Пишет ОПУБЛИКОВАННУЮ запись (как кнопка Publish в CM): зарплаты и итоги
  * месяца читают только published. Связь `personal` document service сам
@@ -38,9 +38,14 @@ export const CORRECTION_KINDS = {
   payroll: { uid: 'api::payroll.payroll', text: 'comment', hasSource: true, textRequired: true, cs: 'Odpis ze mzdy' },
   avans: { uid: 'api::avans.avans', text: 'comment', hasSource: false, textRequired: false, cs: 'Záloha' },
   salary: { uid: 'api::salary.salary', text: 'comment', hasSource: false, textRequired: false, cs: 'Výplata' },
+  // налоги за сотрудника (s215): у схемы обязательный enum `type`
+  tax: { uid: 'api::tax.tax', text: 'comment', hasSource: false, textRequired: false, cs: 'Daně' },
 } as const;
 
 export const KIND_KEYS = Object.keys(CORRECTION_KINDS);
+
+/** Вид налога — enum `tax.type` схемы. */
+export const TAX_TYPES = { all: 'vše', social: 'sociální', health: 'zdravotní', income: 'daň z příjmu' } as const;
 
 /** Потолок суммы одной записи — защита от лишнего нуля (месячная зарплата ~30–60 тыс.). */
 export const MAX_SUM_KC = 300000;
@@ -109,7 +114,12 @@ export const normalizeCorrectionInput = (body: any, today: string) => {
   if (text.length > MAX_TEXT) throw new CorrectionError(400, 'text_too_long', `Комментарий длиннее ${MAX_TEXT} символов`);
   if (meta.textRequired && !text) throw new CorrectionError(400, 'text_required', 'Напишите, за что');
 
-  return { kind, personal, date, sum: rawSum, text };
+  if (kind !== 'tax') return { kind, personal, date, sum: rawSum, text };
+  const taxType = String(b.taxType ?? '');
+  if (!Object.prototype.hasOwnProperty.call(TAX_TYPES, taxType)) {
+    throw new CorrectionError(400, 'bad_tax_type', 'Выберите вид налога');
+  }
+  return { kind, personal, date, sum: rawSum, text, taxType };
 };
 
 /** Запись, которую ведёт движок (дозапись / интерная услуга / коррекция). */
@@ -130,6 +140,7 @@ export const toRow = (kind: string, doc: any, draft: boolean) => {
     date: doc.date ?? null,
     sum: toKc(doc.sum),
     text: String(doc?.[meta.text] ?? '').trim(),
+    taxType: kind === 'tax' ? doc?.type ?? null : null,
     personal: doc.personal ? { documentId: doc.personal.documentId, name: String(doc.personal.name ?? '').trim() } : null,
     source,
     draft,
@@ -169,7 +180,14 @@ const PRAGUE_DAY = new Intl.DateTimeFormat('en-CA', {
   day: '2-digit',
 });
 
-const fieldsOf = (meta: any) => ['date', 'sum', meta.text, ...(meta.hasSource ? ['source'] : []), 'createdAt'];
+const fieldsOf = (meta: any) => [
+  'date',
+  'sum',
+  meta.text,
+  ...(meta.hasSource ? ['source'] : []),
+  ...(meta === CORRECTION_KINDS.tax ? ['type'] : []),
+  'createdAt',
+];
 
 export default {
   _log(action: string, session: any, row: any) {
@@ -183,7 +201,7 @@ export default {
         employeeName: row.personal?.name || '',
         summary: logSummary(action === 'correction_create' ? 'create' : 'delete', row),
         details: {
-          typ: CORRECTION_KINDS[row.kind].cs,
+          typ: row.taxType ? `${CORRECTION_KINDS[row.kind].cs} (${TAX_TYPES[row.taxType] || row.taxType})` : CORRECTION_KINDS[row.kind].cs,
           zaměstnanec: row.personal?.name || '—',
           datum: fmtDay(row.date),
           částka: fmtKc(row.sum),
@@ -237,6 +255,7 @@ export default {
         sum: String(input.sum),
         [meta.text]: input.text || null,
         personal: { documentId: input.personal },
+        ...(input.kind === 'tax' ? { type: input.taxType } : {}),
       },
       fields: fieldsOf(meta),
       populate: { personal: { fields: ['name'] } },
