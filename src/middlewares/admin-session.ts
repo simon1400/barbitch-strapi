@@ -56,10 +56,24 @@ const STAFF_ROLES = new Set(['owner', 'manager', 'administrator', 'master']);
 // Панель Strapi и ручки движка тут не задеты: проверка только на /api/<коллекция>.
 const MASTER_DENIED = new Set(['bookings', 'clients', 'redemptions']);
 
-const deniedForMaster = (path: string): boolean => {
-  const seg = path.slice('/api/'.length).split(/[/?]/)[0];
-  return MASTER_DENIED.has(seg);
-};
+const collectionOf = (path: string): string => path.slice('/api/'.length).split(/[/?]/)[0];
+
+const deniedForMaster = (path: string): boolean => MASTER_DENIED.has(collectionOf(path));
+
+// 🟥 Коллекции ТОЛЬКО ДЛЯ ЧТЕНИЯ любой сессии сотрудника (s218).
+//
+// Сессия получает права full-access токена, поэтому мастер (и администратор) мог
+// `POST /api/time-blocks` напрямую: блок лёг бы сразу действующим (default схемы —
+// approved) — мимо согласования, журнала и планового графика. Решение владельца:
+// мастер сам себе блоков не ставит, администратор меняет блоки через согласование.
+// Админка пишет блоки исключительно ручками движка (/api/engine/admin/blocks,
+// /schedule), а эти коллекции лишь читает (календарь, «Загрузка», «Окна»).
+// Панель Strapi (/admin/**) не задета: часы салона владелец правит в CM как раньше.
+const STAFF_READ_ONLY = new Set(['time-blocks', 'salon-hours', 'master-schedules']);
+const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+export const deniedWriteForStaff = (path: string, method: string): boolean =>
+  STAFF_READ_ONLY.has(collectionOf(path)) && !READ_METHODS.has(String(method || 'GET').toUpperCase());
 
 export default (_config: unknown, { strapi }: { strapi: any }) => {
   let warned = false;
@@ -83,6 +97,17 @@ export default (_config: unknown, { strapi }: { strapi: any }) => {
               status: 403,
               code: 'forbidden_for_master',
               message: 'Tato data jsou dostupná jen přes kalendář',
+            },
+          };
+          return;
+        }
+        if (deniedWriteForStaff(path, ctx.request?.method || ctx.method)) {
+          ctx.status = 403;
+          ctx.body = {
+            error: {
+              status: 403,
+              code: 'engine_only',
+              message: 'Změny bloků jen přes kalendář nebo plán směn',
             },
           };
           return;

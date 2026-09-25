@@ -64,6 +64,7 @@ const upsellSvc = () => strapi.service('api::booking-engine.upsell');
 const correctionsSvc = () => strapi.service('api::booking-engine.corrections');
 const timeOffsSvc = () => strapi.service('api::booking-engine.time-offs');
 const shiftsSvc = () => strapi.service('api::booking-engine.shifts');
+const scheduleSvc = () => strapi.service('api::booking-engine.master-schedule');
 
 // personal.documentId по имени сотрудника (session.username = полное имя = personal.name)
 const resolvePersonalByName = async (name) => {
@@ -696,6 +697,66 @@ export default {
     if (!session) return;
     await handle(ctx, () =>
       shiftsSvc().remove({ session, monday: ctx.params.monday, base: ctx.query?.base })
+    );
+  },
+
+  // ── Плановый график мастеров (s218). Смотреть и предлагать — администратор тоже
+  // (requireAdmin: мастеру ручки закрыты — сам себе он ничего не меняет); шаблон,
+  // решения по предложениям и замена старых блоков — только руководство.
+
+  // GET /api/engine/admin/schedule?month=YYYY-MM — сетка мастера × дни
+  async adminScheduleGrid(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => scheduleSvc().grid({ month: ctx.query?.month, session }));
+  },
+
+  // POST /api/engine/admin/schedule/:personal/preview {template?:{from,days} | changes:[…]} — брони в новом нерабочем времени
+  async adminSchedulePreview(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => scheduleSvc().preview({ personal: ctx.params.personal, body: ctx.request.body }));
+  },
+
+  // PUT /api/engine/admin/schedule/:personal/template {from, days:{'0'..'6'}, base}
+  async adminScheduleTemplate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      scheduleSvc().saveTemplate({ session, personal: ctx.params.personal, body: ctx.request.body })
+    );
+  },
+
+  // PUT /api/engine/admin/schedule/:personal/days {changes:[{date,state,from?,to?}], note?, base}
+  // руководство — сразу, администратор — предложение на согласование
+  async adminScheduleDays(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => scheduleSvc().saveDays({ session, personal: ctx.params.personal, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/schedule/:personal/requests/:date {status:'approved'|'rejected'}
+  async adminScheduleDecide(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      scheduleSvc().decide({ session, personal: ctx.params.personal, date: ctx.params.date, body: ctx.request.body })
+    );
+  },
+
+  // GET /api/engine/admin/schedule/:personal/legacy — старые серии, которые план покрывает
+  async adminScheduleLegacy(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => scheduleSvc().legacyCandidates({ personal: ctx.params.personal }));
+  },
+
+  // POST /api/engine/admin/schedule/:personal/legacy {keys:[…]} — удалить их будущие блоки
+  async adminScheduleLegacyReplace(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      scheduleSvc().replaceLegacy({ session, personal: ctx.params.personal, body: ctx.request.body })
     );
   },
 

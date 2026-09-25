@@ -120,6 +120,26 @@ export default {
       tz: 'Europe/Prague',
     },
   },
+  // Плановый график мастеров (s218): довести блоки плана до окна записи. Окно
+  // (последняя дата salon_hours) сдвигается каждую ночь синком часов салона, часы
+  // салона могут поправить в CM — поэтому раз в час. Идемпотентно: без изменений
+  // плана и часов — ноль записей.
+  masterScheduleReconcile: {
+    task: async ({ strapi }) => {
+      try {
+        const res = await strapi.service('api::booking-engine.master-schedule').reconcileAll();
+        if (res.created || res.deleted) {
+          strapi.log.info(`master-schedule cron: +${res.created} −${res.deleted} plan block(s) / ${res.schedules} plan(s)`);
+        }
+      } catch (e) {
+        strapi.log.error(`master-schedule cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '20 * * * *', // каждый час в :20
+      tz: 'Europe/Prague',
+    },
+  },
   dailyDigest: {
     task: async ({ strapi }) => {
       try {

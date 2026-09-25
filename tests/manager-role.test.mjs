@@ -104,6 +104,17 @@ const CASES = [
   ['engine: смены — сохранить неделю', engine.adminShiftSave, ['owner', 'manager']],
   ['engine: смены — удалить неделю', engine.adminShiftDelete, ['owner', 'manager']],
   ['engine: блок (админская ручка)', engine.adminCreateBlock, ['owner', 'manager', 'administrator']],
+  // плановый график мастеров (s218): мастер сам себе ничего не меняет; администратор
+  // смотрит и предлагает, шаблон / согласование / замена старых блоков — руководство
+  ['engine: план — сетка месяца', engine.adminScheduleGrid, ['owner', 'manager', 'administrator']],
+  ['engine: план — предпросмотр броней', engine.adminSchedulePreview, ['owner', 'manager', 'administrator']],
+  ['engine: план — изменить дни', engine.adminScheduleDays, ['owner', 'manager', 'administrator']],
+  ['engine: план — шаблон недели', engine.adminScheduleTemplate, ['owner', 'manager']],
+  ['engine: план — решение по предложению', engine.adminScheduleDecide, ['owner', 'manager']],
+  ['engine: план — старые серии', engine.adminScheduleLegacy, ['owner', 'manager']],
+  ['engine: план — заменить старые серии', engine.adminScheduleLegacyReplace, ['owner', 'manager']],
+  ['engine: правка блока', engine.adminPatchBlock, ['owner', 'manager', 'administrator']],
+  ['engine: удаление блока', engine.adminDeleteBlock, ['owner', 'manager', 'administrator']],
   ['дубли клиентов', dedupe[Object.keys(dedupe)[0]], ['owner', 'manager', 'administrator']],
   ['откат смены', shiftRevert.revert, ['owner', 'manager']],
   ['синк отзывов', reviewSync.sync, ['owner', 'manager']],
@@ -146,8 +157,17 @@ test('схемы: enum роли и position знают manager', () => {
 
 test('сервисы: блоки и дозаписи считают manager руководством', () => {
   const be = src('src/api/booking-engine/services/booking-engine.ts').replace(/\r/g, '');
-  assert.ok(be.includes("const isOwner = session?.role === 'owner' || session?.role === 'manager';"), 'блок manager не approved сразу');
-  assert.ok(be.includes("const resetApproval = session?.role !== 'owner' && session?.role !== 'manager' && block.approvalStatus"), 'правка блока manager сбрасывает approval');
+  assert.ok(
+    be.includes("const isManagementSession = (session) => session?.role === 'owner' || session?.role === 'manager';"),
+    'руководство = owner + manager'
+  );
+  assert.ok(be.includes('const isOwner = isManagementSession(session); // руководство (s213)'), 'блок manager не approved сразу');
+  assert.ok(be.includes('const resetApproval = !isManagementSession(session) && block.approvalStatus'), 'правка блока manager сбрасывает approval');
+  // s218: правка действующего блока не руководством — предложение, блок не перестаёт действовать
+  assert.ok(
+    be.includes('if (!isManagementSession(session) && effective) {' + String.fromCharCode(10) + '      return this._proposeBlockChange(block, data, session);'),
+    'администратор правит действующий блок напрямую'
+  );
   const up = src('src/api/booking-engine/services/upsell.ts');
   assert.ok(up.includes("const isOwner = session?.role === 'owner' || session?.role === 'manager';"), 'upsell mine/byAdmin');
 });
@@ -159,4 +179,47 @@ test('сайт и движок: мастера только position=master', ()
   for (const f of ['rebook.ts', 'upsell.ts']) {
     assert.ok(src(`src/api/booking-engine/services/${f}`).includes("filters: { isActive: true, position: 'master' },"), f);
   }
+});
+
+// ── s218: сессии сотрудников не пишут блоки / часы / план в обход движка ──
+const mwCode = src('src/middlewares/admin-session.ts').replace(
+  /from '\.\.\/utils\/admin-jwt';/,
+  `from '${JWT_URL}';`
+);
+const mw = await import(dataUrl(toJs(mwCode)));
+
+async function runMw(role, method, pathName) {
+  const ctx = {
+    path: pathName,
+    method,
+    status: 200,
+    body: undefined,
+    state: {},
+    request: { path: pathName, method, header: role ? { authorization: `Bearer ${token(role)}` } : {} },
+  };
+  let passed = false;
+  await mw.default({}, { strapi: globalThis.strapi })(ctx, async () => {
+    passed = true;
+  });
+  return { passed, status: ctx.status, code: ctx.body?.error?.code };
+}
+
+test('admin-session: блоки, часы салона и план — только чтение для всех ролей сотрудников', async () => {
+  for (const role of ['owner', 'manager', 'administrator', 'master']) {
+    for (const coll of ['time-blocks', 'salon-hours', 'master-schedules']) {
+      for (const method of ['POST', 'PUT', 'DELETE']) {
+        const r = await runMw(role, method, `/api/${coll}/abc`);
+        assert.equal(r.passed, false, `${role} ${method} ${coll} прошёл`);
+        assert.equal(r.status, 403);
+        assert.equal(r.code, 'engine_only');
+      }
+      const g = await runMw(role, 'GET', `/api/${coll}?filters[date][$eq]=2026-10-01`);
+      assert.equal(g.passed, true, `${role} GET ${coll} не прошёл`);
+    }
+  }
+  // соседние коллекции и ручки движка не задеты
+  assert.equal((await runMw('administrator', 'POST', '/api/penalties')).passed, true);
+  assert.equal((await runMw('master', 'POST', '/api/engine/admin/blocks')).passed, true);
+  // панель Strapi не трогается вообще
+  assert.equal((await runMw('master', 'POST', '/admin/content-manager/collection-types/api::time-block.time-block')).passed, true);
 });

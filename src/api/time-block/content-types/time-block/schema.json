@@ -61,6 +61,21 @@
     },
     "approvedAt": {
       "type": "datetime"
+    },
+    "proposedStartsAt": {
+      "type": "datetime"
+    },
+    "proposedEndsAt": {
+      "type": "datetime"
+    },
+    "proposedTitle": {
+      "type": "string"
+    },
+    "proposedByName": {
+      "type": "string"
+    },
+    "proposedAt": {
+      "type": "datetime"
     }
   }
 }

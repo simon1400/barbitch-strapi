@@ -60,12 +60,31 @@ const joinTableOf = (uid, attrName) => {
   return { table: jt.name, sourceCol: jt.joinColumn.name, targetCol: jt.inverseJoinColumn.name };
 };
 const OWN_BLOCK_PREFIX = 'own|'; // noonaKey engine-блоков — реконсайл зеркала их не трогает
+// Блоки планового графика мастера (s218, services/master-schedule.ts): ведёт только план,
+// из календаря их не правят и не удаляют — иначе ежечасный reconcile вернул бы их обратно.
+const PLAN_BLOCK_PREFIX = 'own|plan|';
+const isPlanBlock = (block) => String(block?.noonaKey || '').startsWith(PLAN_BLOCK_PREFIX);
+const assertNotPlanBlock = (block) => {
+  if (isPlanBlock(block)) {
+    throw new EngineError(409, 'plan_block', 'Blok je z plánu směn — změňte ho v modulu Plán směn');
+  }
+};
+// Руководство (владелец + управляющая, s213): его блоки и правки действуют сразу.
+const isManagementSession = (session) => session?.role === 'owner' || session?.role === 'manager';
 // Блоки, заведённые администратором, вступают в силу только после подтверждения владельцем.
 // approvalStatus: approved (действует) | pending (ждёт владельца) | rejected (отклонён).
 // Легаси-строки (созданные до этой правки) и зеркальные Noona-блоки имеют NULL → approved.
 const BLOCK_APPROVED = 'approved';
 const BLOCK_PENDING = 'pending';
 const BLOCK_REJECTED = 'rejected';
+// Очистка предложения правки блока (s218): применено, отклонено или перебито руководством.
+const BLOCK_PROPOSAL_CLEAR = {
+  proposedStartsAt: null,
+  proposedEndsAt: null,
+  proposedTitle: null,
+  proposedByName: null,
+  proposedAt: null,
+};
 const RESCHEDULE_LIMIT = 3; // максимум самостоятельных переносов одной брони клиентом
 
 // Формат даты для журнала действий: «pá 17.7.» (день недели + D.M., без года).
@@ -1840,7 +1859,7 @@ export default {
     // общий ключ на всю серию (уникальный uuid) — каждый день = отдельная строка, но одна группа
     const key = `${OWN_BLOCK_PREFIX}${crypto.randomUUID()}`;
     // блок владельца действует сразу; блок администратора ждёт подтверждения владельца
-    const isOwner = session?.role === 'owner' || session?.role === 'manager'; // руководство (s213)
+    const isOwner = isManagementSession(session); // руководство (s213)
     const approval = isOwner
       ? { approvalStatus: BLOCK_APPROVED, approvedByName: session?.username || '', approvedAt: new Date().toISOString() }
       : { approvalStatus: BLOCK_PENDING, approvedByName: '', approvedAt: null };
@@ -1968,6 +1987,7 @@ export default {
       populate: { employee: { fields: ['name'] } },
     });
     if (!block) throw new EngineError(404, 'block_not_found', 'Блок не найден');
+    assertNotPlanBlock(block);
     const data = {};
     if (startMin != null || endMin != null) {
       const s = Number(startMin);
@@ -1980,10 +2000,17 @@ export default {
     }
     if (title != null) data.title = String(title).trim() || 'Blokace';
     if (!Object.keys(data).length) return block;
-    // правка администратором снимает подтверждение — блок снова ждёт владельца
-    // (иначе обход: одобрили блок на 15 мин → админ растянул его на весь день).
-    // Владелец правит свободно: статус не трогаем, он подтверждает отдельной кнопкой.
-    const resetApproval = session?.role !== 'owner' && session?.role !== 'manager' && block.approvalStatus !== BLOCK_PENDING;
+    // 🟥 s218 (решение владельца): правка ДЕЙСТВУЮЩЕГО блока администратором — только
+    // предложение. Блок продолжает занимать время как раньше, пока руководство не
+    // согласует правку (раньше блок уходил в pending и выходной открывался для записи).
+    const effective = block.approvalStatus == null || block.approvalStatus === BLOCK_APPROVED;
+    if (!isManagementSession(session) && effective) {
+      return this._proposeBlockChange(block, data, session);
+    }
+    // руководство правит напрямую — висящее предложение администратора этим отменяется
+    if (block.proposedStartsAt || block.proposedEndsAt || block.proposedTitle) Object.assign(data, BLOCK_PROPOSAL_CLEAR);
+    // правка администратором своего pending/rejected блока — снова ждёт согласования
+    const resetApproval = !isManagementSession(session) && block.approvalStatus !== BLOCK_PENDING;
     if (resetApproval) {
       data.approvalStatus = BLOCK_PENDING;
       data.approvedByName = '';
@@ -2036,6 +2063,110 @@ export default {
     return updated;
   },
 
+  // Предложение правки действующего блока администратором (s218, F2). Блок не меняется:
+  // новые время/название лежат в proposed*, решение — adminSetBlockApproval.
+  async _proposeBlockChange(block, data, session) {
+    const bDate = String(block.date);
+    const curStart = utcToPragueMinClamped(block.startsAt, bDate);
+    const curEnd = utcToPragueMinClamped(block.endsAt, bDate);
+    const nextStartsAt = data.startsAt || block.startsAt;
+    const nextEndsAt = data.endsAt || block.endsAt;
+    const nextTitle = data.title != null ? data.title : block.title || 'Blokace';
+    const newStart = utcToPragueMinClamped(nextStartsAt, bDate);
+    const newEnd = utcToPragueMinClamped(nextEndsAt, bDate);
+    if (newStart === curStart && newEnd === curEnd && nextTitle === (block.title || 'Blokace')) {
+      // та же правка — снять висящее предложение, если было
+      if (!block.proposedStartsAt) return block;
+      return strapi.documents(TIME_BLOCK_UID).update({ documentId: block.documentId, data: BLOCK_PROPOSAL_CLEAR });
+    }
+    const updated = await strapi.documents(TIME_BLOCK_UID).update({
+      documentId: block.documentId,
+      data: {
+        proposedStartsAt: nextStartsAt,
+        proposedEndsAt: nextEndsAt,
+        proposedTitle: nextTitle,
+        proposedByName: session?.username || '',
+        proposedAt: new Date().toISOString(),
+      },
+    });
+    const oldTime = `${minToHHMM(curStart)}–${minToHHMM(curEnd)}`;
+    const newTime = `${minToHHMM(newStart)}–${minToHHMM(newEnd)}`;
+    const empName = await this._blockEmployeeName(block);
+    strapi
+      .service('api::calendar-log.calendar-log')
+      .write({
+        action: 'block_edit',
+        entityType: 'block',
+        actorName: session?.username || '',
+        entityDocId: block.documentId,
+        employeeName: empName,
+        summary: `Návrh úpravy bloku: ${empName ? `${empName} · ` : ''}${fmtDay(bDate)} · ${oldTime} → ${newTime}${
+          nextTitle !== (block.title || 'Blokace') ? ` · ${nextTitle}` : ''
+        } · čeká na schválení`,
+        details: {
+          mistr: empName || null,
+          date: fmtDay(bDate),
+          before: { time: oldTime, title: block.title },
+          after: { time: newTime, title: nextTitle },
+          schválení: 'blok platí beze změny, dokud vedení návrh neschválí',
+        },
+      })
+      .catch((e) => strapi.log.error(`calendar-log block-propose failed: ${e.message}`));
+    this._notifyBlockPending({
+      employeeName: empName,
+      actorName: session?.username || '',
+      dates: [bDate],
+      startMin: newStart,
+      endMin: newEnd,
+      title: nextTitle,
+      recLabel: '',
+      edited: true,
+    });
+    return updated;
+  },
+
+  // Решение руководства по предложению правки блока: approved — применить, rejected — стереть.
+  async _decideBlockChange(block, status, session) {
+    const bDate = String(block.date);
+    const fmt = (s, e) => `${minToHHMM(utcToPragueMinClamped(s, bDate))}–${minToHHMM(utcToPragueMinClamped(e, bDate))}`;
+    const oldTime = fmt(block.startsAt, block.endsAt);
+    const newTime = fmt(block.proposedStartsAt || block.startsAt, block.proposedEndsAt || block.endsAt);
+    const approved = status === BLOCK_APPROVED;
+    const data = approved
+      ? {
+          startsAt: block.proposedStartsAt || block.startsAt,
+          endsAt: block.proposedEndsAt || block.endsAt,
+          title: block.proposedTitle || block.title,
+          approvalStatus: BLOCK_APPROVED,
+          approvedByName: session?.username || '',
+          approvedAt: new Date().toISOString(),
+          ...BLOCK_PROPOSAL_CLEAR,
+        }
+      : { ...BLOCK_PROPOSAL_CLEAR };
+    await strapi.documents(TIME_BLOCK_UID).update({ documentId: block.documentId, data });
+    const empName = await this._blockEmployeeName(block);
+    strapi
+      .service('api::calendar-log.calendar-log')
+      .write({
+        action: approved ? 'block_approve' : 'block_reject',
+        entityType: 'block',
+        actorName: session?.username || '',
+        entityDocId: block.documentId,
+        employeeName: empName,
+        summary: `${approved ? 'Úprava bloku schválena' : 'Úprava bloku zamítnuta'}: ${empName ? `${empName} · ` : ''}${fmtDay(bDate)} · ${oldTime} → ${newTime}`,
+        details: {
+          mistr: empName || null,
+          datum: fmtDay(bDate),
+          před: oldTime,
+          návrh: newTime,
+          název: block.proposedTitle || block.title,
+          navrhl: block.proposedByName || null,
+        },
+      })
+      .catch((e) => strapi.log.error(`calendar-log block-change-decision failed: ${e.message}`));
+    return { updated: 1, status, change: true };
+  },
+
   // Ключ серии блока: own-серия делит noonaKey, зеркальная rrule-серия — noonaBlockedId
   // (у зеркальных noonaKey per-date `id|date`, для группировки не годится).
   _blockSeriesFilter(block) {
@@ -2055,6 +2186,11 @@ export default {
       populate: { employee: { fields: ['name'] } },
     });
     if (!block) throw new EngineError(404, 'block_not_found', 'Блок не найден');
+    assertNotPlanBlock(block);
+    // предложение правки действующего блока (s218) — решение касается только его
+    if (block.proposedStartsAt || block.proposedEndsAt || block.proposedTitle) {
+      return this._decideBlockChange(block, status, session);
+    }
 
     const targets = series
       ? await strapi.documents(TIME_BLOCK_UID).findMany({ filters: this._blockSeriesFilter(block), limit: 1000 })
@@ -2105,30 +2241,52 @@ export default {
   // Прошлые pending-блоки не показываем — подтверждать их уже нечего.
   async adminPendingBlocks() {
     const today = pragueDateOf(new Date().toISOString());
-    const rows = await strapi.documents(TIME_BLOCK_UID).findMany({
-      filters: { approvalStatus: BLOCK_PENDING, date: { $gte: today } },
-      populate: { employee: { fields: ['name'] } },
-      sort: ['date:asc', 'startsAt:asc'],
-      limit: 500,
-    });
-    return {
-      items: rows.map((b) => {
-        const d = String(b.date);
-        const own = String(b.noonaKey || '').startsWith(OWN_BLOCK_PREFIX);
-        return {
-          documentId: b.documentId,
-          date: d,
-          startMin: b.startsAt ? utcToPragueMinClamped(b.startsAt, d) : null,
-          endMin: b.endsAt ? utcToPragueMinClamped(b.endsAt, d) : null,
-          title: b.title || '',
-          employeeName: b.employeeNameRaw || b.employee?.name || '',
-          createdByName: b.createdByName || '',
-          createdAt: b.createdAt || null,
-          own,
-          seriesKey: own ? b.noonaKey : b.noonaBlockedId || b.documentId,
-        };
+    const [rows, changes, plan] = await Promise.all([
+      strapi.documents(TIME_BLOCK_UID).findMany({
+        filters: { approvalStatus: BLOCK_PENDING, date: { $gte: today } },
+        populate: { employee: { fields: ['name'] } },
+        sort: ['date:asc', 'startsAt:asc'],
+        limit: 500,
       }),
+      // предложения правок действующих блоков (s218, F2) — блок работает по-старому до решения
+      strapi.documents(TIME_BLOCK_UID).findMany({
+        filters: { proposedStartsAt: { $notNull: true }, date: { $gte: today } },
+        populate: { employee: { fields: ['name'] } },
+        sort: ['date:asc', 'startsAt:asc'],
+        limit: 500,
+      }),
+      strapi.service('api::booking-engine.master-schedule').pendingRequests(),
+    ]);
+    const row = (b, kind) => {
+      const d = String(b.date);
+      const own = String(b.noonaKey || '').startsWith(OWN_BLOCK_PREFIX);
+      return {
+        kind,
+        documentId: b.documentId,
+        date: d,
+        startMin: b.startsAt ? utcToPragueMinClamped(b.startsAt, d) : null,
+        endMin: b.endsAt ? utcToPragueMinClamped(b.endsAt, d) : null,
+        title: b.title || '',
+        employeeName: b.employeeNameRaw || b.employee?.name || '',
+        createdByName: b.createdByName || '',
+        createdAt: b.createdAt || null,
+        own,
+        // предложение правки — всегда один блок, серии у него нет
+        seriesKey: kind === 'change' ? `change|${b.documentId}` : own ? b.noonaKey : b.noonaBlockedId || b.documentId,
+        ...(kind === 'change'
+          ? {
+              proposedStartMin: b.proposedStartsAt ? utcToPragueMinClamped(b.proposedStartsAt, d) : null,
+              proposedEndMin: b.proposedEndsAt ? utcToPragueMinClamped(b.proposedEndsAt, d) : null,
+              proposedTitle: b.proposedTitle || '',
+              proposedByName: b.proposedByName || '',
+            }
+          : {}),
+      };
     };
+    const items = [...rows.map((b) => row(b, 'new')), ...changes.map((b) => row(b, 'change'))].sort(
+      (a, b) => a.date.localeCompare(b.date) || (a.startMin ?? 0) - (b.startMin ?? 0)
+    );
+    return { items, planRequests: plan.items };
   },
 
   // series=true → удалить все повторения: own-серия делит noonaKey,
@@ -2139,6 +2297,8 @@ export default {
       populate: { employee: { fields: ['name'] } },
     });
     if (!block) throw new EngineError(404, 'block_not_found', 'Блок не найден');
+    // удаление администратором — сразу, без согласования (решение владельца s218); план — только в Плане
+    assertNotPlanBlock(block);
 
     // журнал: имя/время блока фиксируем ДО удаления (пишем один раз, count = 1 или série);
     // имя резолвим тоже ДО delete — после удаления relation уже не прочитать

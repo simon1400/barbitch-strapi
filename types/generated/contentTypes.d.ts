@@ -1726,6 +1726,39 @@ export interface ApiLoyaltyTransactionLoyaltyTransaction
   };
 }
 
+export interface ApiMasterScheduleMasterSchedule
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'master_schedules';
+  info: {
+    description: '\u041F\u043B\u0430\u043D\u043E\u0432\u044B\u0439 \u0433\u0440\u0430\u0444\u0438\u043A \u043C\u0430\u0441\u0442\u0435\u0440\u0430 (s218): \u0448\u0430\u0431\u043B\u043E\u043D \u043D\u0435\u0434\u0435\u043B\u0438 + \u0438\u0441\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F \u043F\u043E \u0434\u0430\u0442\u0430\u043C + \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u043E\u0432. \u041C\u0430\u0442\u0435\u0440\u0438\u0430\u043B\u0438\u0437\u0443\u0435\u0442\u0441\u044F \u0431\u043B\u043E\u043A\u0430\u043C\u0438 own|plan| \u2014 \u043F\u0440\u0430\u0432\u0438\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u0438\u0437 \u0430\u0434\u043C\u0438\u043D\u043A\u0438 (/schedule)';
+    displayName: '\u0413\u0440\u0430\u0444\u0438\u043A \u043C\u0430\u0441\u0442\u0435\u0440\u0430';
+    pluralName: 'master-schedules';
+    singularName: 'master-schedule';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::master-schedule.master-schedule'
+    > &
+      Schema.Attribute.Private;
+    overrides: Schema.Attribute.JSON;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    publishedAt: Schema.Attribute.DateTime;
+    requests: Schema.Attribute.JSON;
+    templates: Schema.Attribute.JSON;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiNavigationNavigation extends Struct.SingleTypeSchema {
   collectionName: 'navigations';
   info: {
@@ -2741,6 +2774,11 @@ export interface ApiTimeBlockTimeBlock extends Struct.CollectionTypeSchema {
     noonaBlockedId: Schema.Attribute.String;
     noonaEmployeeId: Schema.Attribute.String;
     noonaKey: Schema.Attribute.String;
+    proposedAt: Schema.Attribute.DateTime;
+    proposedByName: Schema.Attribute.String;
+    proposedEndsAt: Schema.Attribute.DateTime;
+    proposedStartsAt: Schema.Attribute.DateTime;
+    proposedTitle: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     startsAt: Schema.Attribute.DateTime;
     theme: Schema.Attribute.String;
@@ -3527,6 +3565,7 @@ declare module '@strapi/strapi' {
       'api::google-review.google-review': ApiGoogleReviewGoogleReview;
       'api::homepage.homepage': ApiHomepageHomepage;
       'api::loyalty-transaction.loyalty-transaction': ApiLoyaltyTransactionLoyaltyTransaction;
+      'api::master-schedule.master-schedule': ApiMasterScheduleMasterSchedule;
       'api::navigation.navigation': ApiNavigationNavigation;
       'api::note.note': ApiNoteNote;
       'api::offer.offer': ApiOfferOffer;

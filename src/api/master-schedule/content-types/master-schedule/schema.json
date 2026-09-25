@@ -1,0 +1,30 @@
+{
+  "kind": "collectionType",
+  "collectionName": "master_schedules",
+  "info": {
+    "singularName": "master-schedule",
+    "pluralName": "master-schedules",
+    "displayName": "График мастера",
+    "description": "Плановый график мастера (s218): шаблон недели + исключения по датам + предложения администраторов. Материализуется блоками own|plan| — правится только из админки (/schedule)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "personal": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::personal.personal"
+    },
+    "templates": {
+      "type": "json"
+    },
+    "overrides": {
+      "type": "json"
+    },
+    "requests": {
+      "type": "json"
+    }
+  }
+}
