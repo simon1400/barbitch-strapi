@@ -88,6 +88,10 @@ export default {
     admin('POST', '/engine/admin/time-offs', 'booking-engine.adminTimeOffCreate'),
     admin('PATCH', '/engine/admin/time-offs/:id', 'booking-engine.adminTimeOffUpdate'),
     admin('DELETE', '/engine/admin/time-offs/:id', 'booking-engine.adminTimeOffDelete'),
+    // Смены администраторов (s217): редактор графика недели — только руководство
+    admin('GET', '/engine/admin/shifts', 'booking-engine.adminShiftsList'),
+    admin('PUT', '/engine/admin/shifts/:monday', 'booking-engine.adminShiftSave'),
+    admin('DELETE', '/engine/admin/shifts/:monday', 'booking-engine.adminShiftDelete'),
     admin('POST', '/engine/admin/blocks', 'booking-engine.adminCreateBlock'),
     admin('GET', '/engine/admin/blocks/pending', 'booking-engine.adminPendingBlocks'),
     admin('POST', '/engine/admin/blocks/:id/approval', 'booking-engine.adminSetBlockApproval'),

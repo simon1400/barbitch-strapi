@@ -63,6 +63,7 @@ const analyticsSvc = () => strapi.service('api::booking-engine.admin-analytics')
 const upsellSvc = () => strapi.service('api::booking-engine.upsell');
 const correctionsSvc = () => strapi.service('api::booking-engine.corrections');
 const timeOffsSvc = () => strapi.service('api::booking-engine.time-offs');
+const shiftsSvc = () => strapi.service('api::booking-engine.shifts');
 
 // personal.documentId по имени сотрудника (session.username = полное имя = personal.name)
 const resolvePersonalByName = async (name) => {
@@ -670,6 +671,32 @@ export default {
     const session = requireManagement(ctx);
     if (!session) return;
     await handle(ctx, () => timeOffsSvc().remove({ session, documentId: ctx.params.id }));
+  },
+
+  // Смены администраторов (s217): график недели «кто дежурит» — руководство
+  // GET /api/engine/admin/shifts?from=<понедельник>&weeks=N
+  async adminShiftsList(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => shiftsSvc().list({ from: ctx.query?.from, weeks: ctx.query?.weeks }));
+  },
+
+  // PUT /api/engine/admin/shifts/:monday {days: {monday…sunday}, base: updatedAt|null}
+  async adminShiftSave(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      shiftsSvc().save({ session, monday: ctx.params.monday, body: ctx.request.body })
+    );
+  },
+
+  // DELETE /api/engine/admin/shifts/:monday[?base=updatedAt] — график недели целиком
+  async adminShiftDelete(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      shiftsSvc().remove({ session, monday: ctx.params.monday, base: ctx.query?.base })
+    );
   },
 
   async adminPendingBlocks(ctx) {

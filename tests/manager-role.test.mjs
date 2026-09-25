@@ -99,6 +99,10 @@ const CASES = [
   ['engine: отпуска — создать', engine.adminTimeOffCreate, ['owner', 'manager']],
   ['engine: отпуска — изменить', engine.adminTimeOffUpdate, ['owner', 'manager']],
   ['engine: отпуска — удалить', engine.adminTimeOffDelete, ['owner', 'manager']],
+  // смены администраторов (s217)
+  ['engine: смены — окно недель', engine.adminShiftsList, ['owner', 'manager']],
+  ['engine: смены — сохранить неделю', engine.adminShiftSave, ['owner', 'manager']],
+  ['engine: смены — удалить неделю', engine.adminShiftDelete, ['owner', 'manager']],
   ['engine: блок (админская ручка)', engine.adminCreateBlock, ['owner', 'manager', 'administrator']],
   ['дубли клиентов', dedupe[Object.keys(dedupe)[0]], ['owner', 'manager', 'administrator']],
   ['откат смены', shiftRevert.revert, ['owner', 'manager']],
