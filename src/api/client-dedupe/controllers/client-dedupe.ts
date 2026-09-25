@@ -1,5 +1,5 @@
 // @ts-nocheck
-// Ручки модуля «Дубли клиентов» (admin-апка, owner + administrator).
+// Ручки модуля «Дубли клиентов» (admin-апка, owner + manager + administrator).
 // Паттерн s78: роуты auth:false + ручная проверка admin-jwt здесь
 // (Strapi-стратегии наш HS256-токен не знают).
 
@@ -8,7 +8,7 @@ import { DedupeError } from '../services/client-dedupe';
 
 const svc = () => strapi.service('api::client-dedupe.client-dedupe');
 
-const ALLOWED_ROLES = new Set(['owner', 'administrator']);
+const ALLOWED_ROLES = new Set(['owner', 'manager', 'administrator']);
 
 const requireStaff = (ctx) => {
   const session = verifySession(tokenFromCtx(ctx));

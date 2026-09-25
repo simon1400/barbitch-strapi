@@ -292,7 +292,7 @@ export default {
   async _masters(offerable) {
     const personals = await strapi.documents(PERSONAL_UID).findMany({
       status: 'published',
-      filters: { isActive: true },
+      filters: { isActive: true, position: 'master' }, // управляющая (s213) — не мастер
       fields: ['name', 'tier', 'noonaEmployeeId'],
       populate: { services: { fields: ['title'] } },
       limit: 100,
@@ -655,7 +655,7 @@ export default {
     const [y, m] = month.split('-').map(Number);
     const from = `${month}-01`;
     const to = `${month}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
-    const isOwner = session?.role === 'owner';
+    const isOwner = session?.role === 'owner' || session?.role === 'manager'; // руководство (s213)
 
     const knex = strapi.db.connection;
     let q = knex('bookings')

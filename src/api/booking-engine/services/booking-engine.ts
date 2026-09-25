@@ -289,7 +289,7 @@ export default {
     const svc = await this.resolveService(serviceDocId);
     const all = await strapi.documents(PERSONAL_UID).findMany({
       status: 'published',
-      filters: { isActive: true, services: { documentId: { $eq: svc.documentId } } },
+      filters: { isActive: true, position: 'master', services: { documentId: { $eq: svc.documentId } } },
       fields: ['name', 'tier'],
       populate: { photo: true },
       limit: 100,
@@ -349,7 +349,7 @@ export default {
   async listEmployeesForService(serviceDocId) {
     return strapi.documents(PERSONAL_UID).findMany({
       status: 'published',
-      filters: { isActive: true, services: { documentId: { $eq: serviceDocId } } },
+      filters: { isActive: true, position: 'master', services: { documentId: { $eq: serviceDocId } } },
       fields: ['name', 'tier', 'bookingPriority', 'noonaEmployeeId'],
       limit: 100,
     });
@@ -1840,7 +1840,7 @@ export default {
     // общий ключ на всю серию (уникальный uuid) — каждый день = отдельная строка, но одна группа
     const key = `${OWN_BLOCK_PREFIX}${crypto.randomUUID()}`;
     // блок владельца действует сразу; блок администратора ждёт подтверждения владельца
-    const isOwner = session?.role === 'owner';
+    const isOwner = session?.role === 'owner' || session?.role === 'manager'; // руководство (s213)
     const approval = isOwner
       ? { approvalStatus: BLOCK_APPROVED, approvedByName: session?.username || '', approvedAt: new Date().toISOString() }
       : { approvalStatus: BLOCK_PENDING, approvedByName: '', approvedAt: null };
@@ -1983,7 +1983,7 @@ export default {
     // правка администратором снимает подтверждение — блок снова ждёт владельца
     // (иначе обход: одобрили блок на 15 мин → админ растянул его на весь день).
     // Владелец правит свободно: статус не трогаем, он подтверждает отдельной кнопкой.
-    const resetApproval = session?.role !== 'owner' && block.approvalStatus !== BLOCK_PENDING;
+    const resetApproval = session?.role !== 'owner' && session?.role !== 'manager' && block.approvalStatus !== BLOCK_PENDING;
     if (resetApproval) {
       data.approvalStatus = BLOCK_PENDING;
       data.approvedByName = '';

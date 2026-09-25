@@ -3,7 +3,7 @@
 // (global::rate-limit-engine); админские — ручная проверка admin-jwt (паттерн s78:
 // Strapi-стратегии наш HS256-токен не знают, роуты остаются auth:false).
 
-import { tokenFromCtx, verifySession } from '../../../utils/admin-jwt';
+import { isManagementRole, tokenFromCtx, verifySession } from '../../../utils/admin-jwt';
 import { EngineError } from '../services/booking-engine';
 
 const svc = () => strapi.service('api::booking-engine.booking-engine');
@@ -27,7 +27,7 @@ const handle = async (ctx, fn) => {
 
 const requireAdmin = (ctx) => {
   const session = verifySession(tokenFromCtx(ctx));
-  if (!session || !['owner', 'administrator'].includes(session.role)) {
+  if (!session || !['owner', 'manager', 'administrator'].includes(session.role)) {
     ctx.status = 401;
     ctx.body = { error: { status: 401, code: 'unauthorized', message: 'Vyžadováno přihlášení administrátora' } };
     return null;
@@ -35,12 +35,12 @@ const requireAdmin = (ctx) => {
   return session;
 };
 
-// только владелец — подтверждение блоков, заведённых администраторами
-const requireOwner = (ctx) => {
+// только руководство (владелец + управляющая, s213) — подтверждение блоков, отчёты
+const requireManagement = (ctx) => {
   const session = verifySession(tokenFromCtx(ctx));
-  if (!session || session.role !== 'owner') {
+  if (!session || !isManagementRole(session.role)) {
     ctx.status = 401;
-    ctx.body = { error: { status: 401, code: 'owner_only', message: 'Schvalovat bloky může jen majitel' } };
+    ctx.body = { error: { status: 401, code: 'owner_only', message: 'Tuto akci může provést jen vedení salonu' } };
     return null;
   }
   return session;
@@ -230,7 +230,7 @@ export default {
     await handle(ctx, () => strapi.service('api::booking-engine.booking-notify').sendReminders());
   },
 
-  // ── админские (admin-jwt, роли owner/administrator) ──
+  // ── админские (admin-jwt, роли owner/manager/administrator) ──
 
   // GET /api/engine/push/vapid — публичный VAPID-ключ для подписки на устройстве
   async pushVapid(ctx) {
@@ -550,17 +550,17 @@ export default {
     );
   },
 
-  // GET /api/engine/admin/upsell/report?month=YYYY-MM — контроль предложений, только владелец
+  // GET /api/engine/admin/upsell/report?month=YYYY-MM — контроль предложений, руководство (s213)
   async adminUpsellReport(ctx) {
-    const session = requireOwner(ctx);
+    const session = requireManagement(ctx);
     if (!session) return;
     await handle(ctx, () => upsellSvc().report({ month: String(ctx.query?.month || '').trim() }));
   },
 
   // GET /api/engine/admin/attribution/report?from=&to=&basis=created|visit&touch=first|last
-  // «Источники броней» (s200) — только владелец
+  // «Источники броней» (s200) — руководство (s213)
   async adminAttributionReport(ctx) {
-    const session = requireOwner(ctx);
+    const session = requireManagement(ctx);
     if (!session) return;
     const q = ctx.query || {};
     await handle(ctx, () =>
@@ -602,16 +602,16 @@ export default {
   },
 
   // DELETE /api/engine/admin/blocks/:id[?series=1] — series=1 удаляет все повторения
-  // GET /api/engine/admin/blocks/pending — блоки, ждущие подтверждения владельца
+  // GET /api/engine/admin/blocks/pending — блоки, ждущие подтверждения руководства
   async adminPendingBlocks(ctx) {
-    const session = requireOwner(ctx);
+    const session = requireManagement(ctx);
     if (!session) return;
     await handle(ctx, () => svc().adminPendingBlocks());
   },
 
   // POST /api/engine/admin/blocks/:id/approval {status:'approved'|'rejected', series?:boolean}
   async adminSetBlockApproval(ctx) {
-    const session = requireOwner(ctx);
+    const session = requireManagement(ctx);
     if (!session) return;
     const b = ctx.request.body || {};
     await handle(ctx, () =>

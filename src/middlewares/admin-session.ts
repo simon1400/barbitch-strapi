@@ -37,7 +37,7 @@ import { tokenFromCtx, verifySession } from '../utils/admin-jwt';
 //   2. Требуем нашу роль в payload: у токена панели Strapi её нет вообще.
 // Любое из двух условий закрыло бы дыру, но нужны оба: первое защищает панель,
 // второе — от чужого токена с тем же секретом на прикладных маршрутах.
-const STAFF_ROLES = new Set(['owner', 'administrator', 'master']);
+const STAFF_ROLES = new Set(['owner', 'manager', 'administrator', 'master']);
 
 // 🟥 Коллекции, закрытые для роли MASTER (s182).
 //

@@ -189,7 +189,7 @@ export default {
     // активные мастера + их назначенные услуги (со стороны personal — как publicServiceEmployees)
     const personals = await strapi.documents(PERSONAL_UID).findMany({
       status: 'published',
-      filters: { isActive: true },
+      filters: { isActive: true, position: 'master' }, // управляющая (s213) — не мастер
       fields: ['name', 'tier', 'noonaEmployeeId'],
       populate: { photo: true, services: { fields: ['title'] } },
       limit: 100,

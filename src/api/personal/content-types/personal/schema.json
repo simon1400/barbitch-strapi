@@ -97,7 +97,8 @@
       "default": "master",
       "enum": [
         "administrator",
-        "master"
+        "master",
+        "manager"
       ]
     },
     "rates": {

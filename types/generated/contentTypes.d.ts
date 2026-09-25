@@ -505,7 +505,9 @@ export interface ApiAdminUserAdminUser extends Struct.CollectionTypeSchema {
       Schema.Attribute.Required &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
-    role: Schema.Attribute.Enumeration<['master', 'owner', 'administrator']> &
+    role: Schema.Attribute.Enumeration<
+      ['master', 'owner', 'administrator', 'manager']
+    > &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<'master'>;
     updatedAt: Schema.Attribute.DateTime;
@@ -2016,7 +2018,9 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
           localized: false;
         };
       }>;
-    position: Schema.Attribute.Enumeration<['administrator', 'master']> &
+    position: Schema.Attribute.Enumeration<
+      ['administrator', 'master', 'manager']
+    > &
       Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
         i18n: {

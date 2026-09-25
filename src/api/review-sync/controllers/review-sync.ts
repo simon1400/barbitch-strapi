@@ -1,11 +1,11 @@
 // @ts-nocheck
-import { requireOwner } from '../../../utils/admin-jwt';
+import { requireManagement } from '../../../utils/admin-jwt';
 
 export default {
   async sync(ctx) {
     // Роут auth:false → гейт вручную. До s182 аноним мог жечь квоту Google
     // Places и писать отзывы в БД без авторизации.
-    const session = requireOwner(ctx);
+    const session = requireManagement(ctx);
     if (!session) return;
     try {
       const result = await strapi.service('api::review-sync.review-sync').syncReviews();

@@ -10,8 +10,14 @@ import crypto from 'crypto'
 export interface AdminSession {
   id: number
   username: string
-  role: 'owner' | 'administrator' | 'master'
+  role: AdminRole
 }
+
+// s213: 'manager' (управляющая) — права владельца везде, кроме email-рассылки
+export type AdminRole = 'owner' | 'manager' | 'administrator' | 'master'
+
+/** Руководство салона: владелец и управляющая (s213). */
+export const isManagementRole = (role: unknown): boolean => role === 'owner' || role === 'manager'
 
 export interface VerifiedSession extends AdminSession {
   iat: number
@@ -85,14 +91,15 @@ export const tokenFromCtx = (ctx: any): string | null => {
 }
 
 /**
- * Гейт «только владелец» для кастомных ручек с `auth: false` (s182).
+ * Гейт «руководство» (владелец + управляющая, s213; до s213 — только владелец)
+ * для кастомных ручек с `auth: false` (s182).
  * Возвращает сессию либо null — и во втором случае сам пишет 401 в ctx,
  * контроллеру остаётся `if (!session) return`. Формат ответа тот же, что у
  * campaign.send, чтобы админка одинаково показывала причину.
  */
-export const requireOwner = (ctx: any): VerifiedSession | null => {
+export const requireManagement = (ctx: any): VerifiedSession | null => {
   const session = verifySession(tokenFromCtx(ctx))
-  if (!session || session.role !== 'owner') {
+  if (!session || !isManagementRole(session.role)) {
     ctx.status = 401
     ctx.body = {
       error: { status: 401, code: 'owner_only', message: 'Tuto akci může provést jen majitel' },

@@ -4,7 +4,7 @@
 
 import { factories } from '@strapi/strapi'
 import bcrypt from 'bcryptjs'
-import { signSession, verifySession, tokenFromCtx } from '../../../utils/admin-jwt'
+import { signSession, verifySession, tokenFromCtx, isManagementRole, type AdminRole } from '../../../utils/admin-jwt'
 
 export default factories.createCoreController('api::admin-user.admin-user', ({ strapi }) => ({
   // Кастомный endpoint для проверки логина
@@ -39,7 +39,7 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
       const jwt = signSession({
         id: user.id as number,
         username: user.username as string,
-        role: user.role as 'owner' | 'administrator' | 'master',
+        role: user.role as AdminRole,
       })
 
       // Возвращаем данные пользователя (без пароля)
@@ -97,7 +97,7 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
     if (!session) {
       return ctx.unauthorized('Authentication required')
     }
-    if (session.role !== 'owner' && session.username !== username) {
+    if (!isManagementRole(session.role) && session.username !== username) {
       return ctx.forbidden('You can only access your own data')
     }
 

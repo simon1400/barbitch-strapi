@@ -3,7 +3,7 @@
 // движка: Strapi-стратегии наш HS256-токен не знают, поэтому роут auth:false
 // и проверка делается вручную — паттерн s78/s171).
 
-import { tokenFromCtx, verifySession } from '../../../utils/admin-jwt';
+import { isManagementRole, tokenFromCtx, verifySession } from '../../../utils/admin-jwt';
 import { CampaignError } from '../services/campaign';
 
 export default {
@@ -36,10 +36,10 @@ export default {
   // в client-роут, открытый в интернет без авторизации.
   async voucherConfirmation(ctx) {
     const session = verifySession(tokenFromCtx(ctx));
-    if (!session || session.role !== 'owner') {
+    if (!session || !isManagementRole(session.role)) {
       ctx.status = 401;
       ctx.body = {
-        error: { status: 401, code: 'owner_only', message: 'Potvrzení voucheru může odeslat jen majitel' },
+        error: { status: 401, code: 'owner_only', message: 'Potvrzení voucheru může odeslat jen vedení salonu' },
       };
       return;
     }
