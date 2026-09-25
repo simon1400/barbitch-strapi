@@ -393,3 +393,78 @@ test('remove: запись и вся её серия (в т.ч. ручные п�
   const del = s.logs.find((l) => l.action === 'timeoff_delete');
   assert.equal(del.summary, 'Smazáno — dovolená: Yana Ivanova 10.10.2026 – 12.10.2026 (3 dny) · 3 bloky');
 });
+
+// ── s216: блоки только с сегодняшнего дня, прошлое не трогаем ───────────────
+test('blockDates: период, но не раньше сегодня', () => {
+  assert.deepEqual(T.blockDates('2026-10-03', '2026-10-06', '2026-10-05'), ['2026-10-05', '2026-10-06']);
+  assert.deepEqual(T.blockDates('2026-10-01', '2026-10-04', '2026-10-05'), []);
+  assert.deepEqual(T.blockDates('2026-10-05', '2026-10-05', '2026-10-05'), ['2026-10-05']);
+  assert.deepEqual(T.blockDates('2026-10-07', '2026-10-08', '2026-10-05'), ['2026-10-07', '2026-10-08']);
+});
+
+test('create: начало в прошлом — блоки с сегодняшнего дня; целиком в прошлом — ни блоков, ни ключа', async () => {
+  const s = makeStrapi();
+  const r1 = await svc.create({ session: SESSION, body: { personal: MASTER, type: 'sick', startDate: '2026-10-02', endDate: '2026-10-07' }, now: NOW });
+  assert.equal(r1.blocks, 3);
+  assert.deepEqual(s.blocks().map((b) => b.date).sort(), ['2026-10-05', '2026-10-06', '2026-10-07']);
+  const r2 = await svc.create({ session: SESSION, body: { personal: MASTER2, type: 'sick', startDate: '2026-09-28', endDate: '2026-10-04' }, now: NOW });
+  assert.equal(r2.blocks, 0);
+  assert.equal(r2.row.blockSeriesKey, null);
+  assert.equal(s.offs().find((o) => o.documentId === r2.row.documentId).blockSeriesKey, null, 'без блоков ключ не пишется — бейдж не врёт');
+  assert.equal(s.blocks().length, 3);
+});
+
+const KEY = 'own|past-series';
+const seedSeries = (dates, personal = MASTER, title = 'Nemoc') =>
+  dates.map((date, i) => ({ documentId: `blk${i}aaaaaaaaaaaaaaaaaaaa`, noonaKey: KEY, date, title, employee: { documentId: personal }, noonaEmployeeId: PERSONALS[personal].noonaEmployeeId }));
+const PAST_OFF = { documentId: 'pastoffaaaaaaaaaaaaaaaaa', personal: { documentId: MASTER }, type: 'sick', startDate: '2026-10-01', endDate: '2026-10-07', paid: true, blockSeriesKey: KEY };
+const SERIES = ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07'];
+
+test('update: прошлые блоки серии не удаляются, даже если период их больше не покрывает', async () => {
+  const s = makeStrapi({ timeOffs: [PAST_OFF], blocks: seedSeries(SERIES) });
+  const res = await svc.update({ session: SESSION, documentId: PAST_OFF.documentId, body: { startDate: '2026-10-03', endDate: '2026-10-05' }, now: NOW });
+  assert.deepEqual(s.blocks().map((b) => b.date).sort(), ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05'],
+    'прошлые 01–04 целы (01–02 уже вне периода), будущие 06–07 удалены');
+  assert.equal(res.blocks, 5);
+  assert.equal(s.offs()[0].blockSeriesKey, KEY);
+  // период целиком ушёл в прошлое — будущих блоков нет, прошлые на месте, ключ остаётся (удаление записи их уберёт)
+  const res2 = await svc.update({ session: SESSION, documentId: PAST_OFF.documentId, body: { startDate: '2026-10-01', endDate: '2026-10-02' }, now: NOW });
+  assert.deepEqual(s.blocks().map((b) => b.date).sort(), ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04']);
+  assert.equal(res2.blocks, 4);
+  assert.equal(s.offs()[0].blockSeriesKey, KEY);
+});
+
+test('update: смена типа не переименовывает прошлые блоки', async () => {
+  const s = makeStrapi({ timeOffs: [PAST_OFF], blocks: seedSeries(SERIES) });
+  await svc.update({ session: SESSION, documentId: PAST_OFF.documentId, body: { type: 'vacation' }, now: NOW });
+  const t = Object.fromEntries(s.blocks().map((b) => [b.date, b.title]));
+  assert.equal(t['2026-10-04'], 'Nemoc');
+  assert.equal(t['2026-10-05'], 'Dovolená');
+  assert.equal(t['2026-10-07'], 'Dovolená');
+});
+
+test('update: смена сотрудника переносит только сегодня и дальше; на администратора — прошлое остаётся', async () => {
+  const s = makeStrapi({ timeOffs: [PAST_OFF], blocks: seedSeries(SERIES) });
+  await svc.update({ session: SESSION, documentId: PAST_OFF.documentId, body: { personal: MASTER2 }, now: NOW });
+  const by = (who) => s.blocks().filter((b) => b.employee.documentId === who).map((b) => b.date).sort();
+  assert.deepEqual(by(MASTER), ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04']);
+  assert.deepEqual(by(MASTER2), ['2026-10-05', '2026-10-06', '2026-10-07']);
+  await svc.update({ session: SESSION, documentId: PAST_OFF.documentId, body: { personal: ADMIN }, now: NOW });
+  assert.deepEqual(s.blocks().map((b) => b.date).sort(), ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04']);
+  assert.equal(s.offs()[0].blockSeriesKey, KEY, 'прошлые блоки остались — ключ нужен, чтобы удаление записи их убрало');
+});
+
+test('update: старая запись из CM в прошлом — пересохранение ничего не ставит', async () => {
+  const s = makeStrapi({ timeOffs: [{ documentId: 'cmpastaaaaaaaaaaaaaaaaaa', personal: { documentId: MASTER }, type: 'sick', startDate: '2026-09-22', endDate: '2026-09-25', paid: true }] });
+  const res = await svc.update({ session: SESSION, documentId: 'cmpastaaaaaaaaaaaaaaaaaa', body: { comment: 'x' }, now: NOW });
+  assert.equal(res.blocks, 0);
+  assert.equal(s.blocks().length, 0);
+  assert.equal(s.offs()[0].blockSeriesKey ?? null, null);
+});
+
+test('remove: удаление записи убирает и прошлые блоки серии', async () => {
+  const s = makeStrapi({ timeOffs: [PAST_OFF], blocks: seedSeries(SERIES) });
+  const res = await svc.remove({ session: SESSION, documentId: PAST_OFF.documentId });
+  assert.equal(res.blocks, 7);
+  assert.equal(s.blocks().length, 0);
+});

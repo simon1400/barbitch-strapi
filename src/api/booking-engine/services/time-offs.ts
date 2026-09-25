@@ -6,7 +6,10 @@
  *
  * Запись отсутствия МАСТЕРА (position master, активна, есть noonaEmployeeId —
  * по нему календарь раскладывает блоки по колонкам) материализуется серией
- * own-блоков: по блоку на каждый день периода, на часы салона этой даты
+ * own-блоков: по блоку на каждый день периода С СЕГОДНЯШНЕГО (пражского) дня
+ * (решение владельца s216: прошлое не трогаем — ни календарь, ни загрузку
+ * задним числом; блоки прошлых дней серии правка не удаляет, не переименовывает
+ * и не переносит, их убирает только удаление записи), на часы салона этой даты
  * (строки `salon_hours` есть только на ~90 дней вперёд — дальше окно по
  * умолчанию 10:00–19:00, как ставил владелец). Блоки руководства — approved
  * сразу. Серия делит один `noonaKey` (`own|<uuid>`), он же хранится в
@@ -155,6 +158,10 @@ export const blockWindow = (hour: any): { startMin: number; endMin: number } => 
   return { startMin: DEFAULT_OPEN_MIN, endMin: DEFAULT_CLOSE_MIN };
 };
 
+/** Даты, на которые нужны блоки: период, но не раньше сегодняшнего дня. */
+export const blockDates = (startDate: string, endDate: string, today: string): string[] =>
+  endDate < today ? [] : datesBetween(startDate > today ? startDate : today, endDate);
+
 /**
  * Довести серию до периода: какие блоки удалить (дата вне периода или дубль
  * даты), какие даты создать. Блоки внутри периода не трогаются.
@@ -300,8 +307,8 @@ export default {
    * Довести серию блоков до записи. Возвращает ключ серии (null — блоков нет)
    * и число блоков после синхронизации.
    */
-  async _syncBlocks({ key, person, personDocId, type, startDate, endDate, session }) {
-    const existing = key
+  async _syncBlocks({ key, person, personDocId, type, startDate, endDate, session, today }) {
+    const all = key
       ? await strapi.documents(TIME_BLOCK_UID).findMany({
           filters: { noonaKey: { $eq: key } },
           fields: ['date', 'title'],
@@ -309,10 +316,13 @@ export default {
           limit: 1000,
         })
       : [];
+    // прошлые дни серии не трогаем никогда — только сегодня и дальше
+    const past = all.filter((b) => String(b.date) < today);
+    const existing = all.filter((b) => String(b.date) >= today);
 
     if (!needsBlocks(person)) {
       for (const b of existing) await strapi.documents(TIME_BLOCK_UID).delete({ documentId: b.documentId });
-      return { key: null, count: 0, created: 0, deleted: existing.length };
+      return { key: past.length ? key : null, count: past.length, created: 0, deleted: existing.length };
     }
 
     // серия чужого сотрудника (в записи сменили человека) — снести целиком
@@ -321,7 +331,7 @@ export default {
     const own = existing.filter((b) => !foreign.includes(b));
 
     const seriesKey = key || `${OWN_BLOCK_PREFIX}${crypto.randomUUID()}`;
-    const plan = planBlockSync(own, datesBetween(startDate, endDate));
+    const plan = planBlockSync(own, blockDates(startDate, endDate, today));
     for (const b of plan.toDelete) await strapi.documents(TIME_BLOCK_UID).delete({ documentId: b.documentId });
 
     const title = TIME_OFF_TYPES[type].block;
@@ -365,9 +375,10 @@ export default {
         });
       }
     }
+    const count = past.length + plan.kept + plan.toCreate.length;
     return {
-      key: seriesKey,
-      count: plan.kept + plan.toCreate.length,
+      key: count > 0 ? seriesKey : null,
+      count,
       created: plan.toCreate.length,
       deleted: plan.toDelete.length + foreign.length,
     };
@@ -410,13 +421,17 @@ export default {
   },
 
   async create({ session, body, now = new Date() }) {
-    const input = normalizeTimeOffInput(body, PRAGUE_DAY.format(now));
+    const today = PRAGUE_DAY.format(now);
+    const input = normalizeTimeOffInput(body, today);
     const person = await this._person(input.personal);
     if (person.isActive === false) throw new TimeOffError(404, 'personal_not_found', 'Сотрудник не найден');
     await this._assertNoOverlap(input);
 
     // ключ серии заводим заранее — при сбое посередине по нему удаляются и уже созданные блоки
-    const newKey = needsBlocks(person) ? `${OWN_BLOCK_PREFIX}${crypto.randomUUID()}` : null;
+    const newKey =
+      needsBlocks(person) && blockDates(input.startDate, input.endDate, today).length
+        ? `${OWN_BLOCK_PREFIX}${crypto.randomUUID()}`
+        : null;
 
     const doc = await strapi.documents(TIME_OFF_UID).create({
       data: {
@@ -441,6 +456,7 @@ export default {
         startDate: input.startDate,
         endDate: input.endDate,
         session,
+        today,
       });
     } catch (e) {
       // без блоков запись не оставляем — иначе мастер «в отпуске», а сайт его продаёт
@@ -465,7 +481,8 @@ export default {
       paid: doc.paid,
       comment: doc.comment,
     };
-    const input = normalizeTimeOffInput(body, PRAGUE_DAY.format(now), base);
+    const today = PRAGUE_DAY.format(now);
+    const input = normalizeTimeOffInput(body, today, base);
     const person = await this._person(input.personal);
     if (input.personal !== base.personal && person.isActive === false) {
       throw new TimeOffError(404, 'personal_not_found', 'Сотрудник не найден');
@@ -491,6 +508,7 @@ export default {
       startDate: input.startDate,
       endDate: input.endDate,
       session,
+      today,
     });
     if ((sync.key || null) !== (doc.blockSeriesKey || null)) {
       await strapi.documents(TIME_OFF_UID).update({ documentId: doc.documentId, data: { blockSeriesKey: sync.key } });
