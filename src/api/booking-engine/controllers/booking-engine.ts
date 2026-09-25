@@ -603,6 +603,13 @@ export default {
 
   // DELETE /api/engine/admin/blocks/:id[?series=1] — series=1 удаляет все повторения
   // GET /api/engine/admin/blocks/pending — блоки, ждущие подтверждения руководства
+  // GET /api/engine/admin/today?date=YYYY-MM-DD — дашборд «Сегодня» (s214), только руководство
+  async adminToday(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => strapi.service('api::booking-engine.today').overview({ date: ctx.query?.date }));
+  },
+
   async adminPendingBlocks(ctx) {
     const session = requireManagement(ctx);
     if (!session) return;

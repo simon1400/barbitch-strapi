@@ -88,6 +88,7 @@ const CASES = [
   // [название, ручка, кому открыто]
   ['engine: одобрение блока', engine.adminSetBlockApproval, ['owner', 'manager']],
   ['engine: блоки ke schválení', engine.adminPendingBlocks, ['owner', 'manager']],
+  ['engine: дашборд «Сегодня»', engine.adminToday, ['owner', 'manager']],
   ['engine: отчёт дозаписей', engine.adminUpsellReport, ['owner', 'manager']],
   ['engine: источники броней', engine.adminAttributionReport, ['owner', 'manager']],
   ['engine: блок (админская ручка)', engine.adminCreateBlock, ['owner', 'manager', 'administrator']],
