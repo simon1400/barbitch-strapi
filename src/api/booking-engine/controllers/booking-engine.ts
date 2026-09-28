@@ -65,6 +65,7 @@ const correctionsSvc = () => strapi.service('api::booking-engine.corrections');
 const timeOffsSvc = () => strapi.service('api::booking-engine.time-offs');
 const shiftsSvc = () => strapi.service('api::booking-engine.shifts');
 const scheduleSvc = () => strapi.service('api::booking-engine.master-schedule');
+const birthdaysSvc = () => strapi.service('api::booking-engine.birthdays');
 
 // personal.documentId по имени сотрудника (session.username = полное имя = personal.name)
 const resolvePersonalByName = async (name) => {
@@ -612,6 +613,15 @@ export default {
     const session = requireManagement(ctx);
     if (!session) return;
     await handle(ctx, () => strapi.service('api::booking-engine.today').overview({ date: ctx.query?.date }));
+  },
+
+  // Дни рождения сотрудников (s221): ближайшие 30 дней, только день и месяц —
+  // руководство и администраторы, мастеру нет
+  // GET /api/engine/admin/birthdays
+  async adminBirthdays(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => birthdaysSvc().list({ session }));
   },
 
   // Корректировки зарплат (s215): штрафы, доп. заработок, списания, авансы, выплаты — руководство

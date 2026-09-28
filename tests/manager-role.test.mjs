@@ -103,6 +103,8 @@ const CASES = [
   ['engine: смены — окно недель', engine.adminShiftsList, ['owner', 'manager']],
   ['engine: смены — сохранить неделю', engine.adminShiftSave, ['owner', 'manager']],
   ['engine: смены — удалить неделю', engine.adminShiftDelete, ['owner', 'manager']],
+  // дни рождения сотрудников (s221): руководство и администраторы, мастеру нет
+  ['engine: дни рождения', engine.adminBirthdays, ['owner', 'manager', 'administrator']],
   ['engine: блок (админская ручка)', engine.adminCreateBlock, ['owner', 'manager', 'administrator']],
   // плановый график мастеров (s218): мастер сам себе ничего не меняет; администратор
   // смотрит и предлагает, шаблон / согласование / замена старых блоков — руководство
@@ -222,4 +224,103 @@ test('admin-session: блоки, часы салона и план — толь�
   assert.equal((await runMw('master', 'POST', '/api/engine/admin/blocks')).passed, true);
   // панель Strapi не трогается вообще
   assert.equal((await runMw('master', 'POST', '/admin/content-manager/collection-types/api::time-block.time-block')).passed, true);
+});
+
+// ── s221: паспортные данные сотрудников (personal.oficial) закрыты любой сессии ──
+async function runMwFull(role, method, pathName, { querystring = '', body, response } = {}) {
+  const ctx = {
+    path: pathName,
+    method,
+    status: 200,
+    body: undefined,
+    state: {},
+    request: {
+      path: pathName,
+      method,
+      querystring,
+      body,
+      header: role ? { authorization: `Bearer ${token(role)}` } : {},
+    },
+  };
+  let passed = false;
+  await mw.default({}, { strapi: globalThis.strapi })(ctx, async () => {
+    passed = true;
+    ctx.body = response;
+  });
+  return { passed, status: ctx.status, code: ctx.body?.error?.code, body: ctx.body };
+}
+
+test('admin-session: запрос с oficial в query или теле — 403 для всех ролей', async () => {
+  const queries = [
+    'populate=oficial',
+    'populate[oficial][fields][0]=documentNumber',
+    'populate%5Boficial%5D=*',
+    'populate%255Boficial%255D=*', // дважды закодировано
+    // закодировано САМО слово — сервер раскодирует ключ и отдал бы компонент
+    'populate[%6Fficial]=*',
+    'populate[o%66icial][fields][0]=documentNumber',
+    'populate[%256Fficial]=*',
+    'populate[0]=OFICIAL',
+    'filters[oficial][documentNumber][$startsWith]=1',
+    'sort=oficial.dateBirth',
+    'populate[personal][populate][oficial]=*',
+  ];
+  for (const role of ['owner', 'manager', 'administrator', 'master']) {
+    for (const q of queries) {
+      const r = await runMwFull(role, 'GET', '/api/personals', { querystring: q });
+      assert.equal(r.passed, false, `${role} ${q} прошёл`);
+      assert.equal(r.status, 403);
+      assert.equal(r.code, 'personal_data_closed');
+    }
+    const w = await runMwFull(role, 'PUT', '/api/personals/abc', { body: { data: { oficial: { phone: '1' } } } });
+    assert.equal(w.passed, false, `${role} запись oficial прошла`);
+    assert.equal(w.code, 'personal_data_closed');
+    // обычные запросы админки не задеты
+    const ok = await runMwFull(role, 'GET', '/api/personals', {
+      querystring: 'filters[isActive][$eq]=true&fields[0]=name&populate[services][fields][0]=title',
+      response: { data: [{ name: 'A' }] },
+    });
+    assert.equal(ok.passed, true);
+    const put = await runMwFull(role, 'PUT', '/api/personals/abc', { body: { data: { bookingPriority: 3 } } });
+    assert.equal(put.passed, true);
+  }
+});
+
+test('admin-session: oficial вырезается из ответа на любой глубине (populate=*, вложенные связи)', async () => {
+  const response = () => ({
+    data: [
+      { name: 'A', oficial: { documentNumber: 'X1', dateBirth: '01.01.1990' }, rates: [{ rate: 150 }] },
+      { name: 'B', personal: { name: 'C', oficial: { documentNumber: 'X2' }, createdAt: new Date(0) } },
+    ],
+    meta: { pagination: { total: 2 } },
+  });
+  for (const role of ['owner', 'manager', 'administrator', 'master']) {
+    const r = await runMwFull(role, 'GET', '/api/personals', { querystring: 'populate=*', response: response() });
+    assert.equal(r.passed, true);
+    assert.equal(JSON.stringify(r.body).includes('X1'), false, `${role}: документ в ответе`);
+    assert.equal(JSON.stringify(r.body).toLowerCase().includes('oficial'), false);
+    assert.equal(r.body.data[0].rates[0].rate, 150);
+    assert.equal(r.body.data[1].personal.name, 'C');
+    assert.ok(r.body.data[1].personal.createdAt instanceof Date);
+    assert.equal(r.body.meta.pagination.total, 2);
+  }
+  // без сессии сотрудника (сайт, панель) ответ не трогается
+  const site = await runMwFull(null, 'GET', '/api/personals', { querystring: 'populate=*', response: response() });
+  assert.equal(site.body.data[0].oficial.documentNumber, 'X1');
+  const panel = await runMwFull('owner', 'GET', '/admin/content-manager/x', { querystring: 'populate=oficial', response: response() });
+  assert.equal(panel.passed, true);
+  assert.equal(panel.body.data[0].oficial.documentNumber, 'X1');
+  // не-JSON ответ (Buffer) проходит как есть
+  const buf = await runMwFull('owner', 'GET', '/api/personals', { response: Buffer.from('oficial') });
+  assert.equal(buf.body.toString(), 'oficial');
+});
+
+test('admin-session: медиатека закрыта сессиям сотрудников', async () => {
+  for (const role of ['owner', 'manager', 'administrator', 'master']) {
+    for (const [method, p] of [['GET', '/api/upload/files'], ['POST', '/api/upload'], ['GET', '/api/upload/files/12']]) {
+      const r = await runMwFull(role, method, p);
+      assert.equal(r.passed, false, `${role} ${method} ${p} прошёл`);
+      assert.equal(r.status, 403);
+    }
+  }
 });

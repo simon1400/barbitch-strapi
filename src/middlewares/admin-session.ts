@@ -75,6 +75,91 @@ const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 export const deniedWriteForStaff = (path: string, method: string): boolean =>
   STAFF_READ_ONLY.has(collectionOf(path)) && !READ_METHODS.has(String(method || 'GET').toUpperCase());
 
+// 🟥 Паспортные данные сотрудников закрыты ЛЮБОЙ сессии сотрудника (s221).
+//
+// Компонент `personal.oficial` — номер документа, адреса, дата рождения, телефон,
+// сканы документов. Сессия получает права full-access токена, поэтому мастер мог
+// одной строкой (`/api/personals?populate=oficial`) вытащить документы всех коллег.
+// Админке компонент не нужен ВООБЩЕ: единственное, что из него показывается, —
+// день и месяц рождения, и их отдаёт ручка движка `/api/engine/admin/birthdays`
+// (сервер читает сам, год наружу не уходит). Поэтому три замка, все роли:
+//   1. запрос, где `oficial` упомянут в query (populate / filters / sort / fields), —
+//      403: фильтр `filters[oficial][documentNumber][$startsWith]` подбирал бы
+//      значение по символу, даже если сам компонент в ответ не попадает;
+//   2. запись с `oficial` в теле — 403 (правится только в панели Strapi);
+//   3. из ЛЮБОГО ответа ключ `oficial` вырезается на любой глубине — закрывает
+//      `populate=*` и вложенный populate через связи (услуги → personal → …),
+//      которые по тексту запроса не распознать.
+//   4. медиатека (`/api/upload/**`) закрыта целиком: в ней лежат сканы документов,
+//      а `GET /api/upload/files` отдавал их списком со ссылками. Админка медиатеку
+//      не читает и файлов не загружает.
+// Панель Strapi (/admin/**) не задета — владелец ведёт данные там же.
+const SECRET_KEY = 'oficial';
+const STAFF_DENIED = new Set(['upload']);
+
+export const deniedForStaff = (path: string): boolean => STAFF_DENIED.has(collectionOf(path));
+const MAX_DEPTH = 12;
+
+const safeDecode = (s: string): string => {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+};
+
+/** Запрос упоминает закрытый компонент (в т.ч. в дважды закодированном виде). */
+export const queryTouchesSecret = (querystring: string): boolean => {
+  const raw = String(querystring || '');
+  return [raw, safeDecode(raw), safeDecode(safeDecode(raw))].some((q) => q.toLowerCase().includes(SECRET_KEY));
+};
+
+/** В теле запроса есть ключ закрытого компонента (на любой глубине). */
+export const bodyTouchesSecret = (body: unknown, depth = 0): boolean => {
+  if (!body || typeof body !== 'object' || depth > MAX_DEPTH) return false;
+  if (Array.isArray(body)) return body.some((v) => bodyTouchesSecret(v, depth + 1));
+  return Object.entries(body as Record<string, unknown>).some(
+    ([k, v]) => k.toLowerCase() === SECRET_KEY || bodyTouchesSecret(v, depth + 1)
+  );
+};
+
+const isPlain = (v: unknown): boolean => {
+  if (!v || typeof v !== 'object') return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+};
+
+/** Вырезает закрытый компонент из ответа (меняет объект на месте); true — что-то вырезано. */
+export const stripSecret = (body: unknown, depth = 0): boolean => {
+  if (depth > MAX_DEPTH) return false;
+  let hit = false;
+  if (Array.isArray(body)) {
+    for (const v of body) if (stripSecret(v, depth + 1)) hit = true;
+    return hit;
+  }
+  // потоки, Buffer, даты — не трогаем
+  if (!isPlain(body)) return false;
+  const obj = body as Record<string, unknown>;
+  for (const k of Object.keys(obj)) {
+    if (k.toLowerCase() === SECRET_KEY) {
+      delete obj[k];
+      hit = true;
+    } else if (stripSecret(obj[k], depth + 1)) hit = true;
+  }
+  return hit;
+};
+
+const denySecret = (ctx: any) => {
+  ctx.status = 403;
+  ctx.body = {
+    error: {
+      status: 403,
+      code: 'personal_data_closed',
+      message: 'Osobní údaje zaměstnanců jsou dostupné jen v administraci Strapi',
+    },
+  };
+};
+
 export default (_config: unknown, { strapi }: { strapi: any }) => {
   let warned = false;
   return async (ctx: any, next: () => Promise<void>) => {
@@ -112,6 +197,14 @@ export default (_config: unknown, { strapi }: { strapi: any }) => {
           };
           return;
         }
+        if (
+          deniedForStaff(path) ||
+          queryTouchesSecret(ctx.request?.querystring || ctx.querystring || '') ||
+          bodyTouchesSecret(ctx.request?.body)
+        ) {
+          denySecret(ctx);
+          return;
+        }
         const proxyToken = process.env.ADMIN_PROXY_API_TOKEN;
         if (proxyToken) {
           ctx.request.header.authorization = `Bearer ${proxyToken}`;
@@ -121,6 +214,9 @@ export default (_config: unknown, { strapi }: { strapi: any }) => {
             'admin-session: ADMIN_PROXY_API_TOKEN не задан — запросы админки к коллекциям будут отклонены'
           );
         }
+        await next();
+        stripSecret(ctx.body);
+        return;
       }
     }
     await next();
