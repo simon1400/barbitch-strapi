@@ -11,6 +11,12 @@ export interface AdminSession {
   id: number
   username: string
   role: AdminRole
+  /**
+   * documentId карточки сотрудника (s229, план карточки §5а.1) — есть только у учёток
+   * со связью. В токене — для админки (своя колонка календаря, свой кабинет); сервер
+   * этому полю токена НЕ верит и берёт связь из базы (см. `sessionFromCtx`).
+   */
+  personalDocId?: string
 }
 
 // s213: 'manager' (управляющая) — права владельца везде, кроме email-рассылки
@@ -91,6 +97,24 @@ export const tokenFromCtx = (ctx: any): string | null => {
 }
 
 /**
+ * Сессия запроса + связь учётки с карточкой ИЗ БАЗЫ (s229, §5а.1).
+ *
+ * Middleware `admin-session` на каждом `/api/**` читает учётку сессии (кэш 30 с) и
+ * кладёт её `personalDocId` в `ctx.state.adminPersonalDocId`. Отсюда его берут все, кто
+ * ищет «себя» (свои брони мастера, пуш-подписка, дозаписи, кабинет администратора,
+ * «это вы» в карточке). Значение из токена отбрасывается: связь, сменённая после входа,
+ * действует сразу, а токен без поля (выдан до s229) работает как прежде — через имя.
+ * Нет связи → `personalDocId` не заполнен, вызывающий ищет карточку по имени.
+ */
+export const sessionFromCtx = (ctx: any): VerifiedSession | null => {
+  const session = verifySession(tokenFromCtx(ctx))
+  if (!session) return null
+  const { personalDocId: _fromToken, ...rest } = session
+  const fromDb: unknown = ctx?.state?.adminPersonalDocId
+  return typeof fromDb === 'string' && fromDb.trim() ? { ...rest, personalDocId: fromDb.trim() } : rest
+}
+
+/**
  * Гейт «руководство» (владелец + управляющая, s213; до s213 — только владелец)
  * для кастомных ручек с `auth: false` (s182).
  * Возвращает сессию либо null — и во втором случае сам пишет 401 в ctx,
@@ -98,7 +122,7 @@ export const tokenFromCtx = (ctx: any): string | null => {
  * campaign.send, чтобы админка одинаково показывала причину.
  */
 export const requireManagement = (ctx: any): VerifiedSession | null => {
-  const session = verifySession(tokenFromCtx(ctx))
+  const session = sessionFromCtx(ctx)
   if (!session || !isManagementRole(session.role)) {
     ctx.status = 401
     ctx.body = {

@@ -57,7 +57,7 @@ globalThis.strapi = {
       return {
         findOne: async ({ where, select }) => {
           dbCalls += 1;
-          assert.deepEqual(select.slice().sort(), ['id', 'isActive', 'role', 'username'], 'пароль не читается');
+          assert.deepEqual(select.slice().sort(), ['id', 'isActive', 'personalDocId', 'role', 'username'], 'пароль не читается');
           if (dbFail) throw dbFail;
           const a = ACCOUNTS.get(where.id);
           return a ? { ...a } : null;
@@ -427,4 +427,51 @@ test('lifecycle admin-user сбрасывает кэш при правке и у
     assert.match(m[1], /dropAccountCache\(\)/, `${hook} не сбрасывает кэш`);
   }
   assert.match(code, /const dropAccountCache = \(\) => invalidateAdminAccount\(\)/);
+});
+
+// ───────────────────────── s229: связь учётки с карточкой (§5а.1) ─────────────────────────
+test('s229: связь с карточкой — из базы в ctx.state, sessionFromCtx верит базе, а не токену', async () => {
+  ACCOUNTS.get(ROLE_IDS.master).personalDocId = 'card-master';
+  // токен без поля (выдан до s229) — проходит, связь берётся из базы
+  let r = await run('master', 'GET', '/api/engine/admin/calendar/day');
+  assert.equal(r.passed, true, r.code);
+  assert.equal(r.ctx.state.adminPersonalDocId, 'card-master');
+  let s = jwt.sessionFromCtx(r.ctx);
+  assert.equal(s.personalDocId, 'card-master');
+  assert.equal(s.username, 'u-master');
+  // учётка без связи — поля нет, вызывающий ищет по имени
+  r = await run('administrator', 'GET', '/api/engine/admin/calendar/day');
+  assert.equal(r.passed, true);
+  assert.equal(r.ctx.state.adminPersonalDocId, null);
+  assert.equal('personalDocId' in jwt.sessionFromCtx(r.ctx), false);
+  // пробелы / пустая строка в базе — связи нет
+  ACCOUNTS.get(ROLE_IDS.owner).personalDocId = '   ';
+  r = await run('owner', 'GET', '/api/engine/admin/calendar/day');
+  assert.equal(r.passed, true);
+  assert.equal(r.ctx.state.adminPersonalDocId, null);
+  // без middleware (state пуст) поле токена НЕ используется
+  const bare = { state: {}, request: { header: { authorization: `Bearer ${token('master', { personalDocId: 'card-master' })}` } } };
+  assert.equal('personalDocId' in jwt.sessionFromCtx(bare), false);
+});
+
+test('s229: токен со связью, а в базе другая или снята — перезаход (personal_changed)', async () => {
+  ACCOUNTS.get(ROLE_IDS.master).personalDocId = 'card-master';
+  let r = await run('master', 'GET', '/api/engine/admin/calendar/day', { tokenOver: { personalDocId: 'card-master' } });
+  assert.equal(r.passed, true, r.code);
+  r = await run('master', 'GET', '/api/engine/admin/calendar/day', { tokenOver: { personalDocId: 'card-other' } });
+  assert.equal(r.passed, false);
+  assert.equal(r.status, 401);
+  assert.equal(r.code, 'session_revoked');
+  assert.equal(r.reason, 'personal_changed');
+  ACCOUNTS.get(ROLE_IDS.master).personalDocId = null;
+  account.invalidateAdminAccount();
+  r = await run('master', 'GET', '/api/personals', { tokenOver: { personalDocId: 'card-master' } });
+  assert.equal(r.reason, 'personal_changed', 'связь снята — токен со связью больше не годится');
+  // токен без поля при снятой связи — проходит (сервер ищет по имени, как до s229)
+  r = await run('master', 'GET', '/api/personals');
+  assert.equal(r.passed, true);
+  // чистая функция: порядок причин прежний, связь — последней
+  assert.equal(account.sessionMismatch({ role: 'master', username: 'x', personalDocId: 'a' }, { isActive: false, role: 'master', username: 'x', personalDocId: 'b' }), 'account_disabled');
+  assert.equal(account.sessionMismatch({ role: 'master', username: 'x', personalDocId: 'a' }, { isActive: true, role: 'master', username: 'x', personalDocId: 'a' }), null);
+  assert.equal(account.sessionMismatch({ role: 'master', username: 'x' }, { isActive: true, role: 'master', username: 'x', personalDocId: 'a' }), null);
 });

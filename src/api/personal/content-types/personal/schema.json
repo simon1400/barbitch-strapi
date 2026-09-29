@@ -229,6 +229,35 @@
           "localized": false
         }
       }
+    },
+    "dualRole": {
+      "type": "enumeration",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "enum": [
+        "yes"
+      ]
+    },
+    "dualRoleUntil": {
+      "type": "string",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "regex": "^\\d{4}-(0[1-9]|1[0-2])$"
+    },
+    "managerSince": {
+      "type": "string",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "regex": "^\\d{4}-(0[1-9]|1[0-2])$"
     }
   }
 }

@@ -34,6 +34,7 @@ import { sanitizeAttribution } from './attribution-core';
 import { occupancyFilters } from './booking-kind';
 import { isFreeKorekceItem, isQualifyingVisit, korekceWindowStart } from './korekce-core';
 import { classifyTitle } from './upsell-core';
+import { findSessionPersonal } from '../../../utils/staff-identity';
 import {
   internalPayrollComment,
   internalPayrollSum,
@@ -2605,18 +2606,15 @@ export default {
   //   master — дневной график всего салона (кто, когда, какая услуга), но
   //            контакты клиентов не приходят вообще, а деньги и снапшот цен —
   //            только по СВОИМ броням.
-  // noonaEmployeeId мастера из сессии (session.username = personal.name — тот же
-  // матч, что у push-подписки и кабинета мастера). null = мастер не найден в
-  // каталоге: тогда своих броней у него нет и деньги не показываются нигде.
+  // noonaEmployeeId мастера из сессии: карточка — по связи учётки (s229, §5а.1),
+  // у учётки без связи — по имени (session.username = personal.name, как раньше).
+  // null = мастер не найден в каталоге: тогда своих броней у него нет и деньги не
+  // показываются нигде.
   async _ownNoonaIdForSession(session) {
     if (!session || session.role !== 'master') return null;
     try {
-      const mine = await strapi.documents('api::personal.personal').findMany({
-        filters: { name: { $eqi: String(session.username || '').trim() } },
-        fields: ['name', 'noonaEmployeeId'],
-        limit: 1,
-      });
-      return mine[0]?.noonaEmployeeId || null;
+      const mine = await findSessionPersonal(strapi, session, { fields: ['name', 'noonaEmployeeId'] });
+      return mine?.noonaEmployeeId || null;
     } catch (e) {
       strapi.log.error('booking-engine: personal lookup for session failed', e);
       return null;

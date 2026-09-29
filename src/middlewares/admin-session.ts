@@ -71,7 +71,93 @@ const segmentsOf = (path: string): string[] => path.toLowerCase().slice('/api/'.
 
 const collectionOf = (path: string): string => segmentsOf(path)[0];
 
-const deniedForMaster = (path: string): boolean => MASTER_DENIED.has(collectionOf(path));
+// 🟥 Роль MASTER — БЕЛЫЙ список коллекций (s229, план «Карточка сотрудника» §15.4).
+//
+// Кабинет мастера читал `/api/penalties`, `/api/add-moneys`, `/api/payrolls` и
+// `/api/personals?populate=offersDone` прямым REST, а фильтр «только мои» ставил браузер:
+// мастер снимал его и читал выплаты, штрафы, доплаты и заработок коллег. Кабинет теперь
+// ходит в ручку движка `/api/engine/admin/my-month` (карточку сессии определяет сервер),
+// а роли master из коллекций (content-types `api::*` и пользователи плагина) открыты
+// только те, что читают её два экрана — календарь и кабинет:
+//   personals      — список мастеров календаря (с ограничениями ниже);
+//   salon-hours, time-blocks, shifts — сетка дня/недели и дежурный администратор;
+//   salon-services — каталог (карточки услуг в шторке брони);
+//   admin-users    — вход и свой статус (свои правила ниже, s223).
+// Всё остальное (деньги, ваучеры, журналы, токены клиентов, отпуска коллег) — 403.
+// Кастомные ручки (`/api/engine/**`, дедупликация и т. п.) не задеты: у них свои гейты.
+export const MASTER_COLLECTIONS = new Set(['personals', 'salon-hours', 'time-blocks', 'shifts', 'salon-services', 'admin-users']);
+
+/** Имена коллекций REST (plural и singular типов `api::*` + пользователи плагина), в нижнем регистре. */
+export const contentCollectionsOf = (contentTypes: Record<string, any> | undefined): Set<string> => {
+  const out = new Set<string>(['users']);
+  for (const ct of Object.values(contentTypes || {})) {
+    if (!String(ct?.uid || '').startsWith('api::')) continue;
+    for (const n of [ct?.info?.pluralName, ct?.info?.singularName]) if (n) out.add(String(n).toLowerCase());
+  }
+  return out;
+};
+
+export const deniedForMaster = (path: string, collections: Set<string> = new Set()): boolean => {
+  const c = collectionOf(path);
+  if (MASTER_DENIED.has(c)) return true;
+  return collections.has(c) && !MASTER_COLLECTIONS.has(c);
+};
+
+// `/api/personals` для мастера (s229): только чтение списка для календаря.
+//   • query — только известные ключи: фильтры по полям календаря, fields из списка ниже,
+//     сортировка по имени/порядку, пагинация, статус. `populate` и фильтр/сортировка по
+//     деньгам (`ratePercent` сортировкой подбирался бы у коллег по порядку) — 403;
+//   • ответ — у чужих карточек только поля календаря, процент — только у своей
+//     (своя = связь учётки из базы; у учётки без связи — имя = логин, как до s229).
+export const MASTER_PERSONAL_FIELDS = new Set(['name', 'noonaEmployeeId', 'tier', 'calendarOrder', 'ratePercent', 'position', 'isActive']);
+const MASTER_PERSONAL_FILTERS = new Set(['isActive', 'position', 'documentId', 'name', 'noonaEmployeeId', 'tier']);
+const MASTER_PERSONAL_SORT = new Set(['name', 'calendarOrder']);
+const MASTER_PERSONAL_KEEP = new Set([
+  'id', 'documentId', 'name', 'noonaEmployeeId', 'tier', 'calendarOrder', 'position', 'isActive',
+  'createdAt', 'updatedAt', 'publishedAt', 'locale',
+]);
+
+export const deniedMasterPersonalsQuery = (querystring: string): boolean => {
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(String(querystring || ''));
+  } catch {
+    return true;
+  }
+  for (const [key, value] of params) {
+    let m: RegExpExecArray | null;
+    if ((m = /^filters\[([A-Za-z]+)\]\[\$(eq|eqi|ne|in|null|notNull)\](\[\d+\])?$/.exec(key))) {
+      if (!MASTER_PERSONAL_FILTERS.has(m[1])) return true;
+    } else if (/^fields(\[\d+\])?$/.test(key)) {
+      if (value.split(',').some((f) => !MASTER_PERSONAL_FIELDS.has(f.trim()))) return true;
+    } else if (/^sort(\[\d+\])?$/.test(key)) {
+      if (value.split(',').some((f) => !MASTER_PERSONAL_SORT.has(f.trim().split(':')[0]))) return true;
+    } else if (/^pagination\[(page|pageSize|start|limit|withCount)\]$/.test(key)) {
+      continue;
+    } else if (key === 'status' || key === 'locale') {
+      continue;
+    } else {
+      return true;
+    }
+  }
+  return false;
+};
+
+/** Проекция ответа `/api/personals` для мастера (меняет на месте). */
+export const projectPersonalsForMaster = (body: unknown, own: { docId: string; username: string }): void => {
+  const data = isPlain(body) ? (body as Record<string, unknown>).data : undefined;
+  const rows = Array.isArray(data) ? data : isPlain(data) ? [data] : [];
+  const name = own.username.trim().toLowerCase();
+  for (const row of rows) {
+    if (!isPlain(row)) continue;
+    const r = row as Record<string, unknown>;
+    const mine = own.docId ? r.documentId === own.docId : !!name && String(r.name ?? '').trim().toLowerCase() === name;
+    for (const k of Object.keys(r)) {
+      if (MASTER_PERSONAL_KEEP.has(k) || (mine && k === 'ratePercent')) continue;
+      delete r[k];
+    }
+  }
+};
 
 // 🟥 Коллекции ТОЛЬКО ДЛЯ ЧТЕНИЯ любой сессии сотрудника (s218).
 //
@@ -235,6 +321,8 @@ const denySecret = (ctx: any) => {
 
 export default (_config: unknown, { strapi }: { strapi: any }) => {
   let warned = false;
+  let collections: Set<string> | null = null;
+  const contentCollections = () => (collections ||= contentCollectionsOf(strapi?.contentTypes));
   return async (ctx: any, next: () => Promise<void>) => {
     const path: string = ctx?.request?.path || ctx?.path || '';
     // регистр — см. segmentsOf: `/API/engine/...` роутер тоже принимает
@@ -275,7 +363,11 @@ export default (_config: unknown, { strapi }: { strapi: any }) => {
         // сохраняем ДО подмены — иначе гейты собственных ручек ослепнут
         ctx.state.adminJwt = raw;
         ctx.state.adminSession = session;
-        if (session.role === 'master' && deniedForMaster(path)) {
+        // s229 (§5а.1): связь учётки с карточкой — из базы, не из токена (см. sessionFromCtx)
+        ctx.state.adminPersonalDocId = account?.personalDocId || null;
+        const isMaster = session.role === 'master';
+        const isPersonals = collectionOf(path) === 'personals';
+        if (isMaster && deniedForMaster(path, contentCollections())) {
           ctx.status = 403;
           ctx.body = {
             error: {
@@ -312,6 +404,14 @@ export default (_config: unknown, { strapi }: { strapi: any }) => {
           denyStaffData(ctx);
           return;
         }
+        // после проверки oficial (s221) — у неё свой код ошибки
+        if (isMaster && isPersonals && deniedMasterPersonalsQuery(ctx.request?.querystring || ctx.querystring || '')) {
+          ctx.status = 403;
+          ctx.body = {
+            error: { status: 403, code: 'forbidden_for_master', message: 'Tato data jsou dostupná jen přes kalendář' },
+          };
+          return;
+        }
         const proxyToken = process.env.ADMIN_PROXY_API_TOKEN;
         if (proxyToken) {
           ctx.request.header.authorization = `Bearer ${proxyToken}`;
@@ -323,6 +423,9 @@ export default (_config: unknown, { strapi }: { strapi: any }) => {
         }
         await next();
         stripSecret(ctx.body);
+        if (isMaster && isPersonals) {
+          projectPersonalsForMaster(ctx.body, { docId: ctx.state.adminPersonalDocId || '', username: session.username || '' });
+        }
         return;
       }
     }

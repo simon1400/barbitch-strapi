@@ -21,6 +21,8 @@ export interface AdminAccount {
   isActive: boolean | null
   role: string | null
   username: string | null
+  /** связь учётки с карточкой сотрудника (s229, §5а.1); null — связи нет */
+  personalDocId: string | null
 }
 
 export const ACCOUNT_CACHE_TTL_MS = 30_000
@@ -51,23 +53,30 @@ export const invalidateAdminAccount = (id?: number | string | null): void => {
  * Учётку без `isActive === true` не пускаем: логин тоже требует `isActive: true`.
  */
 export const sessionMismatch = (
-  session: { role: string; username: string },
+  session: { role: string; username: string; personalDocId?: unknown },
   account: AdminAccount | null,
 ): string | null => {
   if (!account) return 'account_missing'
   if (account.isActive !== true) return 'account_disabled'
   if (account.role !== session.role) return 'role_changed'
   if (account.username !== session.username) return 'username_changed'
+  // s229: токен со связью, а связь в базе другая или снята — админка показывала бы
+  // чужую колонку/кабинет. Токен без поля (выдан до s229 или учётке без связи) —
+  // не повод: сервер связь всё равно берёт из базы.
+  if (session.personalDocId !== undefined && (account.personalDocId || '') !== String(session.personalDocId || '')) {
+    return 'personal_changed'
+  }
   return null
 }
 
 const readAccount = async (strapi: any, id: number): Promise<AdminAccount | null> => {
   const row = await strapi.db.query('api::admin-user.admin-user').findOne({
     where: { id },
-    select: ['id', 'isActive', 'role', 'username'],
+    select: ['id', 'isActive', 'role', 'username', 'personalDocId'],
   })
   if (!row) return null
-  return { isActive: row.isActive ?? null, role: row.role ?? null, username: row.username ?? null }
+  const personalDocId = typeof row.personalDocId === 'string' && row.personalDocId.trim() ? row.personalDocId.trim() : null
+  return { isActive: row.isActive ?? null, role: row.role ?? null, username: row.username ?? null, personalDocId }
 }
 
 /** Учётка по id (с кэшем). Ошибка базы пробрасывается и в кэш не попадает. */

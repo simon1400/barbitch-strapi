@@ -159,10 +159,30 @@ export const isLeft = (p: any): boolean => p?.isActive === false || String(p?.na
 export const hiddenFromSession = (name: unknown, ownerNames: Set<string>, role: unknown): boolean =>
   role !== 'owner' && ownerNames.has(lower(name));
 
-/** Учётка по имени карточки (инвариант username = personals.name, память master-rename-invariant). */
-export const accountForName = (name: unknown, accounts: any[]) => {
-  const key = lower(name);
-  return key ? accounts.find((a) => lower(a.username) === key) || null : null;
+/**
+ * Учётка карточки (s229, §5а.1): сначала по связи `personalDocId`; у учёток без связи —
+ * по имени (прежний инвариант username = personals.name, память master-rename-invariant).
+ * Учётка, связанная с ДРУГОЙ карточкой, по совпадению имени не берётся.
+ */
+export const accountForCard = (card: { documentId?: unknown; name?: unknown } | null, accounts: any[]) => {
+  const docId = cleanText(card?.documentId);
+  if (docId) {
+    const linked = accounts.find((a) => cleanText(a.personalDocId) === docId);
+    if (linked) return linked;
+  }
+  const key = lower(card?.name);
+  return key ? accounts.find((a) => !cleanText(a.personalDocId) && lower(a.username) === key) || null : null;
+};
+
+/**
+ * Карточка — это сессия (s229): по связи учётки из базы (`sessionFromCtx`); без связи —
+ * по id учётки карточки, а если учётки нет — по имени, как до s229.
+ */
+export const isSelfCard = (session: any, card: { documentId?: unknown; name?: unknown }, account: any): boolean => {
+  const own = cleanText(session?.personalDocId);
+  if (own) return own === cleanText(card?.documentId);
+  if (account) return Number(account.id) === Number(session?.id);
+  return lower(session?.username) === lower(card?.name);
 };
 
 // Телефон → канонический вид: +<код><номер>; 9 цифр без кода → чешский +420.
@@ -343,17 +363,69 @@ export const normalizeBooking = (data: any, current: any) => {
   return { patch: { bookingPriority: v }, changes: from === v ? [] : [{ key: 'bookingPriority', from, to: v }] };
 };
 
-/** Секция «Оплата»: доля мастера и порог. Ставки — только «новая с даты» (planNewRate). */
+const YM_RE = /^(20\d{2})-(0[1-9]|1[0-2])$/;
+
+/** 'YYYY-MM' или null (пусто). Иначе 400. */
+export const normalizeYm = (raw: unknown, code: string, label: string): string | null => {
+  if (raw == null || raw === '') return null;
+  const v = String(raw).trim();
+  if (!YM_RE.test(v)) throw new StaffError(400, code, `${label} — месяц в формате ГГГГ-ММ`);
+  return v;
+};
+
+/**
+ * Зарплатная группа карточки (s229, §5а.2) — раньше списки DUAL_ROLE_WORKERS / MANAGERS
+ * в коде админки (teamSplit.ts), по имени. Значения в базе: `dualRole` 'yes' | null,
+ * `dualRoleUntil` / `managerSince` 'YYYY-MM' | null.
+ */
+export const payrollGroupOf = (doc: any) => ({
+  dualRole: doc?.dualRole === 'yes',
+  dualRoleUntil: YM_RE.test(String(doc?.dualRoleUntil ?? '')) ? doc.dualRoleUntil : null,
+  managerSince: YM_RE.test(String(doc?.managerSince ?? '')) ? doc.managerSince : null,
+});
+
+/**
+ * Секция «Оплата»: доля мастера и порог + зарплатная группа (s229). Ставки — только
+ * «новая с даты» (planNewRate).
+ * 🟥 Группа меняет расчёт зарплат всех месяцев, где она действует (совместитель — до
+ * `dualRoleUntil` включительно, управляющая — с `managerSince`): админка предупреждает
+ * и сбрасывает кэш месяцев.
+ */
 export const normalizePay = (data: any, current: any) => {
-  const keys = onlyKeys(data, ['ratePercent', 'excessThreshold']);
-  const patch: Record<string, number> = {};
+  const keys = onlyKeys(data, ['ratePercent', 'excessThreshold', 'dualRole', 'dualRoleUntil', 'managerSince']);
+  const patch: Record<string, any> = {};
   if (keys.includes('ratePercent')) patch.ratePercent = intIn(data.ratePercent, 0, 100, 'bad_percent', 'Доля мастера, %');
   if (keys.includes('excessThreshold')) {
     patch.excessThreshold = intIn(data.excessThreshold, 0, THRESHOLD_MAX, 'bad_threshold', 'Порог');
   }
+  const group = payrollGroupOf(current);
+  if (keys.includes('dualRole')) {
+    if (typeof data.dualRole !== 'boolean') throw new StaffError(400, 'bad_dual_role', 'Совместитель — да или нет');
+    patch.dualRole = data.dualRole ? 'yes' : null;
+  }
+  if (keys.includes('dualRoleUntil')) patch.dualRoleUntil = normalizeYm(data.dualRoleUntil, 'bad_month', 'Совмещение до');
+  const dualAfter = hasOwn(patch, 'dualRole') ? patch.dualRole === 'yes' : group.dualRole;
+  // без совмещения «до» не бывает — снимаем вместе с признаком
+  if (!dualAfter) {
+    if (hasOwn(patch, 'dualRoleUntil') && patch.dualRoleUntil) {
+      throw new StaffError(400, 'bad_month', '«Совмещение до» — только у совместителя');
+    }
+    if (group.dualRoleUntil) patch.dualRoleUntil = null;
+  }
+  if (keys.includes('managerSince')) {
+    patch.managerSince = normalizeYm(data.managerSince, 'bad_month', 'Управляющая с');
+    if (patch.managerSince && current?.position !== 'manager') {
+      throw new StaffError(409, 'not_manager', 'Оклад управляющей — только у должности «управляющая»');
+    }
+  }
+  const before = (k: string) => {
+    if (k === 'dualRole') return group.dualRole ? 'yes' : null;
+    if (k === 'dualRoleUntil' || k === 'managerSince') return group[k];
+    return current?.[k] ?? null;
+  };
   const changes = Object.keys(patch)
-    .filter((k) => (current?.[k] ?? null) !== patch[k])
-    .map((k) => ({ key: k, from: current?.[k] ?? null, to: patch[k] }));
+    .filter((k) => before(k) !== patch[k])
+    .map((k) => ({ key: k, from: before(k), to: patch[k] }));
   return { patch, changes };
 };
 
@@ -547,8 +619,12 @@ const FIELD_CS = {
   bookingPriority: 'priorita',
   ratePercent: 'podíl mistra',
   excessThreshold: 'práh',
+  dualRole: 'souběh mistr + administrátor',
+  dualRoleUntil: 'souběh do',
+  managerSince: 'vedoucí od',
 };
 const showValue = (key: string, v: any) => {
+  if (key === 'dualRole') return v === 'yes' ? 'ano' : 'ne';
   if (v == null || v === '') return '—';
   if (key === 'position') return POSITIONS[v] || v;
   if (key === 'hiredAt' || key === 'leftAt') return fmtDay(v);
@@ -591,16 +667,6 @@ export const logSummary = (kind: string, name: string, parts: string[] = []) => 
 export const changeParts = (changes: any[]) => changes.map(changeText);
 
 // ── шаг 4: имя, пароль, создание, уход, стирание ──────────────────────────
-
-/**
- * 🟥 Имена, зашитые в расчёт зарплат админки (`teamSplit.ts`: DUAL_ROLE_WORKERS, MANAGERS).
- * Переименование такого человека молча выкинуло бы его из группы совместителей или
- * управляющих, а новое имя из списка — втянуло бы чужого. Сервер этих списков не знает,
- * поэтому держит копию как вторую линию (первая — выключенная кнопка в админке); тест
- * сверяет её с teamSplit.ts. Снимается фазой §5а плана (списки — в карточку).
- */
-export const PAYROLL_LOCKED_NAMES = ['Mariia Medvedeva', 'Oleksandra Fishchuk'];
-export const isNameLocked = (name: unknown): boolean => PAYROLL_LOCKED_NAMES.some((n) => lower(n) === lower(name));
 
 // буква, дальше буквы (с диакритикой), пробел, точка, дефис, апостроф; «❌» — служебная
 // отметка старых ушедших, новому имени её не дать
@@ -845,15 +911,20 @@ const CARD_FIELDS = [
   'hiredAt',
   'leftAt',
   'privateErasedAt',
+  'dualRole',
+  'dualRoleUntil',
+  'managerSince',
   'updatedAt',
 ];
 const DOC_FIELDS = ['kind', 'title', 'validUntil', 'fileName', 'mime', 'size', 'uploadedBy', 'createdAt'];
-const ACCOUNT_SELECT = ['id', 'username', 'role', 'isActive'];
+const ACCOUNT_SELECT = ['id', 'username', 'role', 'isActive', 'personalDocId'];
 
 const photoOf = (p: any) =>
   p?.photo?.url ? { id: p.photo.id ?? null, url: p.photo.url, thumb: p.photo.formats?.thumbnail?.url || p.photo.url } : null;
 
-const accountView = (a: any) => (a ? { id: a.id, username: a.username, role: a.role, isActive: a.isActive === true } : null);
+// linked — учётка связана с карточкой полем personalDocId (s229); false — пока по имени
+const accountView = (a: any) =>
+  a ? { id: a.id, username: a.username, role: a.role, isActive: a.isActive === true, linked: Boolean(cleanText(a.personalDocId)) } : null;
 
 const docView = (d: any) => ({
   documentId: d.documentId,
@@ -943,10 +1014,11 @@ export default {
    * не лёг в базу открытым, даже если запись пройдёт мимо lifecycle. Document service —
    * чтобы у строки были documentId и publishedAt, как у заведённых в панели.
    */
-  async _createAccount(username: string, role: string) {
+  async _createAccount(username: string, role: string, personalDocId: string) {
     const password = genPassword();
     const hash = await bcrypt.hash(password, 10);
-    const row = await strapi.documents(ADMIN_UID).create({ data: { username, password: hash, role, isActive: true } });
+    // связь с карточкой — сразу (s229, §5а.1): «кто я» ищется по ней, а не по имени
+    const row = await strapi.documents(ADMIN_UID).create({ data: { username, password: hash, role, isActive: true, personalDocId } });
     invalidateAdminAccount();
     return { id: row.id, password };
   },
@@ -1019,7 +1091,7 @@ export default {
     const scheduled = await this._hasSchedule(visible.filter((d) => d.position === 'master').map((d) => d.documentId));
     const published = new Set(pubs.map((p) => p.documentId));
     const rows = visible.map((d) => {
-      const account = accountForName(d.name, accounts);
+      const account = accountForCard(d, accounts);
       const servicesCount = (d.services || []).length;
       const missing = privateMissing(d.oficial);
       return {
@@ -1123,7 +1195,7 @@ export default {
         limit: HISTORY_LIMIT,
       }),
     ]);
-    const account = accountForName(doc.name, accounts);
+    const account = accountForCard(doc, accounts);
     const servicesCount = (doc.services || []).length;
     const missing = privateMissing(doc.oficial);
     const rates = (doc.rates || []).map(pickRate).sort((a, b) => String(a.from).localeCompare(String(b.from)));
@@ -1137,7 +1209,7 @@ export default {
       left: isLeft(doc),
       published: Boolean(pub),
       updatedAt: doc.updatedAt,
-      self: lower(session?.username) === lower(doc.name),
+      self: isSelfCard(session, doc, account),
       photo: photoOf(doc),
       hiredAt: ymdOf(doc.hiredAt),
       leftAt: ymdOf(doc.leftAt),
@@ -1161,6 +1233,7 @@ export default {
         excessThreshold: doc.excessThreshold ?? 0,
         rates,
         currentRate: rateOn(doc.rates, today),
+        group: payrollGroupOf(doc),
       },
       account: accountView(account),
       privateMissing: missing,
@@ -1249,10 +1322,10 @@ export default {
     const posChange = result.changes.find((c) => c.key === 'position');
     let account = null;
     if (posChange) {
-      if (lower(session?.username) === lower(doc.name)) {
+      account = accountForCard(doc, accounts);
+      if (isSelfCard(session, doc, account)) {
         throw new StaffError(409, 'self_position', 'Свою должность менять нельзя — вместе с ней сменится ваша роль входа');
       }
-      account = accountForName(doc.name, accounts);
       if (account?.role === 'owner') throw new StaffError(409, 'owner_account', 'Учётка владельца из карточки не меняется');
       if (posChange.from === 'master') {
         const rows = await this._futureBookings(doc, now);
@@ -1686,7 +1759,7 @@ export default {
     let account = null;
     try {
       if (master) await this._write(documentId, { noonaEmployeeId: documentId });
-      if (input.account) account = await this._createAccount(input.name, ROLE_BY_POSITION[input.position]);
+      if (input.account) account = await this._createAccount(input.name, ROLE_BY_POSITION[input.position], documentId);
     } catch (e) {
       await strapi
         .documents(PERSONAL_UID)
@@ -1720,9 +1793,9 @@ export default {
     }
     const { doc, accounts } = await this._card(session, id);
     const documentId = doc.documentId;
-    const account = accountForName(doc.name, accounts);
+    const account = accountForCard(doc, accounts);
     if (account?.role === 'owner') throw new StaffError(409, 'owner_account', 'Учётка владельца из карточки не меняется');
-    const self = account ? Number(account.id) === Number(session?.id) : lower(session?.username) === lower(doc.name);
+    const self = isSelfCard(session, doc, account);
     let password = null;
     let unchanged = false;
 
@@ -1731,8 +1804,13 @@ export default {
       if (isLeft(doc)) throw new StaffError(409, 'staff_left', 'Сотрудник завершил работу — учётка не нужна');
       const role = ROLE_BY_POSITION[doc.position];
       if (!role) throw new StaffError(409, 'bad_position', 'У карточки не указана должность');
-      // логин = имя карточки; другой учётки с этим именем нет (accountForName — без регистра)
-      const created = await this._createAccount(doc.name, role);
+      // логин занят учёткой, связанной с другой карточкой (s229) — иначе уникальность упала бы 500
+      if (accounts.some((a) => lower(a.username) === lower(doc.name))) {
+        throw new StaffError(409, 'name_taken', 'Такой логин уже занят другой учёткой');
+      }
+      // логин = имя карточки; учётки с этим логином нет — assertNameFree при создании и
+      // переименовании карточки (без учёта регистра); связь — на эту карточку
+      const created = await this._createAccount(doc.name, role, documentId);
       password = created.password;
       this._log('staff_account', session, documentId, logSummary('account_create', doc.name, [`role: ${role}`]));
     } else {
@@ -1776,13 +1854,10 @@ export default {
     if (isLeft(doc)) throw new StaffError(409, 'staff_left', 'Ушедшего сотрудника не переименовывают');
     const name = normalizeName(body?.name);
     if (name === doc.name) return { ...(await this.card({ session, id: documentId, now })), unchanged: true };
-    if (lower(session?.username) === lower(doc.name)) {
+    const account = accountForCard(doc, accounts);
+    if (isSelfCard(session, doc, account)) {
       throw new StaffError(409, 'self_rename', 'Себя переименовать нельзя — сменится ваш логин');
     }
-    if (isNameLocked(doc.name) || isNameLocked(name)) {
-      throw new StaffError(409, 'name_locked', 'Это имя зашито в расчёт зарплат — меняется только релизом');
-    }
-    const account = accountForName(doc.name, accounts);
     if (account?.role === 'owner') throw new StaffError(409, 'owner_account', 'Учётка владельца из карточки не меняется');
     assertNameFree(name, await this._allCards(), accounts, { exceptDocId: documentId, exceptAccountId: account?.id ?? null });
 
@@ -1818,7 +1893,7 @@ export default {
   _leaveBlockers(doc: any, account: any, session: any, bookings: any[]) {
     const out = [];
     if (isLeft(doc)) out.push('staff_left');
-    if (lower(session?.username) === lower(doc.name)) out.push('self_leave');
+    if (isSelfCard(session, doc, account)) out.push('self_leave');
     if (account?.role === 'owner') out.push('owner_account');
     if (bookings.length) out.push('future_bookings');
     return out;
@@ -1832,7 +1907,7 @@ export default {
       this._futureBookings(doc, now),
       this._futurePlanBlocks(doc.documentId, today),
     ]);
-    const account = accountForName(doc.name, accounts);
+    const account = accountForCard(doc, accounts);
     return {
       documentId: doc.documentId,
       name: doc.name,
@@ -1858,7 +1933,7 @@ export default {
     const { doc, accounts } = await this._card(session, id, { rates: true });
     assertBase(body?.base, doc);
     const documentId = doc.documentId;
-    const account = accountForName(doc.name, accounts);
+    const account = accountForCard(doc, accounts);
     const early = this._leaveBlockers(doc, account, session, []);
     if (early.includes('staff_left')) throw new StaffError(409, 'staff_left', 'Сотрудник уже завершил работу');
     if (early.includes('self_leave')) throw new StaffError(409, 'self_leave', 'Себе завершить работу нельзя');

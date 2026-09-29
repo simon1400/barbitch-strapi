@@ -542,7 +542,7 @@ test('список: без личных данных, признаки, влад
 test('карточка: учётка без пароля, ставки, ближайшее отсутствие; 404 для чужого/скрытого/мусора', async () => {
   const st = makeStrapi();
   const c = await svc.card({ session: MANAGER, id: P.veronika, now: NOW });
-  assert.deepEqual(c.account, { id: 3, username: 'Veronika', role: 'master', isActive: true });
+  assert.deepEqual(c.account, { id: 3, username: 'Veronika', role: 'master', isActive: true, linked: false });
   assert.ok(!hasKeyDeep(c, 'password') && !hasKeyDeep(c, 'oficial'));
   assert.ok(!JSON.stringify(c).includes(SECRET.documentNumber));
   assert.deepEqual(c.privateMissing, []);
@@ -717,6 +717,19 @@ test('запись и оплата: приоритет только мастер
     await expectErr(() => svc.patch({ session: OWNER, id: P.veronika, body: { section, base: pay.updatedAt, data: {} }, now: NOW }), 400, 'bad_section');
   }
   await expectErr(() => svc.patch({ session: MANAGER, id: P.dima, body: { section: 'pay', base: 'x', data: { ratePercent: 1 } }, now: NOW }), 404, 'staff_not_found');
+  // s229 §5а.2: зарплатная группа — в карточке, обе версии, журнал
+  assert.deepEqual(pay.pay.group, { dualRole: false, dualRoleUntil: null, managerSince: null });
+  const g = await svc.patch({ session: OWNER, id: P.veronika, body: { section: 'pay', base: pay.updatedAt, data: { dualRole: true, dualRoleUntil: '2026-06' } }, now: NOW });
+  assert.deepEqual(g.pay.group, { dualRole: true, dualRoleUntil: '2026-06', managerSince: null });
+  for (const v of [st.draft(P.veronika), st.pub(P.veronika)]) assert.deepEqual([v.dualRole, v.dualRoleUntil], ['yes', '2026-06']);
+  assert.equal(st.logs.at(-1).summary, 'Mzdové podmínky upraveny: Veronika · souběh mistr + administrátor: ne → ano · souběh do: — → 2026-06');
+  const off = await svc.patch({ session: OWNER, id: P.veronika, body: { section: 'pay', base: g.updatedAt, data: { dualRole: false } }, now: NOW });
+  assert.deepEqual(off.pay.group, { dualRole: false, dualRoleUntil: null, managerSince: null });
+  assert.deepEqual([st.pub(P.veronika).dualRole, st.pub(P.veronika).dualRoleUntil], [null, null], 'снятие — обе версии, «до» вместе с признаком');
+  await expectErr(() => svc.patch({ session: OWNER, id: P.veronika, body: { section: 'pay', base: off.updatedAt, data: { managerSince: '2026-10' } }, now: NOW }), 409, 'not_manager');
+  const m = await svc.patch({ session: OWNER, id: P.mariia, body: { section: 'pay', base: st.draft(P.mariia).updatedAt, data: { managerSince: '2026-10' } }, now: NOW });
+  assert.equal(m.pay.group.managerSince, '2026-10');
+  assert.equal(st.pub(P.mariia).managerSince, '2026-10');
 });
 
 test('новая ставка: закрывает прежнюю днём раньше, обе версии, id прежних записей сохранены', async () => {
@@ -913,17 +926,41 @@ test('normalizeName / assertNameFree / genPassword', () => {
   assert.ok(/[A-Z]/.test(pw) && /\d/.test(pw));
 });
 
-test('PAYROLL_LOCKED_NAMES совпадает с зарплатными списками админки (teamSplit.ts)', () => {
-  const code = fs.readFileSync(path.join(root, '../admin/src/pages/dashboard/fetch/teamSplit.ts'), 'utf8');
-  const block = (name) => {
-    const m = new RegExp(`const ${name}[^=]*=\\s*\\[([\\s\\S]*?)\\n?\\]`).exec(code);
-    assert.ok(m, `${name} не найден`);
-    return [...m[1].matchAll(/name:\s*'([^']+)'/g)].map((x) => x[1]);
-  };
-  const names = new Set([...block('DUAL_ROLE_WORKERS'), ...block('MANAGERS')]);
-  assert.deepEqual([...names].sort(), [...S.PAYROLL_LOCKED_NAMES].sort());
-  assert.equal(S.isNameLocked('mariia  medvedeva'), true);
-  assert.equal(S.isNameLocked('Veronika'), false);
+test('s229 §5а.2: зарплатная группа в секции «Оплата» — формат, связки, журнал; запрета имён больше нет', () => {
+  assert.equal(S.PAYROLL_LOCKED_NAMES, undefined, 'список имён снят — группы в карточке');
+  // карточка читает поля группы (заглушка базы отдаёт всё — поэтому проверка по исходнику)
+  const svcSrc = fs.readFileSync(path.join(root, 'src/api/booking-engine/services/staff.ts'), 'utf8');
+  const cardFields = /const CARD_FIELDS = \[([\s\S]*?)\];/.exec(svcSrc)?.[1] || '';
+  for (const f of ['dualRole', 'dualRoleUntil', 'managerSince']) assert.ok(cardFields.includes(`'${f}'`), `CARD_FIELDS без ${f}`);
+  assert.equal(S.isNameLocked, undefined);
+  const mgr = { position: 'manager', dualRole: 'yes', dualRoleUntil: '2026-06', managerSince: null };
+  assert.deepEqual(S.payrollGroupOf(mgr), { dualRole: true, dualRoleUntil: '2026-06', managerSince: null });
+  assert.deepEqual(S.payrollGroupOf({ dualRole: 'no', dualRoleUntil: '2026-13', managerSince: 'x' }), { dualRole: false, dualRoleUntil: null, managerSince: null });
+  // управляющая с месяца
+  let r = S.normalizePay({ managerSince: '2026-10' }, mgr);
+  assert.deepEqual(r.patch, { managerSince: '2026-10' });
+  assert.deepEqual(r.changes, [{ key: 'managerSince', from: null, to: '2026-10' }]);
+  assert.equal(S.changeParts(r.changes)[0], 'vedoucí od: — → 2026-10');
+  // снять совмещение — «до» снимается вместе с ним
+  r = S.normalizePay({ dualRole: false }, mgr);
+  assert.deepEqual(r.patch, { dualRole: null, dualRoleUntil: null });
+  assert.deepEqual(S.changeParts(r.changes), ['souběh mistr + administrátor: ano → ne', 'souběh do: 2026-06 → —']);
+  // без изменений — пустой список
+  assert.deepEqual(S.normalizePay({ dualRole: true, dualRoleUntil: '2026-06' }, mgr).changes, []);
+  // совмещение без «до» (Oleksandra)
+  r = S.normalizePay({ dualRole: true }, { position: 'administrator' });
+  assert.deepEqual([r.patch, r.changes.length], [{ dualRole: 'yes' }, 1]);
+  const bad = (data, cur, code) => assert.throws(() => S.normalizePay(data, cur), (e) => e.code === code, JSON.stringify(data));
+  bad({ dualRole: 'yes' }, mgr, 'bad_dual_role');
+  bad({ dualRoleUntil: '2026-6' }, mgr, 'bad_month');
+  bad({ dualRoleUntil: '1999-01' }, mgr, 'bad_month');
+  bad({ managerSince: '2026-13' }, mgr, 'bad_month');
+  bad({ dualRoleUntil: '2026-06' }, { position: 'master' }, 'bad_month');
+  bad({ dualRole: false, dualRoleUntil: '2026-06' }, mgr, 'bad_month');
+  bad({ managerSince: '2026-10' }, { position: 'master' }, 'not_manager');
+  bad({ name: 'x' }, mgr, 'bad_field');
+  // снять «управляющая с» можно при любой должности
+  assert.deepEqual(S.normalizePay({ managerSince: '' }, { position: 'master', managerSince: '2026-10' }).patch, { managerSince: null });
 });
 
 test('normalizeCreate: обязательны имя и должность; доля — только мастеру; ставка — с текущего месяца', () => {
@@ -1015,7 +1052,8 @@ test('новый мастер: обе версии, ключ колонки = do
   assert.equal(acc.isActive, true);
   assert.match(acc.password, /^\$2[aby]\$10\$/, 'в базу — только хэш');
   assert.ok(bcrypt.compareSync(r.password, acc.password), 'пароль из ответа подходит');
-  assert.deepEqual(r.account, { id: acc.id, username: 'Kira Nová', role: 'master', isActive: true });
+  assert.equal(acc.personalDocId, id, 's229: учётка сразу связана с карточкой');
+  assert.deepEqual(r.account, { id: acc.id, username: 'Kira Nová', role: 'master', isActive: true, linked: true });
   assert.deepEqual(r.flags, ['no_services', 'no_schedule', 'private_incomplete'], 'чек-лист «что осталось»');
   assert.equal(st.logs.length, 1);
   assert.equal(st.logs[0].action, 'staff_create');
@@ -1110,7 +1148,7 @@ test('переименование: карточка (обе версии) + л�
   assert.equal(st.pub(P.veronika).name, 'Veronika Nováková');
   assert.equal(st.accounts.find((a) => a.id === 3).username, 'Veronika Nováková');
   assert.deepEqual(globalThis.__invalidated, [3], 'сессия со старым логином гаснет');
-  assert.deepEqual(r.account, { id: 3, username: 'Veronika Nováková', role: 'master', isActive: true });
+  assert.deepEqual(r.account, { id: 3, username: 'Veronika Nováková', role: 'master', isActive: true, linked: false });
   assert.equal(st.logs.at(-1).summary, 'Přejmenování: Veronika Nováková · Veronika → Veronika Nováková · login změněn');
   // устаревшая base
   await expectErr(() => svc.rename({ session: MANAGER, id: P.veronika, body: { name: 'X Y', base }, now: NOW }), 409, 'staff_changed');
@@ -1121,8 +1159,6 @@ test('переименование: карточка (обе версии) + л�
   assert.equal(st.calls.slice(n).filter((c) => c[0] === 'update').length, 0);
   await expectErr(() => svc.rename({ session: MANAGER, id: P.veronika, body: { name: 'yana', base: b() }, now: NOW }), 409, 'name_taken');
   await expectErr(() => svc.rename({ session: MANAGER, id: P.veronika, body: { name: 'Sexybitch', base: b() }, now: NOW }), 409, 'name_taken');
-  await expectErr(() => svc.rename({ session: MANAGER, id: P.veronika, body: { name: 'Oleksandra Fishchuk', base: b() }, now: NOW }), 409, 'name_locked');
-  await expectErr(() => svc.rename({ session: OWNER, id: P.mariia, body: { name: 'Mariia M', base: st.draft(P.mariia).updatedAt }, now: NOW }), 409, 'name_locked');
   await expectErr(() => svc.rename({ session: MANAGER, id: P.mariia, body: { name: 'Mariia M', base: st.draft(P.mariia).updatedAt }, now: NOW }), 409, 'self_rename');
   await expectErr(() => svc.rename({ session: OWNER, id: P.dima, body: { name: 'Dmitrij', base: st.draft(P.dima).updatedAt }, now: NOW }), 409, 'self_rename');
   await expectErr(() => svc.rename({ session: OWNER2, id: P.dima, body: { name: 'Dmitrij', base: st.draft(P.dima).updatedAt }, now: NOW }), 409, 'owner_account');
@@ -1537,4 +1573,41 @@ test('перенос старого скана: проверка, копия в 
   await expectErr(() => run(304), 502, 'legacy_download_failed');
   assert.ok(fetched.every((u) => u.endsWith('?tr=orig-true')), 'всегда качается оригинал');
   assert.deepEqual(st.draft(P.veronika).oficial.documents.map((f) => f.id), [303, 304], 'при ошибке карточка не тронута');
+});
+
+// ───────────────────────── s229: связь учётки с карточкой (§5а.1) ─────────────────────────
+test('s229: учётка — по связи, хоть логин и не совпадает с именем; «это вы» — по связи сессии', async () => {
+  const st = makeStrapi();
+  const vera = st.accounts.find((a) => a.id === 3);
+  vera.username = 'Veronika Stará';
+  vera.personalDocId = P.veronika;
+  st.accounts.find((a) => a.id === 2).personalDocId = P.mariia;
+  // одноимённая с Yana учётка, связанная с ДРУГОЙ карточкой, — не её
+  st.accounts.push({ id: 7, username: 'Yana', role: 'master', isActive: true, password: 'HASH', personalDocId: 'someone-else' });
+
+  const c = await svc.card({ session: OWNER, id: P.veronika, now: NOW });
+  assert.deepEqual(c.account, { id: 3, username: 'Veronika Stará', role: 'master', isActive: true, linked: true });
+  const list = await svc.list({ session: OWNER, now: NOW });
+  assert.equal(list.rows.find((r) => r.documentId === P.yana).account, null, 'чужая учётка по имени не подтягивается');
+  assert.deepEqual(list.rows.find((r) => r.documentId === P.veronika).account, { id: 3, role: 'master', isActive: true });
+  // создать учётку Yana: логин занят учёткой другой карточки — 409, а не 500 уникальности
+  await expectErr(() => svc.account({ session: OWNER, id: P.yana, body: { action: 'create' }, now: NOW }), 409, 'name_taken');
+
+  // управляющая переименована в логине, связь та же — «это вы» и запреты себе держатся
+  const mgr = { ...MANAGER, username: 'Mariia Nová', personalDocId: P.mariia };
+  assert.equal((await svc.card({ session: mgr, id: P.mariia, now: NOW })).self, true);
+  assert.equal((await svc.card({ session: mgr, id: P.veronika, now: NOW })).self, false);
+  await expectErr(() => svc.account({ session: mgr, id: P.mariia, body: { action: 'disable' }, now: NOW }), 409, 'self_account');
+  await expectErr(() => svc.leave({ session: mgr, id: P.mariia, body: { base: st.draft(P.mariia).updatedAt }, now: NOW }), 409, 'self_leave');
+  // связь сессии с другой карточкой: совпадение имени больше не делает «собой»
+  const other = { ...MANAGER, personalDocId: P.veronika };
+  assert.equal((await svc.card({ session: other, id: P.mariia, now: NOW })).self, false);
+
+  // переименование связанной: логин меняется, связь остаётся
+  globalThis.__invalidated = [];
+  const r = await svc.rename({ session: OWNER, id: P.veronika, body: { name: 'Veronika Nová', base: st.draft(P.veronika).updatedAt }, now: NOW });
+  assert.equal(r.accountRenamed, true);
+  assert.equal(vera.username, 'Veronika Nová');
+  assert.equal(vera.personalDocId, P.veronika);
+  assert.deepEqual(r.account, { id: 3, username: 'Veronika Nová', role: 'master', isActive: true, linked: true });
 });

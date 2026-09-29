@@ -3,7 +3,8 @@
 // (global::rate-limit-engine); админские — ручная проверка admin-jwt (паттерн s78:
 // Strapi-стратегии наш HS256-токен не знают, роуты остаются auth:false).
 
-import { isManagementRole, tokenFromCtx, verifySession } from '../../../utils/admin-jwt';
+import { isManagementRole, sessionFromCtx } from '../../../utils/admin-jwt';
+import { findSessionPersonal } from '../../../utils/staff-identity';
 import { EngineError } from '../services/booking-engine';
 
 const svc = () => strapi.service('api::booking-engine.booking-engine');
@@ -28,7 +29,7 @@ const handle = async (ctx, fn) => {
 };
 
 const requireAdmin = (ctx) => {
-  const session = verifySession(tokenFromCtx(ctx));
+  const session = sessionFromCtx(ctx);
   if (!session || !['owner', 'manager', 'administrator'].includes(session.role)) {
     ctx.status = 401;
     ctx.body = { error: { status: 401, code: 'unauthorized', message: 'Vyžadováno přihlášení administrátora' } };
@@ -39,7 +40,7 @@ const requireAdmin = (ctx) => {
 
 // только руководство (владелец + управляющая, s213) — подтверждение блоков, отчёты
 const requireManagement = (ctx) => {
-  const session = verifySession(tokenFromCtx(ctx));
+  const session = sessionFromCtx(ctx);
   if (!session || !isManagementRole(session.role)) {
     ctx.status = 401;
     ctx.body = { error: { status: 401, code: 'owner_only', message: 'Tuto akci může provést jen vedení salonu' } };
@@ -50,7 +51,7 @@ const requireManagement = (ctx) => {
 
 // любой залогиненный сотрудник (owner/administrator/master) — для push-подписки
 const requireStaff = (ctx) => {
-  const session = verifySession(tokenFromCtx(ctx));
+  const session = sessionFromCtx(ctx);
   if (!session) {
     ctx.status = 401;
     ctx.body = { error: { status: 401, code: 'unauthorized', message: 'Vyžadováno přihlášení' } };
@@ -69,17 +70,11 @@ const shiftsSvc = () => strapi.service('api::booking-engine.shifts');
 const scheduleSvc = () => strapi.service('api::booking-engine.master-schedule');
 const birthdaysSvc = () => strapi.service('api::booking-engine.birthdays');
 const staffSvc = () => strapi.service('api::booking-engine.staff');
+const myMonthSvc = () => strapi.service('api::booking-engine.my-month');
 
-// personal.documentId по имени сотрудника (session.username = полное имя = personal.name)
-const resolvePersonalByName = async (name) => {
-  if (!name) return null;
-  const rows = await strapi.documents('api::personal.personal').findMany({
-    filters: { name: { $eqi: String(name).trim() } },
-    fields: ['name'],
-    limit: 1,
-  });
-  return rows[0]?.documentId || null;
-};
+// personal.documentId сотрудника сессии: по связи учётки, без связи — по имени (s229, §5а.1)
+const resolveSessionPersonalDocId = async (session) =>
+  (await findSessionPersonal(strapi, session))?.documentId || null;
 
 const parseModifiers = (raw) => {
   if (!raw) return [];
@@ -246,13 +241,13 @@ export default {
   },
 
   // POST /api/engine/push/subscribe {subscription, userAgent?} — подписать устройство
-  // залогиненного сотрудника (personal резолвится по имени из сессии)
+  // залогиненного сотрудника (personal — по связи учётки, без связи — по имени)
   async pushSubscribe(ctx) {
     const session = requireStaff(ctx);
     if (!session) return;
     const b = ctx.request.body || {};
     await handle(ctx, async () => {
-      const personalDocId = await resolvePersonalByName(session.username);
+      const personalDocId = await resolveSessionPersonalDocId(session);
       return pushSvc().subscribe({
         personalDocId,
         employeeName: session.username || '',
@@ -620,6 +615,14 @@ export default {
 
   // Дни рождения сотрудников (s221): ближайшие 30 дней, только день и месяц —
   // руководство и администраторы, мастеру нет
+  // GET /api/engine/admin/my-month?from=ISO&to=ISO — кабинет мастера (s229): своя карточка
+  // с услугами, штрафы, доплаты, выплаты. «Своя» — по связи учётки из базы; чужую не запросить.
+  async adminMyMonth(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    await handle(ctx, () => myMonthSvc().get({ session, from: ctx.query?.from, to: ctx.query?.to }));
+  },
+
   // GET /api/engine/admin/birthdays
   async adminBirthdays(ctx) {
     const session = requireAdmin(ctx);

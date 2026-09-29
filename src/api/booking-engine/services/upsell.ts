@@ -40,6 +40,7 @@ import {
 import { classifyTitle, isExcludedOfferService, windowAfter, windowBefore } from './upsell-core';
 import { withoutInternal } from './booking-kind';
 import { EngineError } from './booking-engine';
+import { findSessionPersonal, sessionPersonalDocId } from '../../../utils/staff-identity';
 
 const BOOKING_UID = 'api::booking.booking';
 const SALON_SERVICE_UID = 'api::salon-service.salon-service';
@@ -429,17 +430,15 @@ export default {
     return { ...shell, clients, leftClients };
   },
 
-  // карточка администратора — по строке имени (инвариант s194: personal.name = username)
-  async _adminPersonalDocId(username) {
-    const name = String(username || '').trim();
-    if (!name) return null;
-    const rows = await strapi.documents(PERSONAL_UID).findMany({
+  // карточка администратора сессии: по связи учётки (s229, §5а.1), без связи — по
+  // имени (инвариант s194: personal.name = username). Комиссия — только карточке
+  // администратора, как раньше.
+  async _adminPersonalDocId(session) {
+    const row = await findSessionPersonal(strapi, session, {
       status: 'published',
-      filters: { name: { $eqi: name }, position: 'administrator' },
-      fields: ['name'],
-      limit: 1,
+      filters: { position: 'administrator' },
     });
-    return rows[0]?.documentId || null;
+    return row?.documentId || null;
   },
 
   // ── POST /engine/admin/upsell {anchorBooking, service, employee, mode} ──
@@ -507,7 +506,7 @@ export default {
     const pricing = computePricing({ basePrice: svc.price, baseDurationMin: svc.durationMin, tier: master.tier });
     const amounts = upsellAmounts(pricing.price);
     const username = String(session?.username || '').trim();
-    const adminPersonalDocId = await this._adminPersonalDocId(username);
+    const adminPersonalDocId = await this._adminPersonalDocId(session);
     const clientName = anchor.client.name || anchor.clientNameRaw || '';
     const snapshot = engine().buildServiceSnapshot(svc, null, [], pricing);
     const discount = {
@@ -664,7 +663,21 @@ export default {
       .whereRaw(`discount->>'source' = 'admin'`)
       .orderBy('starts_at', 'desc');
     if (!isOwner) {
-      q = q.whereRaw(`lower(trim(discount->>'adminUsername')) = lower(trim(?))`, [String(session?.username || '')]);
+      // свои дозаписи: по карточке администратора, записанной в бронь при создании;
+      // у брони без неё (карточка не нашлась) — по логину, как до s229. Переименование
+      // (логин меняется вместе с именем) так историю не отрывает.
+      const own = sessionPersonalDocId(session);
+      q = own
+        ? q.where((w) =>
+            w
+              .whereRaw(`discount->>'adminPersonalDocId' = ?`, [own])
+              .orWhere((o) =>
+                o
+                  .whereRaw(`coalesce(discount->>'adminPersonalDocId', '') = ''`)
+                  .whereRaw(`lower(trim(discount->>'adminUsername')) = lower(trim(?))`, [String(session?.username || '')])
+              )
+          )
+        : q.whereRaw(`lower(trim(discount->>'adminUsername')) = lower(trim(?))`, [String(session?.username || '')]);
     }
     const bookings = await q;
 

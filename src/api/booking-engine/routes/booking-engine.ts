@@ -81,6 +81,7 @@ export default {
     admin('GET', '/engine/admin/today', 'booking-engine.adminToday'),
     // дни рождения сотрудников (s221): ближайшие 30 дней, без года рождения
     admin('GET', '/engine/admin/birthdays', 'booking-engine.adminBirthdays'),
+    admin('GET', '/engine/admin/my-month', 'booking-engine.adminMyMonth'),
     // корректировки зарплат (s215): штрафы, доп. заработок, списания, авансы, выплаты
     admin('GET', '/engine/admin/corrections', 'booking-engine.adminCorrectionsList'),
     admin('POST', '/engine/admin/corrections', 'booking-engine.adminCorrectionCreate'),

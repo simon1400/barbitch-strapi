@@ -504,6 +504,7 @@ export interface ApiAdminUserAdminUser extends Struct.CollectionTypeSchema {
     password: Schema.Attribute.String &
       Schema.Attribute.Required &
       Schema.Attribute.Private;
+    personalDocId: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     role: Schema.Attribute.Enumeration<
       ['master', 'owner', 'administrator', 'manager']
@@ -1997,6 +1998,18 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    dualRole: Schema.Attribute.Enumeration<['yes']> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }>;
+    dualRoleUntil: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }>;
     excessThreshold: Schema.Attribute.Integer &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
@@ -2029,6 +2042,12 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       'oneToMany',
       'api::personal.personal'
     >;
+    managerSince: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }>;
     money: Schema.Attribute.Relation<'oneToMany', 'api::cash.cash'>;
     name: Schema.Attribute.String &
       Schema.Attribute.Required &

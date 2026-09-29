@@ -27,6 +27,8 @@ const dataUrl = (js) => 'data:text/javascript;base64,' + Buffer.from(js, 'utf8')
 const jwtJs = toJs(src('src/utils/admin-jwt.ts')).replace(/from 'crypto'/, "from 'node:crypto'");
 const JWT_URL = dataUrl(jwtJs);
 const jwt = await import(JWT_URL);
+// s229: «кто я» — общий помощник utils/staff-identity (без своих импортов)
+const IDENTITY_URL = dataUrl(toJs(src('src/utils/staff-identity.ts')));
 
 const ERR_STUB = (name) => `export class ${name} extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }`;
 
@@ -35,6 +37,7 @@ async function loadController(file, errImport, errName) {
   const jwtImport = /from '\.\.\/\.\.\/\.\.\/utils\/admin-jwt';/;
   assert.ok(jwtImport.test(code), `${file}: импорт admin-jwt не найден`);
   code = code.replace(jwtImport, `from '${JWT_URL}';`);
+  code = code.split("from '../../../utils/staff-identity'").join(`from '${IDENTITY_URL}'`);
   if (errImport) {
     assert.ok(code.includes(errImport), `${file}: импорт ${errName} не найден`);
     code = code.split(errImport).join(`import { ${errName} } from '${dataUrl(ERR_STUB(errName))}';`);
@@ -110,6 +113,8 @@ const CASES = [
   ['engine: смены — удалить неделю', engine.adminShiftDelete, ['owner', 'manager']],
   // дни рождения сотрудников (s221): руководство и администраторы, мастеру нет
   ['engine: дни рождения', engine.adminBirthdays, ['owner', 'manager', 'administrator']],
+  // кабинет мастера «мой месяц» (s229): любой сотрудник, данные — только свои (сервер решает чьи)
+  ['engine: мой месяц', engine.adminMyMonth, ['owner', 'manager', 'administrator', 'master']],
   // карточка сотрудника (s224): только руководство — администраторам ничего (решение владельца)
   ['engine: сотрудники — список', engine.adminStaffList, ['owner', 'manager']],
   ['engine: сотрудники — карточка', engine.adminStaffCard, ['owner', 'manager']],
@@ -307,7 +312,8 @@ test('admin-session: запрос с oficial в query или теле — 403 д
       querystring: 'filters[isActive][$eq]=true&fields[0]=name&populate[services][fields][0]=title',
       response: { data: [{ name: 'A' }] },
     });
-    assert.equal(ok.passed, true);
+    // s229: мастеру populate на personals закрыт (экранам мастера не нужен)
+    assert.equal(ok.passed, role !== 'master', `${role} populate[services]`);
     // s223: мастер в карточки не пишет вовсе, остальные — три ключа экранов админки
     const put = await runMwFull(role, 'PUT', '/api/personals/abc', { body: { data: { bookingPriority: 3 } } });
     assert.equal(put.passed, role !== 'master', `${role} bookingPriority`);
@@ -322,7 +328,11 @@ test('admin-session: oficial вырезается из ответа на люб�
     ],
     meta: { pagination: { total: 2 } },
   });
-  for (const role of ['owner', 'manager', 'administrator', 'master']) {
+  // s229: мастеру populate на personals закрыт целиком (кабинет — через /engine/admin/my-month)
+  const m = await runMwFull('master', 'GET', '/api/personals', { querystring: 'populate=*', response: response() });
+  assert.equal(m.passed, false);
+  assert.equal(m.status, 403);
+  for (const role of ['owner', 'manager', 'administrator']) {
     const r = await runMwFull(role, 'GET', '/api/personals', { querystring: 'populate=*', response: response() });
     assert.equal(r.passed, true);
     assert.equal(JSON.stringify(r.body).includes('X1'), false, `${role}: документ в ответе`);

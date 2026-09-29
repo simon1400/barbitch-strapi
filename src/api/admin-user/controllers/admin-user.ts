@@ -35,11 +35,15 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
         return ctx.unauthorized('Invalid credentials')
       }
 
-      // Выдаём подписанный сессионный токен (роль зашита в токене, проверяется на сервере)
+      // Выдаём подписанный сессионный токен (роль зашита в токене, проверяется на сервере).
+      // s229 (§5а.1): связь с карточкой — для админки (своя колонка, свой кабинет); сервер
+      // её из токена не берёт, а сверяет с базой (сменили связь → перезаход).
+      const personalDocId = typeof user.personalDocId === 'string' ? user.personalDocId.trim() : ''
       const jwt = signSession({
         id: user.id as number,
         username: user.username as string,
         role: user.role as AdminRole,
+        ...(personalDocId ? { personalDocId } : {}),
       })
 
       // Возвращаем данные пользователя (без пароля)
@@ -47,6 +51,7 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
         username: user.username,
         role: user.role,
         id: user.id,
+        ...(personalDocId ? { personalDocId } : {}),
         jwt,
       }
     } catch (error) {
@@ -115,10 +120,12 @@ export default factories.createCoreController('api::admin-user.admin-user', ({ s
 
       const user = users[0]
 
-      // Находим персонал с таким же именем
+      // Карточка администратора: по связи учётки (s229, §5а.1), у учётки без связи —
+      // карточка с таким же именем (инвариант s194: username = personals.name)
+      const linkedDocId = typeof user.personalDocId === 'string' ? user.personalDocId.trim() : ''
       const personals: any = await strapi.entityService.findMany('api::personal.personal', {
         filters: {
-          name: username,
+          ...(linkedDocId ? { documentId: linkedDocId } : { name: username }),
           position: 'administrator'
         },
         populate: ['penalties', 'payroll', 'work_time', 'advances', 'rates'],
