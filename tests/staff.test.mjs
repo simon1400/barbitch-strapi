@@ -306,6 +306,7 @@ function makeStrapi() {
       if (name === 'imagekit') {
         // сервис плагина ImageKit: удаляет по provider_metadata.fileId
         return {
+          config: (k) => (k === 'privateKey' ? 'private_test' : undefined),
           service: (n) => {
             assert.equal(n, 'upload');
             return {
@@ -1238,7 +1239,15 @@ test('стирание через 3 года: личные данные, ска�
   assert.equal(st.draft(P.veronika).oficial.documentNumber, SECRET.documentNumber, 'до подтверждения ничего не стёрто');
 
   st.files.get(301).provider_metadata = { fileId: 'ik-e301' };
-  const r = await svc.erase({ session: MANAGER, id: P.veronika, body: { confirmName: ' veronika ', base: st.draft(P.veronika).updatedAt }, now: NOW });
+  // файл 302 без fileId → поиск в ImageKit (заглушка: не найден) — в сеть тест не ходит
+  const ikCalls = [];
+  const fetchImpl = async (url) => {
+    ikCalls.push(url);
+    return { ok: true, status: 200, json: async () => [] };
+  };
+  const r = await svc.erase({ session: MANAGER, id: P.veronika, body: { confirmName: ' veronika ', base: st.draft(P.veronika).updatedAt }, now: NOW, fetchImpl });
+  assert.equal(ikCalls.length, 1);
+  assert.ok(ikCalls[0].startsWith('https://api.imagekit.io/v1/files?'));
   assert.deepEqual(r.erased, { documents: 1, legacyFiles: 2, notes: 1 });
   for (const v of [st.draft(P.veronika), st.pub(P.veronika)]) {
     assert.equal(v.oficial.id, 71, 'компонент стёрт на месте');
@@ -1404,7 +1413,13 @@ test('перенос старого скана: проверка, копия в 
     'https://ik.imagekit.io/x/visa.jpg': jpg.subarray(0, 40000),
   };
   const fetched = [];
-  const fetchImpl = async (url) => {
+  let ikList = [];
+  const ikQueries = [];
+  const fetchImpl = async (url, init) => {
+    if (url.startsWith('https://api.imagekit.io/v1/files?')) {
+      ikQueries.push({ q: new URL(url).searchParams.get('searchQuery'), auth: init?.headers?.Authorization });
+      return { ok: true, status: 200, json: async () => ikList };
+    }
     fetched.push(url);
     const b = bodies[url];
     return b ? { ok: true, status: 200, arrayBuffer: async () => b } : { ok: false, status: 404 };
@@ -1485,6 +1500,29 @@ test('перенос старого скана: проверка, копия в 
   assert.equal(r3.removed, true);
   assert.equal(r3.cdnLeft, true, 'без fileId удалить в ImageKit нечем');
   assert.equal(st.ikDeleted.length, 3);
+
+  // метаданные старого формата (Cloudinary public_id): fileId ищется в ImageKit по точному пути ссылки
+  const pdf2 = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(991, 4)]);
+  const clUrl = 'https://ik.imagekit.io/njc0tvfgn/strapi-uploads/Dohoda%20o.pdf';
+  st.files.set(306, { id: 306, name: 'Dohoda o.pdf', mime: 'application/pdf', size: 1, url: clUrl, provider: 'imagekit', provider_metadata: { public_id: 'Dohoda_o', resource_type: 'image' } });
+  bodies[`${clUrl}?tr=orig-true`] = pdf2;
+  ikList = [
+    { fileId: 'other-folder', filePath: '/jine/Dohoda o.pdf' },
+    { fileId: 'found-306', filePath: '/strapi-uploads/Dohoda o.pdf' },
+  ];
+  st.draft(P.veronika).oficial.documents = [st.files.get(306)];
+  const r4 = await run(306);
+  assert.equal(r4.cdnLeft, false);
+  assert.equal(st.ikDeleted.at(-1), 'found-306', 'только точное совпадение пути');
+  assert.equal(ikQueries.at(-1).q, 'name = "Dohoda o.pdf"');
+  assert.equal(ikQueries.at(-1).auth, `Basic ${Buffer.from('private_test:').toString('base64')}`);
+  // два точных совпадения — наугад не удаляется: из медиатеки убран, CDN — руками
+  st.files.set(309, { id: 309, name: 'Dohoda o.pdf', mime: 'application/pdf', size: 1, url: clUrl, provider: 'imagekit', provider_metadata: { public_id: 'x' } });
+  ikList = [{ fileId: 'a', filePath: '/strapi-uploads/Dohoda o.pdf' }, { fileId: 'b', filePath: '/strapi-uploads/Dohoda o.pdf' }];
+  st.draft(P.veronika).oficial.documents = [st.files.get(309)];
+  const r5 = await run(309);
+  assert.equal(r5.cdnLeft, true);
+  assert.equal(st.ikDeleted.length, 4, 'ничего лишнего не удалено');
   assert.equal(st.calls.filter((c) => c[0] === 'publish').length, publishesBefore, 'черновик-только не публикуется');
   assert.ok(!st.pub(P.veronika), 'опубликованной версии как не было, так и нет');
   assert.deepEqual(st.draft(P.veronika).oficial.documents, []);

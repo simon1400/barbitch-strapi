@@ -1467,7 +1467,7 @@ export default {
     let removed = false;
     let cdnLeft = true;
     try {
-      const r = await this._removeLibraryFile(fid);
+      const r = await this._removeLibraryFile(fid, fetchImpl);
       removed = r.removed;
       cdnLeft = !r.cdnDeleted;
     } catch (e) {
@@ -1486,16 +1486,50 @@ export default {
    * `provider_metadata.fileId` (и уменьшенные копии); запись медиатеки — только после
    * успешного удаления в CDN, иначе ошибка и файл остаётся виден в панели.
    */
-  async _removeLibraryFile(fid: number) {
+  async _removeLibraryFile(fid: number, fetchImpl: typeof fetch = fetch) {
     const upload = strapi.plugin('upload').service('upload');
     const file = await upload.findOne(fid);
     if (!file) return { removed: false, cdnDeleted: false };
     const ik = strapi.plugin('imagekit')?.service('upload');
+    // у файлов, перенесённых когда-то из Cloudinary, в метаданных `public_id`, а не fileId
+    // ImageKit (на проде — 18 из 22 старых сканов): находим fileId по точному пути ссылки
+    if (!file.provider_metadata?.fileId && ik) {
+      const found = await this._imagekitFileIdByUrl(file.url, fetchImpl);
+      if (found) file.provider_metadata = { ...(file.provider_metadata || {}), fileId: found };
+    }
     const parts = [file, ...Object.values(file.formats || {})].filter((f: any) => f?.provider_metadata?.fileId);
     if (parts.length && !ik) throw new Error('плагин ImageKit не найден — файл из CDN не удалён');
     for (const f of parts) await ik.delete(f);
     await upload.remove(file);
     return { removed: true, cdnDeleted: parts.length > 0 };
+  },
+
+  /**
+   * fileId ImageKit по публичной ссылке: поиск по имени файла, берётся только ТОЧНОЕ совпадение
+   * пути (`/strapi-uploads/<имя>`) и только если оно одно — иначе null (удалять наугад нельзя).
+   */
+  async _imagekitFileIdByUrl(url: unknown, fetchImpl: typeof fetch = fetch): Promise<string | null> {
+    let filePath;
+    try {
+      const u = new URL(String(url ?? ''));
+      if (!u.hostname.endsWith('imagekit.io')) return null;
+      // https://ik.imagekit.io/<endpoint-id>/<путь в медиатеке ImageKit>
+      filePath = '/' + decodeURIComponent(u.pathname).split('/').slice(2).join('/');
+    } catch {
+      return null;
+    }
+    const name = filePath.split('/').pop();
+    const key = strapi.plugin('imagekit')?.config('privateKey');
+    if (!name || !key) return null;
+    const q = new URLSearchParams({ searchQuery: `name = "${name.replace(/"/g, '\\"')}"` });
+    const res = await fetchImpl(`https://api.imagekit.io/v1/files?${q}`, {
+      headers: { Authorization: `Basic ${Buffer.from(`${key}:`).toString('base64')}` },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res?.ok) throw new Error(`ImageKit: поиск файла — HTTP ${res?.status}`);
+    const list = await res.json();
+    const hits = (Array.isArray(list) ? list : []).filter((f) => f?.filePath === filePath && f?.fileId);
+    return hits.length === 1 ? String(hits[0].fileId) : null;
   },
 
   /** Документ этой карточки (с storedName) или 404. */
@@ -1865,7 +1899,7 @@ export default {
    * файлы медиатеки/ImageKit), заметки руководства. Остаются имя, должность, даты,
    * фото и вся зарплатная история. В журнал — только факт и автор.
    */
-  async erase({ session, id, body, now = new Date() }: { session: any; id: unknown; body: any; now?: Date }) {
+  async erase({ session, id, body, now = new Date(), fetchImpl = fetch }: { session: any; id: unknown; body: any; now?: Date; fetchImpl?: typeof fetch }) {
     const today = this._today(now);
     const { doc } = await this._card(session, id, { oficial: { populate: { documents: { fields: ['id'] } } } });
     assertBase(body?.base, doc);
@@ -1908,7 +1942,7 @@ export default {
     let legacyRemoved = 0;
     for (const fid of legacyIds) {
       try {
-        if ((await this._removeLibraryFile(fid)).removed) legacyRemoved += 1;
+        if ((await this._removeLibraryFile(fid, fetchImpl)).removed) legacyRemoved += 1;
       } catch (e) {
         strapi.log.error(`staff: старый скан ${fid} не удалён из медиатеки: ${e.message}`);
       }
