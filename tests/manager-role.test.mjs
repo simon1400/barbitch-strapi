@@ -135,6 +135,16 @@ const CASES = [
   ['engine: сотрудники — завершить работу', engine.adminStaffLeave, ['owner', 'manager']],
   ['engine: сотрудники — стереть личные данные', engine.adminStaffErase, ['owner', 'manager']],
   ['engine: сотрудники — напоминания «Сегодня»', engine.adminStaffReminders, ['owner', 'manager']],
+  // фаза 2 карточки (s231): договоры, онбординг, каталог пунктов — только руководство;
+  // «Мои данные» — любой сотрудник (своя карточка; владельцу сервис отвечает 404)
+  ['engine: сотрудники — новый договор', engine.adminStaffContractCreate, ['owner', 'manager']],
+  ['engine: сотрудники — правка договора', engine.adminStaffContractUpdate, ['owner', 'manager']],
+  ['engine: сотрудники — удалить договор', engine.adminStaffContractDelete, ['owner', 'manager']],
+  ['engine: сотрудники — отметка онбординга', engine.adminStaffOnboarding, ['owner', 'manager']],
+  ['engine: сотрудники — каталог пунктов', engine.adminStaffChecklistItems, ['owner', 'manager']],
+  ['engine: сотрудники — новый пункт', engine.adminStaffChecklistItemCreate, ['owner', 'manager']],
+  ['engine: сотрудники — правка пункта', engine.adminStaffChecklistItemUpdate, ['owner', 'manager']],
+  ['engine: мои данные', engine.adminMyCard, ['owner', 'manager', 'administrator', 'master']],
   ['engine: блок (админская ручка)', engine.adminCreateBlock, ['owner', 'manager', 'administrator']],
   // плановый график мастеров (s218): мастер сам себе ничего не меняет; администратор
   // смотрит и предлагает, шаблон / согласование / замена старых блоков — руководство

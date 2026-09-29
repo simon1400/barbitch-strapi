@@ -1,0 +1,30 @@
+{
+  "kind": "collectionType",
+  "collectionName": "staff_checklist_items",
+  "info": {
+    "singularName": "staff-checklist-item",
+    "pluralName": "staff-checklist-items",
+    "displayName": "Пункт онбординга",
+    "description": "Свои пункты чек-листа нового сотрудника (s231): ключи, форма, инструктаж… Удаления нет — выключенный пункт уходит из новых карточек, отметки остаются. REST-роутов нет: только ручки /engine/admin/staff-checklist-items"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string"
+    },
+    "positions": {
+      "type": "json"
+    },
+    "order": {
+      "type": "integer",
+      "default": 0
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

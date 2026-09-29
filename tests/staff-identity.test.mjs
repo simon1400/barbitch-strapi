@@ -30,6 +30,7 @@ let staffJs = toJs(src('src/api/booking-engine/services/staff.ts'));
 for (const [from, to] of [
   ["from '../../../utils/admin-account'", `from '${dataUrl('export const invalidateAdminAccount = () => {};')}'`],
   ["from './slots-core'", `from '${dataUrl(toJs(src('src/api/booking-engine/services/slots-core.ts')))}'`],
+  ["from '../../../utils/staff-identity'", `from '${dataUrl(toJs(src('src/utils/staff-identity.ts')))}'`],
   ["from 'crypto'", "from 'node:crypto'"],
   ["from 'fs'", "from 'node:fs'"],
   ["from 'path'", "from 'node:path'"],

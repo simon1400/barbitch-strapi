@@ -933,6 +933,72 @@ export default {
     await handle(ctx, () => staffSvc().erase({ session, id: ctx.params.id, body: ctx.request.body }));
   },
 
+  // ── Карточка, фаза 2 (s231): договоры (только учёт), онбординг-чек-лист, «Мои данные»
+
+  // POST /api/engine/admin/staff/:id/contracts {type, from, to?, probationUntil?, ico?, note?, base}
+  async adminStaffContractCreate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().addContract({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // PATCH /api/engine/admin/staff/:id/contracts/:contractId {поля договора, base}
+  async adminStaffContractUpdate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      staffSvc().updateContract({ session, id: ctx.params.id, contractId: ctx.params.contractId, body: ctx.request.body })
+    );
+  },
+
+  // DELETE /api/engine/admin/staff/:id/contracts/:contractId?base=… — только не начавшийся
+  async adminStaffContractDelete(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      staffSvc().deleteContract({ session, id: ctx.params.id, contractId: ctx.params.contractId, body: { base: ctx.query?.base } })
+    );
+  },
+
+  // POST /api/engine/admin/staff/:id/onboarding/:itemId {done}
+  async adminStaffOnboarding(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      staffSvc().setOnboarding({ session, id: ctx.params.id, itemId: ctx.params.itemId, body: ctx.request.body })
+    );
+  },
+
+  // GET /api/engine/admin/staff-checklist-items — каталог своих пунктов (с выключенными)
+  async adminStaffChecklistItems(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().checklistItems());
+  },
+
+  // POST /api/engine/admin/staff-checklist-items {title, positions}
+  async adminStaffChecklistItemCreate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().createChecklistItem({ session, body: ctx.request.body }));
+  },
+
+  // PATCH /api/engine/admin/staff-checklist-items/:itemId {title?, positions?, active?, order?}
+  async adminStaffChecklistItemUpdate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().updateChecklistItem({ session, itemId: ctx.params.itemId, body: ctx.request.body }));
+  },
+
+  // GET /api/engine/admin/my-card — «Мои данные»: своя карточка, только чтение. Любая роль
+  // сотрудника; карточка — по связи учётки (id из запроса не берётся), у владельца — 404.
+  async adminMyCard(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => staffSvc().myCard({ session }));
+  },
+
   async adminPendingBlocks(ctx) {
     const session = requireManagement(ctx);
     if (!session) return;

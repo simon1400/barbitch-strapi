@@ -246,6 +246,24 @@ export interface ContentWeek extends Struct.ComponentSchema {
   };
 }
 
+export interface ItemsContracts extends Struct.ComponentSchema {
+  collectionName: 'components_items_contracts';
+  info: {
+    description: '\u0414\u043E\u0433\u043E\u0432\u043E\u0440 \u0441\u043E\u0442\u0440\u0443\u0434\u043D\u0438\u043A\u0430 (s231): \u0442\u043E\u043B\u044C\u043A\u043E \u0443\u0447\u0451\u0442 \u2014 \u043D\u0430 \u0437\u0430\u0440\u043F\u043B\u0430\u0442\u044B \u0438 \u043D\u0430\u043B\u043E\u0433\u0438 \u043D\u0435 \u0432\u043B\u0438\u044F\u0435\u0442 (\u0441\u043C\u044B\u0441\u043B \u043E\u043F\u043B\u0430\u0442\u044B \u043D\u0435\u0441\u0451\u0442 rates.typeWork)';
+    displayName: 'contracts';
+    icon: 'file';
+  };
+  attributes: {
+    from: Schema.Attribute.Date & Schema.Attribute.Required;
+    ico: Schema.Attribute.String;
+    note: Schema.Attribute.String;
+    probationUntil: Schema.Attribute.Date;
+    to: Schema.Attribute.Date;
+    type: Schema.Attribute.Enumeration<['hpp', 'dpp', 'ico']> &
+      Schema.Attribute.Required;
+  };
+}
+
 export interface ItemsMoneyFlow extends Struct.ComponentSchema {
   collectionName: 'components_items_money_flows';
   info: {
@@ -337,6 +355,7 @@ declare module '@strapi/strapi' {
       'content.price-list': ContentPriceList;
       'content.text': ContentText;
       'content.week': ContentWeek;
+      'items.contracts': ItemsContracts;
       'items.money-flow': ItemsMoneyFlow;
       'items.nav-item': ItemsNavItem;
       'items.rates': ItemsRates;

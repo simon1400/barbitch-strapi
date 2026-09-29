@@ -115,12 +115,36 @@ test('дни рождения: только ближайшие 7 дней, «с�
   assert.equal(A.buildAttention({ today: TODAY, birthdays: [{ name: 'K', day: 1, month: 1, daysLeft: 20 }] }).sections.length, 0);
 });
 
+test('договоры (фаза 2 карточки): конец, истёк без нового, испытательный; без IČO; вместе с документами', () => {
+  const contracts = [
+    { name: 'Dana', kind: 'contract_end', type: 'ico', date: '2026-09-01', daysLeft: -28, ico: '27082440' },
+    { name: 'Anna', kind: 'probation_end', type: 'hpp', date: '2026-10-13', daysLeft: 14 },
+    { name: 'Bára', kind: 'contract_end', type: 'dpp', date: '2026-10-29', daysLeft: 30 },
+    { name: 'Eva', kind: 'contract_end', type: 'dpp', date: TODAY, daysLeft: 0 },
+  ];
+  const r = A.buildAttention({ today: TODAY, staffContracts: contracts });
+  const t = text(r);
+  assert.equal(r.sections.length, 1);
+  assert.match(t, /Документи й договори співробітників — терміни/);
+  assert.match(t, /• <b>Dana<\/b> — договір IČO: закінчився 01\.09, нового немає/);
+  assert.match(t, /• <b>Anna<\/b> — випробувальний термін \(HPP\): до 13\.10 \(через 14 дн\.\)/);
+  assert.match(t, /• <b>Bára<\/b> — договір DPP: до 29\.10 \(через 30 дн\.\)/);
+  assert.match(t, /• <b>Eva<\/b> — договір DPP: закінчується сьогодні/);
+  assert.ok(!t.includes('27082440'), 'IČO не выводится');
+  const both = A.buildAttention({ today: TODAY, staffDocs: [{ name: 'Cili', title: 'Pas', validUntil: TODAY, daysLeft: 0 }], staffContracts: contracts.slice(0, 1) });
+  assert.equal(both.sections.length, 1, 'один раздел на документы и договоры');
+  assert.equal(both.sections[0].length, 3);
+  assert.equal(A.buildAttention({ today: TODAY, staffContracts: [] }).sections.length, 0);
+});
+
 test('digest.ts: разделы подключены, источники по отдельности в try/catch, документы — без владельца', () => {
   const src = fs.readFileSync(path.join(root, 'src/api/digest/services/digest.ts'), 'utf8');
   assert.match(src, /buildAttention\(attention\)/);
   assert.match(src, /const settle = async \(key, fn\) => \{\s*try \{\s*attention\[key\] = await fn\(\);\s*\} catch/);
   for (const k of ['admin', 'pending', 'vouchers', 'staffDocs', 'birthdays']) assert.match(src, new RegExp(`settle\\('${k}'`), k);
   assert.match(src, /reminders\(\{ session: \{ role: 'manager' \} \}\)/, 'карточки владельцев в чат не попадают');
+  // договоры — из того же ответа, только имя/тип/дата/дни (без IČO)
+  assert.match(src, /attention\.staffContracts = \(r\.contracts \|\| \[\]\)\.map\(\(c\) => \(\{ name: c\.name, kind: c\.kind, type: c\.type, date: c\.date, daysLeft: c\.daysLeft \}\)\)/);
   assert.match(src, /\.\.\.\(adminLine \? \[adminLine\] : \[\]\)/);
   assert.match(src, /for \(const sec of attentionSections\) lines\.push\('', \.\.\.sec\)/);
 });

@@ -32,6 +32,7 @@ let svcJs = toJs('src/api/booking-engine/services/staff.ts');
 for (const [from, to] of [
   ["from '../../../utils/admin-account'", `from '${INVALIDATE_URL}'`],
   ["from './slots-core'", `from '${CORE_URL}'`],
+  ["from '../../../utils/staff-identity'", `from '${dataUrl(toJs('src/utils/staff-identity.ts'))}'`],
   ["from 'crypto'", "from 'node:crypto'"],
   ["from 'fs'", "from 'node:fs'"],
   ["from 'path'", "from 'node:path'"],
@@ -147,6 +148,7 @@ function makeStrapi() {
     'api::booking.booking': [],
     'api::calendar-log.calendar-log': [],
     'api::time-block.time-block': [],
+    'api::staff-checklist-item.staff-checklist-item': [],
   };
   for (const p of seed) {
     const at = tick();
@@ -225,6 +227,7 @@ function makeStrapi() {
       if (DP.has(uid)) {
         // Strapi: компоненты получают id
         if (data.rates) data.rates = data.rates.map((x) => ({ ...x, id: ++seq }));
+        if (data.contracts) data.contracts = data.contracts.map((x) => ({ ...x, id: ++seq }));
         if (data.oficial) {
           assertOficialKeys(data.oficial, 'create');
           data.oficial = { ...data.oficial, id: ++seq };
@@ -256,13 +259,14 @@ function makeStrapi() {
         }
         delete data.oficial;
       }
-      if ('rates' in data) {
-        const ids = new Set((r.rates || []).map((x) => x.id));
-        r.rates = data.rates.map((x) => {
-          if (x.id != null) assert.ok(ids.has(x.id), 'чужой компонент rates');
+      for (const comp of ['rates', 'contracts']) {
+        if (!(comp in data)) continue;
+        const ids = new Set((r[comp] || []).map((x) => x.id));
+        r[comp] = data[comp].map((x) => {
+          if (x.id != null) assert.ok(ids.has(x.id), `чужой компонент ${comp}`);
           return { ...x, id: x.id ?? ++seq };
         });
-        delete data.rates;
+        delete data[comp];
       }
       if ('photo' in data) data.photo = { id: data.photo, url: `https://ik.imagekit.io/x/${data.photo}.jpg`, formats: null };
       Object.assign(r, data, { updatedAt: tick() });
@@ -456,8 +460,8 @@ test('planNewRate: закрывает действующие днём раньш
 test('missingFlags: бейджи по должности, ушедшим пусто', () => {
   const ctx = { account: null, servicesCount: 0, hasSchedule: false, privateMissing: ['phone'], today: '2026-10-05' };
   assert.deepEqual(S.missingFlags({ position: 'master', ratePercent: null }, ctx), [
-    'no_account', 'not_in_calendar', 'no_services', 'no_schedule', 'no_rate', 'private_incomplete',
-  ]);
+    'no_account', 'not_in_calendar', 'no_services', 'no_schedule', 'no_rate',
+  ]); // личные данные — в чек-листе (фаза 2), не во флагах
   const okMaster = { position: 'master', ratePercent: 40, noonaEmployeeId: 'x' };
   assert.deepEqual(S.missingFlags(okMaster, { account: { isActive: true }, servicesCount: 3, hasSchedule: true, privateMissing: [], today: '2026-10-05' }), []);
   assert.deepEqual(S.missingFlags(okMaster, { account: { isActive: false }, servicesCount: 3, hasSchedule: true, privateMissing: [], today: '2026-10-05' }), ['account_disabled']);
@@ -514,8 +518,8 @@ test('список: без личных данных, признаки, влад
   const byName = Object.fromEntries(asOwner.rows.map((r) => [r.name, r]));
   assert.deepEqual(byName.Veronika.flags, []);
   assert.equal(byName.Veronika.servicesCount, 2);
-  assert.deepEqual(byName.Yana.flags, ['no_account', 'no_services', 'no_schedule', 'private_incomplete']);
-  assert.deepEqual(byName['Olga Eremina'].flags, ['account_disabled', 'no_rate', 'private_incomplete']);
+  assert.deepEqual(byName.Yana.flags, ['no_account', 'no_services', 'no_schedule']);
+  assert.deepEqual(byName['Olga Eremina'].flags, ['account_disabled', 'no_rate']);
   assert.equal(byName['Olga Eremina'].account.isActive, false);
   assert.deepEqual(byName.Veronika.account, { id: 3, role: 'master', isActive: true }, 'в списке логин не нужен');
   assert.ok(!hasKeyDeep(asOwner, 'password'));
@@ -863,7 +867,7 @@ test('заметки: добавить; править и удалять — а�
 });
 
 test('схема: новые коллекции без REST-роутов, личные данные не обязательны', () => {
-  for (const api of ['staff-document', 'staff-note']) {
+  for (const api of ['staff-document', 'staff-note', 'staff-checklist-item']) {
     assert.ok(!fs.existsSync(path.join(root, `src/api/${api}/routes`)), `${api}: REST-роутов быть не должно`);
     assert.ok(!fs.existsSync(path.join(root, `src/api/${api}/controllers`)), `${api}: контроллера быть не должно`);
     const sch = JSON.parse(fs.readFileSync(path.join(root, `src/api/${api}/content-types/${api}/schema.json`), 'utf8'));
@@ -877,6 +881,14 @@ test('схема: новые коллекции без REST-роутов, лич
   const oficial = JSON.parse(fs.readFileSync(path.join(root, 'src/components/content/oficial-data.json'), 'utf8'));
   for (const [k, a] of Object.entries(oficial.attributes)) assert.ok(!a.required, `${k} required`);
   for (const k of Object.keys(S.PRIVATE_FIELDS)) assert.ok(oficial.attributes[k], `поле ${k} есть в компоненте`);
+  // фаза 2: договор — отдельный компонент (не rates: 🟥 typeWork несёт смысл оплаты)
+  assert.equal(personal.attributes.contracts.component, 'items.contracts');
+  assert.equal(personal.attributes.contracts.repeatable, true);
+  assert.equal(personal.attributes.onboarding.type, 'json');
+  const contract = JSON.parse(fs.readFileSync(path.join(root, 'src/components/items/contracts.json'), 'utf8'));
+  assert.deepEqual(contract.attributes.type.enum, Object.keys(S.CONTRACT_TYPES));
+  const rates = JSON.parse(fs.readFileSync(path.join(root, 'src/components/items/rates.json'), 'utf8'));
+  assert.deepEqual(rates.attributes.typeWork.enum, ['hpp', 'dpp'], 'ставки не тронуты');
 });
 
 // ── шаг 4 (s225): новый сотрудник, учётка, переименование, уход, стирание ───
@@ -1039,7 +1051,7 @@ test('новый мастер: обе версии, ключ колонки = do
   assert.ok(bcrypt.compareSync(r.password, acc.password), 'пароль из ответа подходит');
   assert.equal(acc.personalDocId, id, 's229: учётка сразу связана с карточкой');
   assert.deepEqual(r.account, { id: acc.id, username: 'Kira Nová', role: 'master', isActive: true, linked: true });
-  assert.deepEqual(r.flags, ['no_services', 'no_schedule', 'private_incomplete'], 'чек-лист «что осталось»');
+  assert.deepEqual(r.flags, ['no_services', 'no_schedule'], 'бейджи');
   assert.equal(st.logs.length, 1);
   assert.equal(st.logs[0].action, 'staff_create');
   assert.equal(st.logs[0].summary, 'Nový zaměstnanec: Kira Nová · mistr · junior · nástup 05.10.2026 · podíl 40 % · osobní údaje vyplněny · přístup: master');
@@ -1415,4 +1427,272 @@ test('s229: учётка — по связи, хоть логин и не сов
   assert.equal(vera.username, 'Veronika Nová');
   assert.equal(vera.personalDocId, P.veronika);
   assert.deepEqual(r.account, { id: 3, username: 'Veronika Nová', role: 'master', isActive: true, linked: true });
+});
+
+// ── фаза 2 (s231): договор, онбординг-чек-лист, процент ────────────────────
+test('icoValid: 8 цифр и контрольная цифра mod 11', () => {
+  for (const ok of ['27082440', '00006947']) assert.equal(S.icoValid(ok), true, ok);
+  for (const bad of ['27082441', '2708244', '270824400', 'abcdefgh', '', null, 27082440.5]) assert.equal(S.icoValid(bad), false, String(bad));
+});
+
+test('normalizeContract: типы, даты, испытательный только HPP, IČO только IČO, пересечение — 409', () => {
+  const T = '2026-10-05';
+  const r = S.normalizeContract({ type: 'hpp', from: '2026-10-01', to: '2027-09-30', probationUntil: '2026-12-31' }, { today: T });
+  assert.deepEqual(r.contract, { type: 'hpp', from: '2026-10-01', to: '2027-09-30', probationUntil: '2026-12-31', ico: null, note: null });
+  assert.deepEqual(r.warnings, []);
+  assert.deepEqual(S.normalizeContract({ type: 'hpp', from: '2026-10-01', probationUntil: '2027-03-01' }, { today: T }).warnings, ['long_probation']);
+  // 31.01 + 3 мес. = 30.04 (не 01.05): 30.04 — ещё без предупреждения
+  assert.deepEqual(S.normalizeContract({ type: 'hpp', from: '2026-01-31', probationUntil: '2026-04-30' }, { today: T }).warnings, []);
+  assert.equal(S.normalizeContract({ type: 'ico', from: '2025-01-01', ico: ' 2708 2440 ' }, { today: T }).contract.ico, '27082440');
+  for (const [data, code] of [
+    [{ type: 'hpp' }, 'bad_date'],
+    [{ type: 'osvc', from: '2026-10-01' }, 'bad_contract_type'],
+    [{ type: 'dpp', from: '2026-10-01', to: '2026-09-30' }, 'bad_date'],
+    [{ type: 'dpp', from: '2026-10-01', probationUntil: '2026-11-01' }, 'probation_only_hpp'],
+    [{ type: 'hpp', from: '2026-10-01', to: '2026-10-31', probationUntil: '2026-11-01' }, 'bad_date'],
+    [{ type: 'hpp', from: '2026-10-01', probationUntil: '2026-09-01' }, 'bad_date'],
+    [{ type: 'ico', from: '2026-10-01' }, 'ico_required'],
+    [{ type: 'ico', from: '2026-10-01', ico: '27082441' }, 'bad_ico'],
+    [{ type: 'dpp', from: '2026-10-01', ico: '27082440' }, 'ico_only_ico'],
+    [{ type: 'dpp', from: '2027-10-07' }, 'date_too_far'],
+    [{ type: 'dpp', from: '2014-12-31' }, 'bad_date'],
+    [{ type: 'dpp', from: '2026-10-01', note: 'x'.repeat(201) }, 'too_long'],
+    [{ type: 'dpp', from: '2026-10-01', rate: 150 }, 'bad_field'],
+    [{ type: 'dpp', from: { $gt: '' } }, 'bad_date'],
+    [{}, 'nothing_to_save'],
+  ]) {
+    assert.throws(() => S.normalizeContract(data, { today: T }), (e) => e.code === code, JSON.stringify(data));
+  }
+  const others = [{ id: 1, type: 'dpp', from: '2025-01-01', to: '2026-09-30' }, { id: 2, type: 'hpp', from: '2026-12-01', to: null }];
+  assert.throws(() => S.normalizeContract({ type: 'hpp', from: '2026-09-30' }, { others, today: T }), (e) => e.code === 'contract_overlap' && e.status === 409);
+  assert.throws(() => S.normalizeContract({ type: 'hpp', from: '2026-10-01' }, { others, today: T }), (e) => e.code === 'contract_overlap', 'бессрочный налезает на будущий');
+  assert.equal(S.normalizeContract({ type: 'hpp', from: '2026-10-01', to: '2026-11-30' }, { others, today: T }).contract.to, '2026-11-30');
+  // правка: незаданные поля — из текущего; смена типа с HPP снимает испытательный
+  const cur = { id: 5, type: 'hpp', from: '2026-10-01', to: null, probationUntil: '2026-12-31', ico: null, note: 'x' };
+  assert.deepEqual(S.normalizeContract({ to: '2027-03-31' }, { current: cur, today: T }).contract, {
+    type: 'hpp', from: '2026-10-01', to: '2027-03-31', probationUntil: '2026-12-31', ico: null, note: 'x',
+  });
+  assert.equal(S.normalizeContract({ type: 'dpp' }, { current: cur, today: T }).contract.probationUntil, null);
+});
+
+test('contractOn / contractReminders: текущий договор; конец за 30 дней или истёк без нового; испытательный за 14', () => {
+  const T = '2026-10-05';
+  const list = [
+    { id: 1, type: 'dpp', from: '2025-01-01', to: '2026-06-30' },
+    { id: 2, type: 'hpp', from: '2026-07-01', to: null, probationUntil: '2026-10-19' },
+  ];
+  assert.equal(S.contractOn(list, T).id, 2);
+  assert.equal(S.contractOn(list, '2026-06-30').id, 1);
+  assert.equal(S.contractOn(list, '2024-12-31'), null);
+  const cards = [
+    { documentId: 'a', name: 'Anna', left: false, contracts: list }, // испытательный через 14 — да
+    { documentId: 'b', name: 'Bára', left: false, contracts: [{ type: 'dpp', from: '2026-01-01', to: '2026-11-04' }] }, // +30 — да
+    { documentId: 'c', name: 'Cilka', left: false, contracts: [{ type: 'dpp', from: '2026-01-01', to: '2026-11-05' }] }, // +31 — нет
+    { documentId: 'd', name: 'Dana', left: false, contracts: [{ type: 'ico', ico: '27082440', from: '2025-01-01', to: '2026-09-01' }] }, // истёк, нового нет
+    { documentId: 'e', name: 'Eva', left: false, contracts: [{ type: 'dpp', from: '2025-01-01', to: '2026-10-10' }, { type: 'hpp', from: '2026-10-11', to: null }] }, // есть следующий — нет
+    { documentId: 'f', name: 'Fany', left: true, contracts: [{ type: 'dpp', from: '2025-01-01', to: '2026-10-10' }] }, // ушла — нет
+    { documentId: 'g', name: 'Gita', left: false, contracts: [{ type: 'hpp', from: '2026-09-01', probationUntil: '2026-10-20' }] }, // +15 — нет
+    { documentId: 'h', name: 'Hana', left: false, contracts: [] },
+  ];
+  const r = S.contractReminders(cards, T);
+  assert.deepEqual(r.map((x) => [x.name, x.kind, x.date, x.daysLeft]), [
+    ['Dana', 'contract_end', '2026-09-01', -34],
+    ['Anna', 'probation_end', '2026-10-19', 14],
+    ['Bára', 'contract_end', '2026-11-04', 30],
+  ]);
+  assert.ok(!JSON.stringify(r).includes('27082440'), 'IČO в напоминания не идёт');
+  assert.deepEqual(S.buildReminders(cards, [], T).contracts, r, 'в ответе /staff-reminders');
+});
+
+test('buildChecklist: автопункты по должности, свои пункты, выключенные с отметкой остаются, процент вниз; ушедшим null', () => {
+  const T = '2026-10-05';
+  const items = [
+    { documentId: 'keys', title: 'Klíče', positions: ['master', 'administrator', 'manager'], order: 10, active: true },
+    { documentId: 'apron', title: 'Zástěra', positions: ['master'], order: 20, active: true },
+    { documentId: 'old', title: 'Starý', positions: ['master'], order: 5, active: false },
+  ];
+  const full = {
+    position: 'master',
+    ratePercent: 40,
+    noonaEmployeeId: 'x',
+    photo: { url: 'u' },
+    contracts: [{ type: 'ico', from: '2026-01-01', ico: '27082440' }],
+    onboarding: { keys: { at: '2026-10-01T10:00:00Z', by: 'Dima' }, apron: { at: 'x', by: 'y' }, old: { at: 'x', by: 'y' } },
+  };
+  const ctx = {
+    account: { isActive: true },
+    servicesCount: 3,
+    hasSchedule: true,
+    oficial: { name: 'A', dateBirth: '1', addressInCz: '1', addressInHome: '1', documentNumber: '1', phone: '1', email: '1', bankAccount: '1', emergencyName: 'M', emergencyPhone: '+420' },
+    documents: [{ kind: 'passport', validUntil: null }, { kind: 'health', validUntil: '2026-10-05' }, { kind: 'license', validUntil: null }],
+    items,
+    today: T,
+  };
+  const r = S.buildChecklist(full, ctx);
+  assert.equal(r.percent, 100);
+  assert.equal(r.open, 0);
+  assert.deepEqual(r.items.filter((i) => i.auto).map((i) => i.key), S.AUTO_CHECKLIST.map((a) => a.key), 'мастеру — все автопункты');
+  assert.deepEqual(r.items.filter((i) => !i.auto).map((i) => i.itemId), ['old', 'keys', 'apron'], 'выключенный с отметкой остаётся');
+  assert.deepEqual(r.items.find((i) => i.itemId === 'keys'), { itemId: 'keys', title: 'Klíče', auto: false, done: true, doneAt: '2026-10-01T10:00:00Z', doneBy: 'Dima', active: true });
+  // IČO — нужен živnostenský list, а не «Smlouva»
+  assert.equal(S.buildChecklist(full, { ...ctx, documents: [{ kind: 'passport' }, { kind: 'health' }, { kind: 'contract' }] }).items.find((i) => i.key === 'contract_doc').done, false);
+  // администратор: без фото/zdravotní průkaz/календаря; свой пункт мастера не применим
+  const admin = { position: 'administrator', rates: [], contracts: [], onboarding: null };
+  const a = S.buildChecklist(admin, { account: null, oficial: null, documents: [{ kind: 'health', validUntil: '2026-10-04' }], items, today: T });
+  assert.deepEqual(a.items.map((i) => i.key || i.itemId), ['account', 'private', 'bank', 'emergency', 'id_document', 'contract', 'contract_doc', 'rate', 'keys']);
+  assert.equal(a.percent, 0);
+  assert.equal(a.open, 9);
+  // процент вниз: 1 из 9 = 11; 8 из 9 = 88 (не 89 — 100 % только когда готово всё)
+  assert.equal(S.buildChecklist({ ...admin, onboarding: { keys: { at: 'x', by: 'y' } } }, { account: null, items, today: T }).percent, 11);
+  const almost = S.buildChecklist(
+    { ...admin, rates: [{ typeWork: 'dpp', rate: 150, from: '2026-01-01' }], contracts: [{ type: 'dpp', from: '2026-01-01' }] },
+    { account: { isActive: true }, oficial: ctx.oficial, documents: [{ kind: 'passport' }, { kind: 'contract' }], items, today: T }
+  );
+  assert.deepEqual([almost.percent, almost.open], [88, 1]);
+  // просроченный паспорт не засчитывается; мусор в onboarding не ломает
+  const exp = S.buildChecklist({ ...admin, onboarding: 'мусор' }, { documents: [{ kind: 'passport', validUntil: '2026-10-04' }], items, today: T });
+  assert.equal(exp.items.find((i) => i.key === 'id_document').done, false);
+  assert.equal(S.buildChecklist({ ...admin, isActive: false }, { items, today: T }), null);
+  assert.equal(S.buildChecklist({ ...admin, name: '❌ X' }, { items, today: T }), null);
+});
+
+test('normalizeChecklistItem: название, кому, выключение, порядок; лишнее — 400', () => {
+  assert.deepEqual(S.normalizeChecklistItem({ title: '  Klíče  od  salonu ', positions: ['manager', 'master'] }, { create: true }), {
+    title: 'Klíče od salonu',
+    positions: ['master', 'manager'],
+  });
+  assert.deepEqual(S.normalizeChecklistItem({ active: false, order: '30' }), { active: false, order: 30 });
+  for (const [data, opts, code] of [
+    [{ title: '', positions: ['master'] }, { create: true }, 'title_required'],
+    [{ title: 'x'.repeat(81), positions: ['master'] }, { create: true }, 'too_long'],
+    [{ title: 'A', positions: [] }, { create: true }, 'bad_positions'],
+    [{ title: 'A', positions: ['owner'] }, { create: true }, 'bad_positions'],
+    [{ title: 'A', positions: ['master', 'master'] }, { create: true }, 'bad_positions'],
+    [{ title: 'A', positions: ['master'], active: false }, { create: true }, 'bad_field'],
+    [{ active: 'no' }, {}, 'bad_field'],
+    [{ order: -1 }, {}, 'bad_order'],
+    [{ documentId: 'x' }, {}, 'bad_field'],
+  ]) {
+    assert.throws(() => S.normalizeChecklistItem(data, opts), (e) => e.code === code, JSON.stringify(data));
+  }
+});
+
+test('каталог: стартовый набор кладётся один раз (и при параллельных запросах); добавить, переименовать, выключить', async () => {
+  const st = makeStrapi();
+  const [a, b] = await Promise.all([svc.checklistItems(), svc.checklistItems()]);
+  assert.deepEqual(a.items.map((i) => i.title), S.DEFAULT_CHECKLIST);
+  assert.deepEqual(b, a);
+  assert.equal(st.store['api::staff-checklist-item.staff-checklist-item'].length, 4, 'закладка одна');
+  await svc.checklistItems();
+  assert.equal(st.store['api::staff-checklist-item.staff-checklist-item'].length, 4);
+  const added = await svc.createChecklistItem({ session: MANAGER, body: { title: 'Heslo k Wi-Fi', positions: ['administrator'] } });
+  const wifi = added.items.find((i) => i.title === 'Heslo k Wi-Fi');
+  assert.deepEqual(wifi.positions, ['administrator']);
+  assert.equal(wifi.order, 50);
+  await expectErr(() => svc.createChecklistItem({ session: MANAGER, body: { title: 'heslo k wi-fi', positions: ['master'] } }), 409, 'item_exists');
+  const off = await svc.updateChecklistItem({ session: MANAGER, itemId: wifi.documentId, body: { active: false } });
+  assert.equal(off.items.find((i) => i.documentId === wifi.documentId).active, false);
+  await expectErr(() => svc.updateChecklistItem({ session: MANAGER, itemId: wifi.documentId, body: { title: S.DEFAULT_CHECKLIST[0] } }), 409, 'item_exists');
+  await expectErr(() => svc.updateChecklistItem({ session: MANAGER, itemId: 'nope', body: { active: true } }), 404, 'item_not_found');
+});
+
+test('договоры: добавить (обе версии, журнал), закрыть датой, пересечение, удалить — только не начавшийся; ставки не тронуты', async () => {
+  const st = makeStrapi();
+  const ratesBefore = structuredClone(st.draft(P.veronika).rates);
+  let base = st.draft(P.veronika).updatedAt;
+  let c = await svc.addContract({ session: MANAGER, id: P.veronika, body: { type: 'hpp', from: '2026-01-01', probationUntil: '2026-03-31', base }, now: NOW });
+  assert.equal(c.contracts.current.type, 'hpp');
+  assert.deepEqual(c.warnings, []);
+  assert.equal(st.pub(P.veronika).contracts.length, 1, 'опубликовано');
+  assert.deepEqual(st.draft(P.veronika).rates, ratesBefore, '🟥 договор не трогает ставки');
+  assert.match(st.logs.at(-1).summary, /^Nová smlouva: Veronika · HPP od 01\.01\.2026/);
+  assert.equal(st.logs.at(-1).action, 'staff_contract');
+  // старый base — 409
+  await expectErr(() => svc.addContract({ session: MANAGER, id: P.veronika, body: { type: 'dpp', from: '2027-01-01', base }, now: NOW }), 409, 'staff_changed');
+  base = c.updatedAt;
+  await expectErr(() => svc.addContract({ session: MANAGER, id: P.veronika, body: { type: 'dpp', from: '2027-01-01', base }, now: NOW }), 409, 'contract_overlap');
+  const cid = c.contracts.current.id;
+  c = await svc.updateContract({ session: MANAGER, id: P.veronika, contractId: cid, body: { to: '2026-12-31', base }, now: NOW });
+  assert.equal(c.contracts.list[0].to, '2026-12-31');
+  assert.equal(c.contracts.list[0].id, cid, 'компонент правится на месте');
+  assert.match(st.logs.at(-1).summary, /Smlouva upravena: Veronika · HPP 01\.01\.2026–31\.12\.2026 · do: — → 31\.12\.2026/);
+  c = await svc.addContract({ session: MANAGER, id: P.veronika, body: { type: 'ico', from: '2027-01-01', ico: '27082440', base: c.updatedAt }, now: NOW });
+  assert.equal(c.contracts.list.length, 2);
+  assert.equal(c.contracts.current.id, cid);
+  const future = c.contracts.list[1];
+  await expectErr(() => svc.deleteContract({ session: MANAGER, id: P.veronika, contractId: cid, body: { base: c.updatedAt }, now: NOW }), 409, 'contract_started');
+  await expectErr(() => svc.deleteContract({ session: MANAGER, id: P.veronika, contractId: 99999, body: { base: c.updatedAt }, now: NOW }), 404, 'contract_not_found');
+  await expectErr(() => svc.deleteContract({ session: MANAGER, id: P.veronika, contractId: 'x', body: { base: c.updatedAt }, now: NOW }), 404, 'contract_not_found');
+  c = await svc.deleteContract({ session: MANAGER, id: P.veronika, contractId: future.id, body: { base: c.updatedAt }, now: NOW });
+  assert.deepEqual(c.contracts.list.map((x) => x.id), [cid]);
+  assert.equal(st.pub(P.veronika).contracts.length, 1);
+  assert.deepEqual(st.draft(P.veronika).rates, ratesBefore);
+  // IČO в журнал не просится, но он публичный (ARES) — проверяем лишь, что личных данных нет
+  for (const l of st.logs) for (const v of Object.values(SECRET)) assert.ok(!JSON.stringify(l).includes(v));
+  // чужая (скрытая) карточка — 404; ушедшему новый договор нельзя
+  await expectErr(() => svc.addContract({ session: MANAGER, id: P.dima, body: { type: 'dpp', from: '2026-10-01', base: 'x' }, now: NOW }), 404, 'staff_not_found');
+  for (const v of [st.draft(P.yana), st.pub(P.yana)]) v.isActive = false;
+  await expectErr(() => svc.addContract({ session: MANAGER, id: P.yana, body: { type: 'dpp', from: '2026-10-01', base: st.draft(P.yana).updatedAt }, now: NOW }), 409, 'staff_left');
+});
+
+test('онбординг: отметка кто/когда, снятие, процент в карточке и списке; выключенный — только снять; ушедшим нельзя', async () => {
+  const st = makeStrapi();
+  const { items } = await svc.checklistItems();
+  const keys = items[0];
+  let c = await svc.card({ session: MANAGER, id: P.veronika, now: NOW });
+  const p0 = c.checklist.percent;
+  assert.ok(c.checklist.items.some((i) => i.itemId === keys.documentId && !i.done));
+  c = await svc.setOnboarding({ session: MANAGER, id: P.veronika, itemId: keys.documentId, body: { done: true }, now: NOW });
+  const mark = c.checklist.items.find((i) => i.itemId === keys.documentId);
+  assert.deepEqual([mark.done, mark.doneBy, mark.doneAt], [true, 'Mariia Medvedeva', NOW.toISOString()]);
+  assert.ok(c.checklist.percent > p0);
+  assert.deepEqual(st.pub(P.veronika).onboarding, st.draft(P.veronika).onboarding, 'опубликовано');
+  assert.match(st.logs.at(-1).summary, /^Nástup: splněno: Veronika · Выданы ключи$/);
+  const list = await svc.list({ session: MANAGER, now: NOW });
+  const row = list.rows.find((r) => r.name === 'Veronika');
+  assert.deepEqual(row.checklist, { percent: c.checklist.percent, open: c.checklist.open });
+  assert.ok(!('items' in row.checklist), 'в списке — только процент');
+  assert.equal((await svc.setOnboarding({ session: MANAGER, id: P.veronika, itemId: keys.documentId, body: { done: true }, now: NOW })).unchanged, true);
+  // выключили — отметка осталась, снять можно, поставить заново нельзя
+  await svc.updateChecklistItem({ session: MANAGER, itemId: keys.documentId, body: { active: false } });
+  c = await svc.card({ session: MANAGER, id: P.veronika, now: NOW });
+  assert.equal(c.checklist.items.find((i) => i.itemId === keys.documentId).done, true);
+  assert.ok(!(await svc.card({ session: MANAGER, id: P.yana, now: NOW })).checklist.items.some((i) => i.itemId === keys.documentId), 'из новых ушёл');
+  c = await svc.setOnboarding({ session: MANAGER, id: P.veronika, itemId: keys.documentId, body: { done: false }, now: NOW });
+  assert.ok(!c.checklist.items.some((i) => i.itemId === keys.documentId));
+  await expectErr(() => svc.setOnboarding({ session: MANAGER, id: P.veronika, itemId: keys.documentId, body: { done: true }, now: NOW }), 409, 'item_inactive');
+  for (const [body, code, status] of [[{ done: 'yes' }, 'bad_field', 400], [{}, 'bad_field', 400]]) {
+    await expectErr(() => svc.setOnboarding({ session: MANAGER, id: P.veronika, itemId: items[1].documentId, body, now: NOW }), status, code);
+  }
+  await expectErr(() => svc.setOnboarding({ session: MANAGER, id: P.veronika, itemId: '../x', body: { done: true }, now: NOW }), 404, 'item_not_found');
+  await expectErr(() => svc.setOnboarding({ session: MANAGER, id: P.dima, itemId: items[1].documentId, body: { done: true }, now: NOW }), 404, 'staff_not_found');
+  for (const v of [st.draft(P.yana), st.pub(P.yana)]) v.isActive = false;
+  await expectErr(() => svc.setOnboarding({ session: MANAGER, id: P.yana, itemId: items[1].documentId, body: { done: true }, now: NOW }), 409, 'staff_left');
+  assert.equal((await svc.card({ session: MANAGER, id: P.yana, now: NOW })).checklist, null, 'ушедшим чек-лист не считается');
+});
+
+test('чек-лист карточки: документы и договор закрывают пункты; личные данные — все 10 полей не утекают', async () => {
+  const st = makeStrapi();
+  st.store['api::staff-document.staff-document'].push(
+    { documentId: 'sd1', kind: 'passport', title: 'Pas', validUntil: '2030-01-01', personal: { documentId: P.veronika } },
+    { documentId: 'sd2', kind: 'health', title: 'ZP', validUntil: '2026-10-04', personal: { documentId: P.veronika } },
+    { documentId: 'sd3', kind: 'contract', title: 'Smlouva', validUntil: null, personal: { documentId: P.veronika } }
+  );
+  let c = await svc.card({ session: MANAGER, id: P.veronika, now: NOW });
+  const done = (k) => c.checklist.items.find((i) => i.key === k).done;
+  assert.equal(done('id_document'), true);
+  assert.equal(done('health'), false, 'просрочен');
+  assert.equal(done('contract'), false);
+  assert.equal(done('contract_doc'), true);
+  assert.equal(done('private'), true);
+  assert.equal(done('bank'), false);
+  c = await svc.addContract({ session: MANAGER, id: P.veronika, body: { type: 'dpp', from: '2025-09-01', base: c.updatedAt }, now: NOW });
+  assert.equal(c.checklist.items.find((i) => i.key === 'contract').done, true);
+  const json = JSON.stringify(c);
+  for (const v of [...Object.values(SECRET), 'Veronika Nováková', '09.11.1995']) assert.ok(!json.includes(v), `утечка: ${v}`);
+  assert.ok(!hasKeyDeep(c, 'oficial'));
+  // новый сотрудник — чек-лист в ответе создания (вместо статичного списка)
+  const created = await svc.create({ session: MANAGER, body: { name: 'Nová Mistrová', position: 'master', account: false }, now: NOW });
+  assert.ok(created.checklist.open > 0);
+  assert.ok(created.checklist.items.some((i) => i.key === 'services' && !i.done));
 });

@@ -5,7 +5,8 @@
 // чистое форматирование, без базы.
 //
 // 🟥 Чат дайджеста читают и администраторы: документы — только имя, тип и срок
-// (номеров и сканов нет), дни рождения — только день и месяц.
+// (номеров и сканов нет), договоры — имя, тип и дата (без IČO, фаза 2 карточки),
+// дни рождения — только день и месяц.
 
 export const BIRTHDAY_DAYS = 7;
 export const MAX_ROWS = 8;
@@ -36,6 +37,8 @@ const kc = (n: unknown): string => `${Math.round(Number(n) || 0).toLocaleString(
 
 const days = (n: number): string => `${n} дн.`;
 
+const CONTRACT_TYPE_LABEL = { hpp: 'HPP', dpp: 'DPP', ico: 'IČO' };
+
 /** Имя администратора из недели графика (`shift`) на дату; '' — не указан. */
 export const adminOnDate = (week: { days?: Record<string, string> | null } | null | undefined, date: string): string => {
   if (!week?.days || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
@@ -62,6 +65,8 @@ export interface AttentionInput {
   pending?: { items: any[]; planRequests: any[] };
   vouchers?: { paidRecent: any[]; unpaid: any[] };
   staffDocs?: any[];
+  /** staff.reminders().contracts: конец договора / испытательного срока */
+  staffContracts?: any[];
   birthdays?: any[];
 }
 
@@ -121,14 +126,24 @@ export const buildAttention = (input: AttentionInput): { adminLine: string | nul
     }
   }
 
-  // ── Документы сотрудников: срок ≤ 30 дней или истёк ──
-  if (input.staffDocs?.length) {
-    const rows = input.staffDocs.map((d) => {
-      const n = Number(d.daysLeft);
-      const when = n < 0 ? `прострочено ${days(-n)}` : n === 0 ? 'закінчується сьогодні' : `до ${dm(d.validUntil)} (через ${days(n)})`;
-      return `• <b>${esc(d.name)}</b> — ${esc(d.title || d.kind)}: ${when}`;
-    });
-    sections.push(['🪪 <b>Документи співробітників — терміни:</b>', ...capped(rows, more)]);
+  // ── Документы и договоры сотрудников: срок ≤ 30 дней или истёк; испытательный ≤ 14 дней ──
+  const docRows = (input.staffDocs || []).map((d) => {
+    const n = Number(d.daysLeft);
+    const when = n < 0 ? `прострочено ${days(-n)}` : n === 0 ? 'закінчується сьогодні' : `до ${dm(d.validUntil)} (через ${days(n)})`;
+    return `• <b>${esc(d.name)}</b> — ${esc(d.title || d.kind)}: ${when}`;
+  });
+  const contractRows = (input.staffContracts || []).map((c) => {
+    const n = Number(c.daysLeft);
+    const type = CONTRACT_TYPE_LABEL[c.type] || esc(c.type);
+    if (c.kind === 'probation_end') {
+      return `• <b>${esc(c.name)}</b> — випробувальний термін (${type}): ${n === 0 ? 'закінчується сьогодні' : `до ${dm(c.date)} (через ${days(n)})`}`;
+    }
+    const when = n < 0 ? `закінчився ${dm(c.date)}, нового немає` : n === 0 ? 'закінчується сьогодні' : `до ${dm(c.date)} (через ${days(n)})`;
+    return `• <b>${esc(c.name)}</b> — договір ${type}: ${when}`;
+  });
+  if (docRows.length || contractRows.length) {
+    const title = contractRows.length ? '🪪 <b>Документи й договори співробітників — терміни:</b>' : '🪪 <b>Документи співробітників — терміни:</b>';
+    sections.push([title, ...capped([...docRows, ...contractRows], more)]);
   }
 
   // ── Дни рождения: ближайшие BIRTHDAY_DAYS дней ──

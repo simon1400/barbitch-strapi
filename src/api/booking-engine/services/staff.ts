@@ -40,6 +40,7 @@ import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 import { invalidateAdminAccount } from '../../../utils/admin-account';
+import { findSessionPersonal } from '../../../utils/staff-identity';
 import { minToHHMM, pragueDateOf, pragueMinOf } from './slots-core';
 
 const PERSONAL_UID = 'api::personal.personal';
@@ -51,6 +52,7 @@ const TIME_OFF_UID = 'api::time-off.time-off';
 const BOOKING_UID = 'api::booking.booking';
 const LOG_UID = 'api::calendar-log.calendar-log';
 const TIME_BLOCK_UID = 'api::time-block.time-block';
+const CHECKLIST_UID = 'api::staff-checklist-item.staff-checklist-item';
 const PLAN_KEY_PREFIX = 'own|plan|'; // как master-schedule.ts: блоки плана `own|plan|<personal.documentId>`
 
 export class StaffError extends Error {
@@ -510,7 +512,8 @@ export const rateLabel = (r: any) => {
 
 /**
  * «Чего не хватает» — для бейджей списка. Ушедшим не считается.
- * ctx: { account, servicesCount, hasSchedule, privateMissing, today }.
+ * ctx: { account, servicesCount, hasSchedule, today }.
+ * Заполненность личных данных — в чек-листе (фаза 2, buildChecklist), не здесь.
  */
 export const missingFlags = (p: any, ctx: any): string[] => {
   if (isLeft(p)) return [];
@@ -522,7 +525,263 @@ export const missingFlags = (p: any, ctx: any): string[] => {
   if (master && !ctx.servicesCount) out.push('no_services');
   if (master && !ctx.hasSchedule) out.push('no_schedule');
   if (master ? p?.ratePercent == null : !rateOn(p?.rates, ctx.today)) out.push('no_rate');
-  if (ctx.privateMissing?.length) out.push('private_incomplete');
+  return out;
+};
+
+// ── фаза 2 (s231): договор — только учёт ─────────────────────────────────
+// 🟥 Договор НЕ влияет на деньги: смысл оплаты несёт `rates.typeWork` (у админов `hpp` =
+// фикс в месяц, у управляющей — оклад). Ставки договором не правятся и не подставляются.
+
+export const CONTRACT_TYPES = { hpp: 'HPP', dpp: 'DPP', ico: 'IČO' } as const;
+export const MAX_CONTRACT_NOTE = 200;
+/** Испытательный срок в ЧР — до 3 месяцев (до 6 у руководящих): длиннее — предупреждение, не запрет. */
+export const PROBATION_WARN_MONTHS = 3;
+/** Напоминания (решение §8.1, предложенное): конец договора — за 30 дней, испытательного — за 14. */
+export const CONTRACT_REMIND_DAYS = 30;
+export const PROBATION_REMIND_DAYS = 14;
+
+/** IČO: 8 цифр, последняя — контрольная (веса 8…2, mod 11). */
+export const icoValid = (raw: unknown): boolean => {
+  const s = String(raw ?? '');
+  if (!/^\d{8}$/.test(s)) return false;
+  let sum = 0;
+  for (let i = 0; i < 7; i++) sum += Number(s[i]) * (8 - i);
+  return (11 - (sum % 11)) % 10 === Number(s[7]);
+};
+
+/** Запись договора → чистый вид. */
+export const pickContract = (c: any) => ({
+  id: c?.id ?? null,
+  type: hasOwn(CONTRACT_TYPES, String(c?.type)) ? c.type : 'dpp',
+  from: ymdOf(c?.from),
+  to: ymdOf(c?.to),
+  probationUntil: ymdOf(c?.probationUntil),
+  ico: c?.ico ? String(c.ico) : null,
+  note: c?.note ? String(c.note) : null,
+});
+
+const byFrom = (a: any, b: any) => String(a.from || '').localeCompare(String(b.from || ''));
+
+/** Договоры по дате начала. */
+export const contractsOf = (list: any[]) => (list || []).map(pickContract).sort(byFrom);
+
+/** Текущий договор: покрывающий дату, при совпадении — позже начавшийся. */
+export const contractOn = (list: any[], ymd: string) => {
+  let found = null;
+  for (const c of contractsOf(list)) {
+    if (c.from && c.from <= ymd && (!c.to || c.to >= ymd)) found = c;
+  }
+  return found;
+};
+
+const monthsAfter = (ymd: string, months: number) => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1 + months, d));
+  // 31.01 + 1 мес. → 28/29.02, а не 03.03
+  if (t.getUTCDate() !== d) t.setUTCDate(0);
+  return t.toISOString().slice(0, 10);
+};
+
+const CONTRACT_KEYS = ['type', 'from', 'to', 'probationUntil', 'ico', 'note'];
+
+const optDate = (raw: unknown, label: string): string | null => {
+  if (raw == null || raw === '') return null;
+  const v = String(raw).trim();
+  if (!isValidYmd(v) || v < MIN_HIRED || v > '2100-12-31') throw new StaffError(400, 'bad_date', `${label} — ГГГГ-ММ-ДД`);
+  return v;
+};
+
+/**
+ * Договор для записи. `current` — правка существующего (незаданные поля берутся из него),
+ * `others` — остальные договоры карточки (пересечение периодов — 409).
+ * Прошлые договоры можно править (учёт, опечатки), удалять — только не начавшиеся.
+ * Возвращает договор и предупреждения (длинный испытательный срок).
+ */
+export const normalizeContract = (data: any, { current = null, others = [], today }: { current?: any; others?: any[]; today: string }) => {
+  const keys = onlyKeys(data, CONTRACT_KEYS);
+  const cur = current ? pickContract(current) : null;
+  const val = (k: string) => (keys.includes(k) ? data[k] : cur?.[k]);
+  const type = String(val('type') ?? '');
+  if (!hasOwn(CONTRACT_TYPES, type)) throw new StaffError(400, 'bad_contract_type', 'Тип договора — HPP, DPP или IČO');
+  const from = optDate(val('from'), 'Начало договора');
+  if (!from) throw new StaffError(400, 'bad_date', 'Укажите начало договора');
+  if (from > addDaysYmd(today, MAX_FUTURE_DAYS)) throw new StaffError(400, 'date_too_far', 'Дата слишком далеко в будущем');
+  const to = optDate(val('to'), 'Конец договора');
+  if (to && to < from) throw new StaffError(400, 'bad_date', 'Конец договора раньше начала');
+  let probationUntil = optDate(val('probationUntil'), 'Испытательный срок');
+  // тип сменили с HPP — испытательный уходит вместе с ним (явно присланный — ошибка)
+  if (type !== 'hpp') {
+    if (keys.includes('probationUntil') && probationUntil) {
+      throw new StaffError(400, 'probation_only_hpp', 'Испытательный срок — только у HPP');
+    }
+    probationUntil = null;
+  }
+  if (probationUntil && (probationUntil < from || (to && probationUntil > to))) {
+    throw new StaffError(400, 'bad_date', 'Испытательный срок — внутри договора');
+  }
+  let ico = cleanText(val('ico')) || null;
+  if (type !== 'ico') {
+    if (keys.includes('ico') && ico) throw new StaffError(400, 'ico_only_ico', 'IČO — только у договора IČO (OSVČ)');
+    ico = null;
+  } else {
+    if (ico) ico = ico.replace(/\s/g, '');
+    if (!ico) throw new StaffError(400, 'ico_required', 'Укажите IČO');
+    if (!icoValid(ico)) throw new StaffError(400, 'bad_ico', 'IČO — 8 цифр с верной контрольной цифрой');
+  }
+  const note = cleanText(val('note')) || null;
+  if (note && note.length > MAX_CONTRACT_NOTE) throw new StaffError(400, 'too_long', `Заметка — не длиннее ${MAX_CONTRACT_NOTE} символов`);
+  const end = to || '9999-12-31';
+  const clash = contractsOf(others).find((o) => o.from && o.from <= end && (o.to || '9999-12-31') >= from);
+  if (clash) {
+    const span = `${fmtDay(clash.from)}${clash.to ? `–${fmtDay(clash.to)}` : ' (бессрочно)'}`;
+    throw new StaffError(409, 'contract_overlap', `Пересекается с договором ${CONTRACT_TYPES[clash.type]} ${span} — сначала закройте его датой`);
+  }
+  const warnings = [];
+  if (probationUntil && probationUntil > monthsAfter(from, PROBATION_WARN_MONTHS)) warnings.push('long_probation');
+  return { contract: { type, from, to, probationUntil, ico, note }, warnings };
+};
+
+/** «HPP 01.10.2026–30.09.2027», «DPP od 01.10.2026». */
+export const contractLabel = (c: any) =>
+  `${CONTRACT_TYPES[c?.type] || c?.type} ${c?.to ? `${fmtDay(c.from)}–${fmtDay(c.to)}` : `od ${fmtDay(c.from)}`}`;
+
+/** Массив компонента для записи: прежние записи — со своими `id` (как ставки). */
+const contractRows = (list: any[]) =>
+  list.map((c) => {
+    const row: Record<string, any> = { type: c.type, from: c.from, to: c.to ?? null, probationUntil: c.probationUntil ?? null, ico: c.ico ?? null, note: c.note ?? null };
+    if (c.id != null) row.id = c.id;
+    return row;
+  });
+
+// ── фаза 2 (s231): онбординг-чек-лист и процент заполненности ────────────
+
+export const CHECKLIST_POSITIONS = ['master', 'administrator', 'manager'] as const;
+export const MAX_CHECKLIST_TITLE = 80;
+/** Стартовый каталог своих пунктов (§8.3, предложенное) — кладётся один раз в пустую коллекцию. */
+export const DEFAULT_CHECKLIST = [
+  'Выданы ключи',
+  'Выдана форма',
+  'Инструктаж по безопасности',
+  'Подписан договор о материальной ответственности',
+];
+
+/**
+ * Автопункты: закрываются сами по данным карточки. `section` — куда вести в карточке.
+ * zdravotní průkaz — для мастеров, счёт и экстренный контакт — для всех (§8.2, предложенное).
+ */
+export const AUTO_CHECKLIST = [
+  { key: 'account', title: 'Учётка для входа включена', section: 'account', for: 'all' },
+  { key: 'private', title: 'Личные данные (7 основных полей)', section: 'private', for: 'all' },
+  { key: 'bank', title: 'Номер счёта', section: 'private', for: 'all' },
+  { key: 'emergency', title: 'Экстренный контакт', section: 'private', for: 'all' },
+  { key: 'photo', title: 'Фото', section: 'header', for: 'master' },
+  { key: 'id_document', title: 'Паспорт или вид на жительство (действует)', section: 'documents', for: 'all' },
+  { key: 'health', title: 'Zdravotní průkaz (действует)', section: 'documents', for: 'master' },
+  { key: 'contract', title: 'Текущий договор', section: 'contract', for: 'all' },
+  { key: 'contract_doc', title: 'Скан договора (IČO — živnostenský list)', section: 'documents', for: 'all' },
+  { key: 'rate', title: 'Ставка или доля', section: 'pay', for: 'all' },
+  { key: 'calendar', title: 'Колонка в календаре', section: 'booking', for: 'master' },
+  { key: 'services', title: 'Услуги (Каталог)', section: 'booking', for: 'master' },
+  { key: 'schedule', title: 'Шаблон графика', section: 'booking', for: 'master' },
+] as const;
+
+/** Пункт каталога → чистый вид. positions пусто/мусор — всем. */
+export const pickChecklistItem = (i: any) => {
+  const pos = Array.isArray(i?.positions) ? i.positions.filter((p) => CHECKLIST_POSITIONS.includes(p)) : [];
+  return {
+    documentId: i?.documentId,
+    title: cleanText(i?.title),
+    positions: pos.length ? pos : [...CHECKLIST_POSITIONS],
+    order: Number(i?.order) || 0,
+    active: i?.active !== false,
+  };
+};
+
+const onboardingOf = (v: unknown): Record<string, { at: string; by: string }> => (isPlain(v) ? (v as any) : {});
+
+/** Документ действует на дату (без срока — действует). */
+const docValid = (d: any, today: string) => !d?.validUntil || ymdOf(d.validUntil) >= today;
+
+/**
+ * Чек-лист карточки: автопункты по данным + свои пункты руководства (активные для
+ * должности; выключенные — только если на этой карточке уже отмечены).
+ * Процент — готовые / применимые, вниз (100 — только когда готово всё). Ушедшим — null.
+ * ctx: { account, servicesCount, hasSchedule, oficial, documents: [{kind, validUntil}], items, today }.
+ */
+export const buildChecklist = (p: any, ctx: any) => {
+  if (isLeft(p)) return null;
+  const master = p?.position === 'master';
+  const today = ctx.today;
+  const o = ctx.oficial || {};
+  const docs = ctx.documents || [];
+  const current = contractOn(p?.contracts, today);
+  const has = (kind: string) => docs.some((d) => d.kind === kind && docValid(d, today));
+  const done = {
+    account: Boolean(ctx.account && ctx.account.isActive === true),
+    private: privateMissing(o).length === 0,
+    bank: Boolean(cleanText(o.bankAccount)),
+    emergency: Boolean(cleanText(o.emergencyName) && cleanText(o.emergencyPhone)),
+    photo: Boolean(p?.photo?.url || p?.photo?.id),
+    id_document: has('passport') || has('residence'),
+    health: has('health'),
+    contract: Boolean(current),
+    contract_doc: has(current?.type === 'ico' ? 'license' : 'contract'),
+    rate: master ? p?.ratePercent != null : Boolean(rateOn(p?.rates, today)),
+    calendar: Boolean(cleanText(p?.noonaEmployeeId)),
+    services: Boolean(ctx.servicesCount),
+    schedule: Boolean(ctx.hasSchedule),
+  };
+  const items: any[] = AUTO_CHECKLIST.filter((a) => a.for === 'all' || (a.for === 'master' && master)).map((a) => ({
+    key: a.key,
+    title: a.title,
+    section: a.section,
+    auto: true,
+    done: done[a.key],
+  }));
+  const marks = onboardingOf(p?.onboarding);
+  const own = (ctx.items || [])
+    .map(pickChecklistItem)
+    .filter((i) => i.documentId && (hasOwn(marks, i.documentId) || (i.active && i.positions.includes(p?.position))))
+    .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
+  for (const i of own) {
+    const m = marks[i.documentId];
+    items.push({
+      itemId: i.documentId,
+      title: i.title,
+      auto: false,
+      done: Boolean(m),
+      doneAt: m?.at || null,
+      doneBy: m?.by || null,
+      active: i.active,
+    });
+  }
+  const total = items.length;
+  const ready = items.filter((i) => i.done).length;
+  return { items, percent: total ? Math.floor((ready * 100) / total) : 100, open: total - ready };
+};
+
+/** Каталог: {title, positions} для создания, любые из {title, positions, active, order} для правки. */
+export const normalizeChecklistItem = (data: any, { create = false } = {}) => {
+  const keys = onlyKeys(data, create ? ['title', 'positions'] : ['title', 'positions', 'active', 'order']);
+  const out: Record<string, any> = {};
+  if (create || keys.includes('title')) {
+    const t = cleanText(data.title);
+    if (!t) throw new StaffError(400, 'title_required', 'Название пункта обязательно');
+    if (t.length > MAX_CHECKLIST_TITLE) throw new StaffError(400, 'too_long', `Название — не длиннее ${MAX_CHECKLIST_TITLE} символов`);
+    out.title = t;
+  }
+  if (create || keys.includes('positions')) {
+    const v = data.positions;
+    if (!Array.isArray(v) || !v.length || v.some((x) => !CHECKLIST_POSITIONS.includes(x)) || new Set(v).size !== v.length) {
+      throw new StaffError(400, 'bad_positions', 'Кому пункт — мастер, администратор, управляющая');
+    }
+    out.positions = CHECKLIST_POSITIONS.filter((x) => v.includes(x));
+  }
+  if (keys.includes('active')) {
+    if (typeof data.active !== 'boolean') throw new StaffError(400, 'bad_field', 'active — да или нет');
+    out.active = data.active;
+  }
+  if (keys.includes('order')) out.order = intIn(data.order, 0, 10_000, 'bad_order', 'Порядок');
   return out;
 };
 
@@ -658,6 +917,11 @@ export const logSummary = (kind: string, name: string, parts: string[] = []) => 
     account_password: 'Nové heslo do administrace',
     leave: 'Ukončení spolupráce',
     erase: 'Osobní údaje smazány',
+    contract_add: 'Nová smlouva',
+    contract_update: 'Smlouva upravena',
+    contract_delete: 'Smlouva smazána',
+    onboarding_done: 'Nástup: splněno',
+    onboarding_undone: 'Nástup: odškrtnuto',
   }[kind];
   return [`${head}: ${name}`, ...parts].join(' · ');
 };
@@ -851,7 +1115,30 @@ export const buildReminders = (cards: any[], docs: any[], today: string) => {
     .filter((c) => !c.leftAt)
     .map((c) => ({ personal: c.documentId, name: c.name }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  return { today, horizonDays: DOC_REMIND_DAYS, documents, erase, leftWithoutDate };
+  return { today, horizonDays: DOC_REMIND_DAYS, documents, erase, leftWithoutDate, contracts: contractReminders(cards, today) };
+};
+
+/**
+ * Договоры работающих (фаза 2): последний договор кончается в 30 дней или уже кончился, а
+ * нового нет (`contract_end`); испытательный срок текущего кончается в 14 дней
+ * (`probation_end`). Сотрудник без договоров не напоминает — это пункт чек-листа.
+ * Только имя, тип и дата: номер IČO сюда не идёт (раздел читают и в дайджесте).
+ */
+export const contractReminders = (cards: any[], today: string) => {
+  const out = [];
+  for (const c of cards) {
+    if (c.left) continue;
+    const list = contractsOf(c.contracts);
+    const last = list[list.length - 1];
+    if (last?.to && last.to <= addDaysYmd(today, CONTRACT_REMIND_DAYS)) {
+      out.push({ personal: c.documentId, name: c.name, kind: 'contract_end', type: last.type, date: last.to, daysLeft: daysBetween(today, last.to) });
+    }
+    const cur = contractOn(c.contracts, today);
+    if (cur?.probationUntil && cur.probationUntil >= today && cur.probationUntil <= addDaysYmd(today, PROBATION_REMIND_DAYS)) {
+      out.push({ personal: c.documentId, name: c.name, kind: 'probation_end', type: cur.type, date: cur.probationUntil, daysLeft: daysBetween(today, cur.probationUntil) });
+    }
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name));
 };
 
 const PRAGUE_DAY = new Intl.DateTimeFormat('en-CA', {
@@ -877,6 +1164,7 @@ const CARD_FIELDS = [
   'dualRole',
   'dualRoleUntil',
   'managerSince',
+  'onboarding',
   'updatedAt',
 ];
 const DOC_FIELDS = ['kind', 'title', 'validUntil', 'fileName', 'mime', 'size', 'uploadedBy', 'createdAt'];
@@ -914,6 +1202,16 @@ const docIdOf = (v: unknown) => {
   const s = String(v ?? '');
   if (!DOC_ID.test(s)) throw new StaffError(404, 'staff_not_found', 'Сотрудник не найден');
   return s;
+};
+
+// закладка стартового каталога — одна на процесс (параллельные первые запросы её делят)
+let checklistSeeding: Promise<void> | null = null;
+
+/** Состояние срока документа для «Моих данных». */
+export const docState = (validUntil: string | null, today: string) => {
+  if (!validUntil) return { state: 'none', daysLeft: null };
+  const n = daysBetween(today, validUntil);
+  return { state: n < 0 ? 'expired' : n <= DOC_REMIND_DAYS ? 'soon' : 'ok', daysLeft: n };
 };
 
 export default {
@@ -1042,7 +1340,8 @@ export default {
           photo: { fields: ['url', 'formats'] },
           services: { fields: ['documentId'] },
           rates: true,
-          oficial: { fields: CORE_PRIVATE_KEYS },
+          contracts: true,
+          oficial: { fields: PRIVATE_KEYS },
         },
         sort: 'name:asc',
         limit: 1000,
@@ -1051,12 +1350,25 @@ export default {
     ]);
     const owners = this._ownerNames(accounts);
     const visible = docs.filter((d) => !hiddenFromSession(d.name, owners, session?.role));
-    const scheduled = await this._hasSchedule(visible.filter((d) => d.position === 'master').map((d) => d.documentId));
+    const [scheduled, docKinds, items] = await Promise.all([
+      this._hasSchedule(visible.filter((d) => d.position === 'master').map((d) => d.documentId)),
+      this._docKinds(),
+      this._checklistItems(),
+    ]);
     const published = new Set(pubs.map((p) => p.documentId));
     const rows = visible.map((d) => {
       const account = accountForCard(d, accounts);
       const servicesCount = (d.services || []).length;
-      const missing = privateMissing(d.oficial);
+      const hasSchedule = scheduled.has(d.documentId);
+      const checklist = buildChecklist(d, {
+        account,
+        servicesCount,
+        hasSchedule,
+        oficial: d.oficial,
+        documents: docKinds.get(d.documentId) || [],
+        items,
+        today,
+      });
       return {
         documentId: d.documentId,
         name: d.name,
@@ -1070,10 +1382,54 @@ export default {
         leftAt: ymdOf(d.leftAt),
         servicesCount,
         account: account ? { id: account.id, role: account.role, isActive: account.isActive === true } : null,
-        flags: missingFlags(d, { account, servicesCount, hasSchedule: scheduled.has(d.documentId), privateMissing: missing, today }),
+        flags: missingFlags(d, { account, servicesCount, hasSchedule, today }),
+        // в списке — только процент и число невыполненных (пункты — в карточке)
+        checklist: checklist ? { percent: checklist.percent, open: checklist.open } : null,
+        contract: contractOn(d.contracts, today)?.type || null,
       };
     });
     return { today, rows };
+  },
+
+  /** Тип и срок документов по карточкам (для чек-листа): Map personal → [{kind, validUntil}]. */
+  async _docKinds(personalDocId: string | null = null) {
+    const rows = await strapi.documents(DOC_UID).findMany({
+      ...(personalDocId ? { filters: { personal: { documentId: { $eq: personalDocId } } } } : {}),
+      fields: ['kind', 'validUntil'],
+      populate: { personal: { fields: ['name'] } },
+      limit: 5000,
+    });
+    const out = new Map<string, any[]>();
+    for (const r of rows) {
+      const pid = r.personal?.documentId;
+      if (!pid) continue;
+      if (!out.has(pid)) out.set(pid, []);
+      out.get(pid).push({ kind: r.kind || 'other', validUntil: ymdOf(r.validUntil) });
+    }
+    return out;
+  },
+
+  /**
+   * Каталог своих пунктов. Пустая коллекция — один раз кладётся стартовый набор
+   * (§8.3); параллельные первые запросы делят одну закладку.
+   */
+  async _checklistItems() {
+    const read = () =>
+      strapi.documents(CHECKLIST_UID).findMany({ fields: ['title', 'positions', 'order', 'active'], sort: ['order:asc'], limit: 500 });
+    const rows = await read();
+    if (rows.length) return rows;
+    if (!checklistSeeding) {
+      checklistSeeding = (async () => {
+        if ((await read()).length) return;
+        for (const [i, title] of DEFAULT_CHECKLIST.entries()) {
+          await strapi.documents(CHECKLIST_UID).create({ data: { title, positions: [...CHECKLIST_POSITIONS], order: (i + 1) * 10, active: true } });
+        }
+      })().finally(() => {
+        checklistSeeding = null;
+      });
+    }
+    await checklistSeeding;
+    return read();
   },
 
   /**
@@ -1087,7 +1443,7 @@ export default {
       strapi.documents(PERSONAL_UID).findMany({
         status: 'draft',
         fields: ['name', 'isActive', 'leftAt', 'privateErasedAt'],
-        populate: { oficial: { fields: PRIVATE_KEYS } },
+        populate: { oficial: { fields: PRIVATE_KEYS }, contracts: true },
         limit: 1000,
       }),
       strapi.documents(DOC_UID).findMany({
@@ -1117,6 +1473,7 @@ export default {
         left: isLeft(c),
         leftAt: ymdOf(c.leftAt),
         erasedAt: c.privateErasedAt || null,
+        contracts: c.contracts || [],
         hasPrivate:
           PRIVATE_KEYS.some((k) => cleanText(c.oficial?.[k])) || withFiles.has(c.documentId),
       }));
@@ -1130,10 +1487,11 @@ export default {
       photo: { fields: ['url', 'formats'] },
       services: { fields: ['documentId'] },
       rates: true,
-      oficial: { fields: CORE_PRIVATE_KEYS },
+      contracts: true,
+      oficial: { fields: PRIVATE_KEYS },
     });
     const documentId = doc.documentId;
-    const [pub, scheduled, timeOffs, notes, docsCount, history] = await Promise.all([
+    const [pub, scheduled, timeOffs, notes, docsCount, history, docKinds, items] = await Promise.all([
       strapi.documents(PERSONAL_UID).findOne({ documentId, status: 'published', fields: ['name'] }),
       doc.position === 'master' ? this._hasSchedule([documentId]) : Promise.resolve(new Set()),
       strapi.documents(TIME_OFF_UID).findMany({
@@ -1155,10 +1513,13 @@ export default {
         sort: ['createdAt:desc'],
         limit: HISTORY_LIMIT,
       }),
+      this._docKinds(documentId),
+      this._checklistItems(),
     ]);
     const account = accountForCard(doc, accounts);
     const servicesCount = (doc.services || []).length;
     const missing = privateMissing(doc.oficial);
+    const contracts = contractsOf(doc.contracts);
     const rates = (doc.rates || []).map(pickRate).sort((a, b) => String(a.from).localeCompare(String(b.from)));
     const t = timeOffs[0];
     return {
@@ -1196,6 +1557,17 @@ export default {
         currentRate: rateOn(doc.rates, today),
         group: payrollGroupOf(doc),
       },
+      // договор — только учёт (фаза 2): на ставки и зарплаты не влияет
+      contracts: { list: contracts, current: contractOn(contracts, today) },
+      checklist: buildChecklist(doc, {
+        account,
+        servicesCount,
+        hasSchedule: scheduled.has(documentId),
+        oficial: doc.oficial,
+        documents: docKinds.get(documentId) || [],
+        items,
+        today,
+      }),
       account: accountView(account),
       privateMissing: missing,
       documentsCount: docsCount,
@@ -1208,7 +1580,7 @@ export default {
         details: h.details || null,
         createdAt: h.createdAt || null,
       })),
-      flags: missingFlags(doc, { account, servicesCount, hasSchedule: scheduled.has(documentId), privateMissing: missing, today }),
+      flags: missingFlags(doc, { account, servicesCount, hasSchedule: scheduled.has(documentId), today }),
     };
   },
 
@@ -1322,6 +1694,173 @@ export default {
       ukončeno: plan.closed.map((c) => `${rateLabel(c)} do ${fmtDay(c.to)}`).join(', ') || '—',
     });
     return this.card({ session, id: doc.documentId, now });
+  },
+
+  // ── фаза 2: договоры (только учёт) ─────────────────────────────────────
+
+  /** Договор карточки по id компонента (черновик) или 404. */
+  _contractOf(doc: any, contractId: unknown) {
+    const cid = Number(contractId);
+    const found = Number.isSafeInteger(cid) && cid > 0 ? (doc.contracts || []).find((c) => Number(c.id) === cid) : null;
+    if (!found) throw new StaffError(404, 'contract_not_found', 'Договор не найден');
+    return found;
+  },
+
+  async _writeContracts(doc: any, list: any[]) {
+    await this._write(doc.documentId, { contracts: contractRows(list) });
+  },
+
+  /** POST {type, from, to?, probationUntil?, ico?, note?, base}. */
+  async addContract({ session, id, body, now = new Date() }: { session: any; id: unknown; body: any; now?: Date }) {
+    const today = this._today(now);
+    const { doc } = await this._card(session, id, { contracts: true });
+    assertBase(body?.base, doc);
+    if (isLeft(doc)) throw new StaffError(409, 'staff_left', 'Сотрудник завершил работу — новый договор не заводится');
+    const { base, ...data } = body || {};
+    const { contract, warnings } = normalizeContract(data, { others: doc.contracts || [], today });
+    await this._writeContracts(doc, [...contractsOf(doc.contracts), contract]);
+    this._log('staff_contract', session, doc.documentId, logSummary('contract_add', doc.name, [contractLabel(contract)]), {
+      smlouva: contractLabel(contract),
+      ...(contract.probationUntil ? { 'zkušební doba do': fmtDay(contract.probationUntil) } : {}),
+    });
+    return { ...(await this.card({ session, id: doc.documentId, now })), warnings };
+  },
+
+  /** PATCH …/contracts/:contractId {любые поля договора, base} — в т.ч. «закрыть датой» (`to`). */
+  async updateContract({ session, id, contractId, body, now = new Date() }: { session: any; id: unknown; contractId: unknown; body: any; now?: Date }) {
+    const today = this._today(now);
+    const { doc } = await this._card(session, id, { contracts: true });
+    assertBase(body?.base, doc);
+    const cur = this._contractOf(doc, contractId);
+    const { base, ...data } = body || {};
+    const others = (doc.contracts || []).filter((c) => c !== cur);
+    const { contract, warnings } = normalizeContract(data, { current: cur, others, today });
+    const before = pickContract(cur);
+    const changed = CONTRACT_KEYS.filter((k) => (before[k] ?? null) !== (contract[k] ?? null));
+    if (!changed.length) return { ...(await this.card({ session, id: doc.documentId, now })), warnings, unchanged: true };
+    const list = contractsOf(doc.contracts).map((c) => (c.id === before.id ? { ...contract, id: c.id } : c));
+    await this._writeContracts(doc, list);
+    const show = (k: string, v: any) => (v == null || v === '' ? '—' : ['from', 'to', 'probationUntil'].includes(k) ? fmtDay(v) : k === 'type' ? CONTRACT_TYPES[v] : String(v));
+    const label = { type: 'typ', from: 'od', to: 'do', probationUntil: 'zkušební doba do', ico: 'IČO', note: 'poznámka' };
+    const parts = changed.map((k) => `${label[k]}: ${show(k, before[k])} → ${show(k, contract[k])}`);
+    this._log('staff_contract', session, doc.documentId, logSummary('contract_update', doc.name, [contractLabel(contract), ...parts]));
+    return { ...(await this.card({ session, id: doc.documentId, now })), warnings, unchanged: false };
+  },
+
+  /** DELETE …/contracts/:contractId — только ещё не начавшийся (история не теряется). */
+  async deleteContract({ session, id, contractId, body, now = new Date() }: { session: any; id: unknown; contractId: unknown; body: any; now?: Date }) {
+    const today = this._today(now);
+    const { doc } = await this._card(session, id, { contracts: true });
+    assertBase(body?.base, doc);
+    const cur = pickContract(this._contractOf(doc, contractId));
+    if (cur.from && cur.from <= today) {
+      throw new StaffError(409, 'contract_started', 'Начавшийся договор не удаляется — закройте его датой');
+    }
+    await this._writeContracts(doc, contractsOf(doc.contracts).filter((c) => c.id !== cur.id));
+    this._log('staff_contract', session, doc.documentId, logSummary('contract_delete', doc.name, [contractLabel(cur)]));
+    return this.card({ session, id: doc.documentId, now });
+  },
+
+  // ── фаза 2: онбординг-чек-лист ─────────────────────────────────────────
+
+  /**
+   * POST …/onboarding/:itemId {done} — отметка своего пункта (кто и когда). Без `base`:
+   * отметка не спорит с правкой секций, а ответ — карточка с новым updatedAt.
+   */
+  async setOnboarding({ session, id, itemId, body, now = new Date() }: { session: any; id: unknown; itemId: unknown; body: any; now?: Date }) {
+    if (typeof body?.done !== 'boolean') throw new StaffError(400, 'bad_field', 'done — да или нет');
+    const { doc } = await this._card(session, id);
+    if (isLeft(doc)) throw new StaffError(409, 'staff_left', 'Сотрудник завершил работу — чек-лист не ведётся');
+    const iid = String(itemId ?? '');
+    const items = DOC_ID.test(iid) ? await strapi.documents(CHECKLIST_UID).findMany({ filters: { documentId: { $eq: iid } }, fields: ['title', 'active'], limit: 1 }) : [];
+    const item = items[0];
+    if (!item) throw new StaffError(404, 'item_not_found', 'Пункт не найден');
+    const marks = { ...onboardingOf(doc.onboarding) };
+    const was = hasOwn(marks, iid);
+    // выключенный пункт можно только снять (отметить заново — нет: он ушёл из чек-листа)
+    if (body.done && item.active === false && !was) throw new StaffError(409, 'item_inactive', 'Пункт выключен');
+    if (body.done === was) return { ...(await this.card({ session, id: doc.documentId, now })), unchanged: true };
+    if (body.done) marks[iid] = { at: now.toISOString(), by: session?.username || '' };
+    else delete marks[iid];
+    await this._write(doc.documentId, { onboarding: marks });
+    this._log('staff_onboarding', session, doc.documentId, logSummary(body.done ? 'onboarding_done' : 'onboarding_undone', doc.name, [cleanText(item.title)]));
+    return { ...(await this.card({ session, id: doc.documentId, now })), unchanged: false };
+  },
+
+  /** Каталог своих пунктов (включая выключенные — для «Настроить пункты»). */
+  async checklistItems() {
+    return { items: (await this._checklistItems()).map(pickChecklistItem) };
+  },
+
+  async createChecklistItem({ body }: { session: any; body: any }) {
+    const data = normalizeChecklistItem(body, { create: true });
+    const rows = await this._checklistItems();
+    if (rows.some((r) => lower(r.title) === lower(data.title))) throw new StaffError(409, 'item_exists', 'Такой пункт уже есть');
+    const order = Math.max(0, ...rows.map((r) => Number(r.order) || 0)) + 10;
+    await strapi.documents(CHECKLIST_UID).create({ data: { ...data, order, active: true } });
+    return this.checklistItems();
+  },
+
+  async updateChecklistItem({ itemId, body }: { session: any; itemId: unknown; body: any }) {
+    const iid = String(itemId ?? '');
+    const rows = await this._checklistItems();
+    const item = DOC_ID.test(iid) ? rows.find((r) => r.documentId === iid) : null;
+    if (!item) throw new StaffError(404, 'item_not_found', 'Пункт не найден');
+    const data = normalizeChecklistItem(body);
+    if (data.title && rows.some((r) => r.documentId !== iid && lower(r.title) === lower(data.title))) {
+      throw new StaffError(409, 'item_exists', 'Такой пункт уже есть');
+    }
+    await strapi.documents(CHECKLIST_UID).update({ documentId: iid, data });
+    return this.checklistItems();
+  },
+
+  // ── фаза 2: «Мои данные» ───────────────────────────────────────────────
+
+  /**
+   * Своя карточка сотрудника — только чтение. Карточка — по связи учётки (без связи — по
+   * имени, utils/staff-identity); чужую не запросить: id из запроса не берётся вовсе.
+   * У владельца карточки нет — 404. Сканы не отдаются (ни storedName, ни ссылки):
+   * скачивание — только руководству (решение s222). Без заметок, журнала и учётки.
+   */
+  async myCard({ session, now = new Date() }: { session: any; now?: Date }) {
+    if (!session || session.role === 'owner') throw new StaffError(404, 'no_card', 'Карточки сотрудника у этой учётки нет');
+    const today = this._today(now);
+    const doc = await findSessionPersonal(strapi, session, {
+      status: 'draft',
+      fields: ['name', 'position', 'tier', 'hiredAt', 'ratePercent', 'isActive'],
+      populate: { photo: { fields: ['url', 'formats'] }, rates: true, contracts: true, oficial: true },
+    });
+    if (!doc) throw new StaffError(404, 'no_card', 'Карточка сотрудника не найдена — скажите руководству');
+    const docs = await strapi.documents(DOC_UID).findMany({
+      filters: { personal: { documentId: { $eq: doc.documentId } } },
+      fields: ['kind', 'title', 'validUntil'],
+      sort: ['createdAt:desc'],
+      limit: 200,
+    });
+    const values = pickPrivate(doc.oficial);
+    // id компонентов — внутренняя деталь записи, наружу не идут
+    const noId = ({ id: _id, ...c }: any) => c;
+    const contracts = contractsOf(doc.contracts).map(noId);
+    const current = contractOn(doc.contracts, today);
+    const rate = rateOn(doc.rates, today);
+    return {
+      today,
+      name: doc.name,
+      position: doc.position,
+      tier: doc.tier || 'senior',
+      hiredAt: ymdOf(doc.hiredAt),
+      photo: photoOf(doc),
+      private: values,
+      documents: docs.map((d) => {
+        const validUntil = ymdOf(d.validUntil);
+        return { kind: d.kind || 'other', title: d.title || '', validUntil, ...docState(validUntil, today) };
+      }),
+      contracts: { list: contracts, current: current ? noId(current) : null },
+      pay:
+        doc.position === 'master'
+          ? { ratePercent: doc.ratePercent ?? null, currentRate: null }
+          : { ratePercent: null, currentRate: rate ? { typeWork: rate.typeWork, rate: rate.rate, hourlyRate: rate.hourlyRate, from: rate.from } : null },
+    };
   },
 
   // ── файлы ──────────────────────────────────────────────────────────────

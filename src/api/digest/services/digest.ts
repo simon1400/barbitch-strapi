@@ -476,12 +476,12 @@ export default {
       settle('pending', () => engine('booking-engine').adminPendingBlocks()),
       settle('vouchers', () => engine('today').vouchers(todayRanges(today))),
       // роль manager: карточки владельцев не попадают (чат читают и администраторы)
-      settle('staffDocs', async () =>
-        (await engine('staff').reminders({ session: { role: 'manager' } })).documents.map((d) => ({
-          ...d,
-          title: d.title || DOC_KINDS[d.kind] || d.kind,
-        }))
-      ),
+      // один запрос на документы и договоры; договоры — без IČO (только имя, тип, дата)
+      settle('staffDocs', async () => {
+        const r = await engine('staff').reminders({ session: { role: 'manager' } });
+        attention.staffContracts = (r.contracts || []).map((c) => ({ name: c.name, kind: c.kind, type: c.type, date: c.date, daysLeft: c.daysLeft }));
+        return r.documents.map((d) => ({ ...d, title: d.title || DOC_KINDS[d.kind] || d.kind }));
+      }),
       settle('birthdays', async () => (await engine('birthdays').list({ session: { role: 'administrator' } })).items),
     ]);
     const { adminLine, sections: attentionSections } = buildAttention(attention);

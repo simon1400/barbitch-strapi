@@ -1995,6 +1995,12 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
         };
       }> &
       Schema.Attribute.DefaultTo<0>;
+    contracts: Schema.Attribute.Component<'items.contracts', true> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -2071,6 +2077,12 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       Schema.Attribute.SetPluginOptions<{
         i18n: {
           localized: true;
+        };
+      }>;
+    onboarding: Schema.Attribute.JSON &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
         };
       }>;
     payroll: Schema.Attribute.Relation<'oneToMany', 'api::payroll.payroll'>;
@@ -2691,6 +2703,39 @@ export interface ApiSlotHoldSlotHold extends Struct.CollectionTypeSchema {
     sessionKey: Schema.Attribute.String;
     startsAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
     totalPrice: Schema.Attribute.Decimal;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiStaffChecklistItemStaffChecklistItem
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'staff_checklist_items';
+  info: {
+    description: '\u0421\u0432\u043E\u0438 \u043F\u0443\u043D\u043A\u0442\u044B \u0447\u0435\u043A-\u043B\u0438\u0441\u0442\u0430 \u043D\u043E\u0432\u043E\u0433\u043E \u0441\u043E\u0442\u0440\u0443\u0434\u043D\u0438\u043A\u0430 (s231): \u043A\u043B\u044E\u0447\u0438, \u0444\u043E\u0440\u043C\u0430, \u0438\u043D\u0441\u0442\u0440\u0443\u043A\u0442\u0430\u0436\u2026 \u0423\u0434\u0430\u043B\u0435\u043D\u0438\u044F \u043D\u0435\u0442 \u2014 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043D\u044B\u0439 \u043F\u0443\u043D\u043A\u0442 \u0443\u0445\u043E\u0434\u0438\u0442 \u0438\u0437 \u043D\u043E\u0432\u044B\u0445 \u043A\u0430\u0440\u0442\u043E\u0447\u0435\u043A, \u043E\u0442\u043C\u0435\u0442\u043A\u0438 \u043E\u0441\u0442\u0430\u044E\u0442\u0441\u044F. REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/staff-checklist-items';
+    displayName: '\u041F\u0443\u043D\u043A\u0442 \u043E\u043D\u0431\u043E\u0440\u0434\u0438\u043D\u0433\u0430';
+    pluralName: 'staff-checklist-items';
+    singularName: 'staff-checklist-item';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    active: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::staff-checklist-item.staff-checklist-item'
+    > &
+      Schema.Attribute.Private;
+    order: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    positions: Schema.Attribute.JSON;
+    publishedAt: Schema.Attribute.DateTime;
+    title: Schema.Attribute.String;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -3693,6 +3738,7 @@ declare module '@strapi/strapi' {
       'api::service.service': ApiServiceService;
       'api::shift.shift': ApiShiftShift;
       'api::slot-hold.slot-hold': ApiSlotHoldSlotHold;
+      'api::staff-checklist-item.staff-checklist-item': ApiStaffChecklistItemStaffChecklistItem;
       'api::staff-document.staff-document': ApiStaffDocumentStaffDocument;
       'api::staff-note.staff-note': ApiStaffNoteStaffNote;
       'api::stock.stock': ApiStockStock;

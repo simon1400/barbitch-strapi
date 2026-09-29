@@ -258,6 +258,24 @@
         }
       },
       "regex": "^\\d{4}-(0[1-9]|1[0-2])$"
+    },
+    "contracts": {
+      "type": "component",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "component": "items.contracts",
+      "repeatable": true
+    },
+    "onboarding": {
+      "type": "json",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      }
     }
   }
 }
