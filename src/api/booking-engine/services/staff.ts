@@ -735,13 +735,30 @@ export const eraseDueDate = (leftAt: string | null): string | null => {
 // ── перенос старых сканов из медиатеки (s228, §3.11 плана) ────────────────
 
 /**
- * Скачанный файл совпадает с записью медиатеки: Strapi хранит размер в КБ с двумя знаками,
- * так что расхождение больше пары байт — это не тот файл (или обрезанная загрузка).
+ * Скачанный файл совпадает с записью медиатеки: Strapi хранит размер в КБ по 1000 байт
+ * с двумя знаками (122582 б → 122.58), так что расхождение больше 5 байт — это не тот файл:
+ * обрезанная загрузка или пережатая CDN копия (проверено на проде 29.09: JPEG 3.2 МБ по
+ * обычной ссылке ImageKit приходит 1.2 МБ).
  */
 export const legacySizeMatches = (bytes: number, sizeKb: unknown): boolean => {
   const kb = Number(sizeKb);
   if (!Number.isFinite(kb) || kb <= 0 || bytes <= 0) return false;
-  return Math.abs(bytes - kb * 1024) <= 16;
+  return Math.abs(bytes - kb * 1000) <= 5;
+};
+
+/**
+ * Ссылка на ОРИГИНАЛ: ImageKit по обычной ссылке отдаёт оптимизированную копию
+ * (картинки пережимает), `tr=orig-true` — исходный файл байт в байт.
+ */
+export const legacyOriginalUrl = (url: unknown): string => {
+  const raw = String(url ?? '');
+  try {
+    const u = new URL(raw);
+    if (u.hostname === 'ik.imagekit.io' || u.hostname.endsWith('.imagekit.io')) u.searchParams.set('tr', 'orig-true');
+    return u.toString();
+  } catch {
+    return raw;
+  }
 };
 
 /** Название документа из имени старого файла: без расширения, пробелы схлопнуты. */
@@ -1187,7 +1204,7 @@ export default {
         id: f.id,
         name: f.name || '',
         mime: f.mime || '',
-        size: Math.round(Number(f.size || 0) * 1024), // медиатека хранит КБ
+        size: Math.round(Number(f.size || 0) * 1000), // медиатека хранит КБ по 1000 байт
         url: f.url || '',
       })),
     };
@@ -1391,14 +1408,18 @@ export default {
 
     let res;
     try {
-      res = await fetchImpl(String(legacy.url || ''), { signal: AbortSignal.timeout(30_000) });
+      res = await fetchImpl(legacyOriginalUrl(legacy.url), { signal: AbortSignal.timeout(30_000) });
     } catch (e) {
       throw new StaffError(502, 'legacy_download_failed', `Не удалось скачать файл: ${e.message}`);
     }
     if (!res?.ok) throw new StaffError(502, 'legacy_download_failed', `Не удалось скачать файл: HTTP ${res?.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > MAX_FILE_BYTES) throw new StaffError(413, 'file_too_big', 'Файл больше 10 МБ');
-    if (!legacySizeMatches(buf.length, legacy.size)) {
+    // acceptSizeBytes — ручное подтверждение для файла, у которого запись медиатеки врёт (на проде
+    // один такой: провайдер `local`, в ImageKit лежит единственная копия меньшего размера): принимается
+    // только если скачано ровно столько байт, сколько подтвердил человек
+    const confirmed = Number.isInteger(body?.acceptSizeBytes) && body.acceptSizeBytes === buf.length;
+    if (!confirmed && !legacySizeMatches(buf.length, legacy.size)) {
       throw new StaffError(409, 'legacy_size_mismatch', `Скачано ${buf.length} байт, в медиатеке ${legacy.size} КБ — перенос остановлен`);
     }
     const type = detectFile(buf.subarray(0, 16));

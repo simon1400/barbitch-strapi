@@ -553,7 +553,7 @@ test('личные данные: ключ `private`, проходят через
   const r = await svc.privateData({ session: MANAGER, id: P.veronika });
   assert.equal(r.private.documentNumber, SECRET.documentNumber);
   assert.equal(r.private.dateBirthYmd, '1995-11-09');
-  assert.deepEqual(r.legacyFiles.map((f) => [f.id, f.name, f.size]), [[301, 'pas.pdf', 123392], [302, 'visa.jpg', 81920]]);
+  assert.deepEqual(r.legacyFiles.map((f) => [f.id, f.name, f.size]), [[301, 'pas.pdf', 120500], [302, 'visa.jpg', 80000]]);
   assert.deepEqual(r.documents, []);
   const copy = structuredClone(r);
   assert.equal(mw.stripSecret(copy), false, 'middleware ничего не вырезал');
@@ -1346,8 +1346,15 @@ test('основное: дата ухода — только ушедшим, н�
 
 // ── s228: перенос старых сканов из медиатеки в закрытый каталог ─────────────
 test('legacySizeMatches / legacyTitle', () => {
-  assert.equal(S.legacySizeMatches(123405, 120.51), true); // 120.51 КБ = 123402 б
-  assert.equal(S.legacySizeMatches(123500, 120.51), false);
+  // Strapi: КБ по 1000 байт, два знака (прод: 122582 б → 122.58)
+  assert.equal(S.legacySizeMatches(122582, 122.58), true);
+  assert.equal(S.legacySizeMatches(7447296, 7447.3), true);
+  assert.equal(S.legacySizeMatches(122582, 119.71), false, 'КиБ (÷1024) — не наш формат');
+  assert.equal(S.legacySizeMatches(1166577, 3192.55), false, 'пережатая копия CDN');
+  assert.equal(S.legacySizeMatches(122590, 122.58), false);
+  assert.equal(S.legacyOriginalUrl('https://ik.imagekit.io/njc0tvfgn/a%20b.jpg'), 'https://ik.imagekit.io/njc0tvfgn/a%20b.jpg?tr=orig-true');
+  assert.equal(S.legacyOriginalUrl('https://ik.imagekit.io/x/p.pdf?tr=w-100'), 'https://ik.imagekit.io/x/p.pdf?tr=orig-true');
+  assert.equal(S.legacyOriginalUrl('https://example.com/p.pdf'), 'https://example.com/p.pdf');
   assert.equal(S.legacySizeMatches(0, 1), false);
   assert.equal(S.legacySizeMatches(100, null), false);
   assert.equal(S.legacyTitle('Pas  Veronika.PDF'), 'Pas Veronika');
@@ -1362,14 +1369,19 @@ test('перенос старого скана: проверка, копия в 
   // файлы медиатеки: 301 — PDF (ImageKit), 302 — JPEG с провайдером local
   const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(123393, 5)]);
   const jpg = Buffer.concat([JPG, Buffer.alloc(81920 - JPG.length, 2)]);
-  st.files.get(301).size = +(pdf.length / 1024).toFixed(2);
+  st.files.get(301).size = +(pdf.length / 1000).toFixed(2);
   st.files.get(301).provider = 'imagekit';
-  st.files.get(302).size = 80;
+  st.files.get(302).size = +(81920 / 1000).toFixed(2);
   st.files.get(302).provider = 'local';
   for (const v of [st.draft(P.veronika), st.pub(P.veronika)]) {
     v.oficial.documents = v.oficial.documents.map((f) => st.files.get(f.id));
   }
-  const bodies = { 'https://ik.imagekit.io/x/pas.pdf': pdf, 'https://ik.imagekit.io/x/visa.jpg': jpg };
+  // CDN отдаёт оригинал только с tr=orig-true; по обычной ссылке — «пережатую» копию
+  const bodies = {
+    'https://ik.imagekit.io/x/pas.pdf?tr=orig-true': pdf,
+    'https://ik.imagekit.io/x/visa.jpg?tr=orig-true': jpg,
+    'https://ik.imagekit.io/x/visa.jpg': jpg.subarray(0, 40000),
+  };
   const fetched = [];
   const fetchImpl = async (url) => {
     fetched.push(url);
@@ -1414,14 +1426,17 @@ test('перенос старого скана: проверка, копия в 
   await expectErr(() => run(301), 404, 'legacy_not_found'); // повтор — уже перенесён
 
   // размер не совпал — ничего не записано и не удалено
-  st.files.get(302).size = 81;
+  st.files.get(302).size = 81.93;
   st.draft(P.veronika).oficial.documents = [st.files.get(302)];
   await expectErr(() => run(302), 409, 'legacy_size_mismatch');
+  await expectErr(() => run(302, { dryRun: true, acceptSizeBytes: 81921 }), 409, 'legacy_size_mismatch');
+  await expectErr(() => run(302, { dryRun: true, acceptSizeBytes: '81920' }), 409, 'legacy_size_mismatch');
+  assert.equal((await run(302, { dryRun: true, acceptSizeBytes: 81920 })).size, 81920, 'подтверждённый размер — ровно скачанный');
   assert.equal(fs.readdirSync(dir).length, 1);
   assert.deepEqual(st.removed, [301]);
 
   // карточка без опубликованной версии: пишется только черновик, publish не зовётся; провайдер local — CDN-копия остаётся
-  st.files.get(302).size = 80;
+  st.files.get(302).size = 81.92;
   st.draft(P.veronika).oficial.documents = [st.files.get(302)];
   const pubIdx = st.store['api::personal.personal'].findIndex((x) => x.documentId === P.veronika && x.published);
   st.store['api::personal.personal'].splice(pubIdx, 1);
@@ -1435,11 +1450,12 @@ test('перенос старого скана: проверка, копия в 
   assert.equal(st.store['api::staff-document.staff-document'].at(-1).mime, 'image/jpeg');
 
   // сбой скачивания и неподдерживаемый тип
-  st.files.set(303, { id: 303, name: 'x.docx', mime: 'application/msword', size: 1, url: 'https://ik.imagekit.io/x/x.docx', provider: 'imagekit' });
+  st.files.set(303, { id: 303, name: 'x.docx', mime: 'application/msword', size: 1.02, url: 'https://ik.imagekit.io/x/x.docx', provider: 'imagekit' });
   st.files.set(304, { id: 304, name: 'gone.pdf', mime: 'application/pdf', size: 1, url: 'https://ik.imagekit.io/x/gone.pdf', provider: 'imagekit' });
-  bodies['https://ik.imagekit.io/x/x.docx'] = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(1020, 1)]);
+  bodies['https://ik.imagekit.io/x/x.docx?tr=orig-true'] = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(1020, 1)]);
   st.draft(P.veronika).oficial.documents = [st.files.get(303), st.files.get(304)];
   await expectErr(() => run(303), 409, 'bad_file_type');
   await expectErr(() => run(304), 502, 'legacy_download_failed');
+  assert.ok(fetched.every((u) => u.endsWith('?tr=orig-true')), 'всегда качается оригинал');
   assert.deepEqual(st.draft(P.veronika).oficial.documents.map((f) => f.id), [303, 304], 'при ошибке карточка не тронута');
 });
