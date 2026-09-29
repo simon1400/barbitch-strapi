@@ -27,15 +27,6 @@
     "email": {
       "type": "string"
     },
-    "documents": {
-      "type": "media",
-      "multiple": true,
-      "required": false,
-      "allowedTypes": [
-        "images",
-        "files"
-      ]
-    },
     "bankAccount": {
       "type": "string"
     },

@@ -88,6 +88,9 @@ const subtractBusy = (
 };
 
 import { withoutInternal } from '../../booking-engine/services/booking-kind';
+import { buildAttention, adminOnDate, mondayOf } from './digest-attention';
+import { DOC_KINDS } from '../../booking-engine/services/staff';
+import { todayRanges } from '../../booking-engine/services/today';
 
 export default {
   async buildDigest(): Promise<string> {
@@ -454,6 +457,35 @@ export default {
       strapi.log.warn(`digest: schedule failed: ${e.message}`);
     }
 
+    // ── Для управляющей (s230): админ смены, Ke schválení, ваучеры, документы, ДР ──
+    // Каждый источник отдельно: сбой одного не гасит ни раздел соседей, ни дайджест.
+    const attention: any = { today };
+    const engine = (name) => strapi.service(`api::booking-engine.${name}`);
+    const settle = async (key, fn) => {
+      try {
+        attention[key] = await fn();
+      } catch (e) {
+        strapi.log.warn(`digest: ${key} failed: ${e.message}`);
+      }
+    };
+    await Promise.all([
+      settle('admin', async () => {
+        const { weeks } = await engine('shifts').list({ from: mondayOf(today), weeks: 1 });
+        return adminOnDate(weeks?.[0], today);
+      }),
+      settle('pending', () => engine('booking-engine').adminPendingBlocks()),
+      settle('vouchers', () => engine('today').vouchers(todayRanges(today))),
+      // роль manager: карточки владельцев не попадают (чат читают и администраторы)
+      settle('staffDocs', async () =>
+        (await engine('staff').reminders({ session: { role: 'manager' } })).documents.map((d) => ({
+          ...d,
+          title: d.title || DOC_KINDS[d.kind] || d.kind,
+        }))
+      ),
+      settle('birthdays', async () => (await engine('birthdays').list({ session: { role: 'administrator' } })).items),
+    ]);
+    const { adminLine, sections: attentionSections } = buildAttention(attention);
+
     // ── Сборка сообщения ──
     const weekPct = weekCapacityMin ? Math.round((weekBookedMin / weekCapacityMin) * 100) : null;
 
@@ -471,12 +503,14 @@ export default {
       `<b>Bar.Bitch — дайджест ${fmtDateCz(today)}</b>`,
       '',
       workdayLine,
+      ...(adminLine ? [adminLine] : []),
       `💅 Сьогодні записів: <b>${todayCount}</b>`,
       masterLines || '• записів немає',
     ];
     if (offTodayLines.length) {
       lines.push('', '🏖 <b>Сьогодні не працюють:</b>', offTodayLines.join('\n'));
     }
+    for (const sec of attentionSections) lines.push('', ...sec);
     if (newClientLines.length) {
       lines.push('', '✨ <b>Нові клієнти сьогодні:</b>', newClientLines.join('\n'));
     }

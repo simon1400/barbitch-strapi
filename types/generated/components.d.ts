@@ -173,7 +173,6 @@ export interface ContentOficialData extends Struct.ComponentSchema {
     bankAccount: Schema.Attribute.String;
     dateBirth: Schema.Attribute.String;
     documentNumber: Schema.Attribute.String;
-    documents: Schema.Attribute.Media<'images' | 'files', true>;
     email: Schema.Attribute.String;
     emergencyName: Schema.Attribute.String;
     emergencyPhone: Schema.Attribute.String;

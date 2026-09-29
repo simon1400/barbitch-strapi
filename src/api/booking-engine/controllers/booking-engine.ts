@@ -832,16 +832,6 @@ export default {
     );
   },
 
-  // POST /api/engine/admin/staff/:id/legacy/:fileId/migrate {dryRun?} — перенос старого
-  // скана из медиатеки (ImageKit) в закрытый каталог (s228, §3.11)
-  async adminStaffLegacyMigrate(ctx) {
-    const session = requireManagement(ctx);
-    if (!session) return;
-    await handle(ctx, () =>
-      staffSvc().migrateLegacyFile({ session, id: ctx.params.id, fileId: ctx.params.fileId, body: ctx.request.body })
-    );
-  },
-
   // GET /api/engine/admin/staff/:id/files/:fileId — скан потоком (не кэшировать)
   async adminStaffFileDownload(ctx) {
     const session = requireManagement(ctx);

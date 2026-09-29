@@ -20,8 +20,7 @@
  * Две версии карточки: пишем черновик (`update`) и сразу публикуем — как кнопка Publish
  * и как уже делают каталог, «Pořadí» и приоритет (REST `PUT ?status=published`).
  * Публикация пересоздаёт опубликованную строку — связи других коллекций Strapi
- * перепривязывает сам. Компоненты: `oficial` правится С `id` (на месте) и с прежним
- * списком `documents` — старые сканы в ImageKit не теряются до переноса (§3.11);
+ * перепривязывает сам. Компоненты: `oficial` правится С `id` (на месте);
  * `rates` пишутся целым массивом, существующие записи — со своими `id`.
  *
  * Защита от одновременной правки: клиент шлёт `base` = updatedAt черновика, от которого
@@ -659,7 +658,6 @@ export const logSummary = (kind: string, name: string, parts: string[] = []) => 
     account_password: 'Nové heslo do administrace',
     leave: 'Ukončení spolupráce',
     erase: 'Osobní údaje smazány',
-    file_migrate: 'Dokument přenesen z knihovny médií',
   }[kind];
   return [`${head}: ${name}`, ...parts].join(' · ');
 };
@@ -796,41 +794,6 @@ export const eraseDueDate = (leftAt: string | null): string | null => {
   const yy = y + ERASE_AFTER_YEARS;
   const day = isRealDate(yy, m, d) ? d : d - 1;
   return `${yy}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-};
-
-// ── перенос старых сканов из медиатеки (s228, §3.11 плана) ────────────────
-
-/**
- * Скачанный файл совпадает с записью медиатеки: Strapi хранит размер в КБ по 1000 байт
- * с двумя знаками (122582 б → 122.58), так что расхождение больше 5 байт — это не тот файл:
- * обрезанная загрузка или пережатая CDN копия (проверено на проде 29.09: JPEG 3.2 МБ по
- * обычной ссылке ImageKit приходит 1.2 МБ).
- */
-export const legacySizeMatches = (bytes: number, sizeKb: unknown): boolean => {
-  const kb = Number(sizeKb);
-  if (!Number.isFinite(kb) || kb <= 0 || bytes <= 0) return false;
-  return Math.abs(bytes - kb * 1000) <= 5;
-};
-
-/**
- * Ссылка на ОРИГИНАЛ: ImageKit по обычной ссылке отдаёт оптимизированную копию
- * (картинки пережимает), `tr=orig-true` — исходный файл байт в байт.
- */
-export const legacyOriginalUrl = (url: unknown): string => {
-  const raw = String(url ?? '');
-  try {
-    const u = new URL(raw);
-    if (u.hostname === 'ik.imagekit.io' || u.hostname.endsWith('.imagekit.io')) u.searchParams.set('tr', 'orig-true');
-    return u.toString();
-  } catch {
-    return raw;
-  }
-};
-
-/** Название документа из имени старого файла: без расширения, пробелы схлопнуты. */
-export const legacyTitle = (name: unknown): string => {
-  const t = cleanText(String(name ?? '').replace(/\.[a-z0-9]{1,5}$/i, '')).slice(0, MAX_TITLE);
-  return t || DOC_KINDS.other;
 };
 
 // ── напоминания для «Сегодня» (s227, §3.12 и §8.2 плана) ──────────────────
@@ -1124,7 +1087,7 @@ export default {
       strapi.documents(PERSONAL_UID).findMany({
         status: 'draft',
         fields: ['name', 'isActive', 'leftAt', 'privateErasedAt'],
-        populate: { oficial: { fields: PRIVATE_KEYS, populate: { documents: { fields: ['id'] } } } },
+        populate: { oficial: { fields: PRIVATE_KEYS } },
         limit: 1000,
       }),
       strapi.documents(DOC_UID).findMany({
@@ -1155,9 +1118,7 @@ export default {
         leftAt: ymdOf(c.leftAt),
         erasedAt: c.privateErasedAt || null,
         hasPrivate:
-          PRIVATE_KEYS.some((k) => cleanText(c.oficial?.[k])) ||
-          (c.oficial?.documents || []).length > 0 ||
-          withFiles.has(c.documentId),
+          PRIVATE_KEYS.some((k) => cleanText(c.oficial?.[k])) || withFiles.has(c.documentId),
       }));
     return buildReminders(rows, docRows, today);
   },
@@ -1256,9 +1217,7 @@ export default {
    * Ключ `private`, не `oficial` (admin-session вырезает `oficial` из ответов).
    */
   async privateData({ session, id }: { session: any; id: unknown }) {
-    const { doc } = await this._card(session, id, {
-      oficial: { populate: { documents: { fields: ['name', 'mime', 'size', 'url'] } } },
-    });
+    const { doc } = await this._card(session, id, { oficial: true });
     const documents = await strapi.documents(DOC_UID).findMany({
       filters: { personal: { documentId: { $eq: doc.documentId } } },
       fields: DOC_FIELDS,
@@ -1272,14 +1231,6 @@ export default {
       private: { ...values, dateBirthYmd: birthToYmd(values.dateBirth) },
       missing: privateMissing(doc.oficial),
       documents: documents.map(docView),
-      // старые сканы из панели Strapi (ImageKit) — до переноса в закрытый каталог (§3.11)
-      legacyFiles: (doc.oficial?.documents || []).map((f) => ({
-        id: f.id,
-        name: f.name || '',
-        mime: f.mime || '',
-        size: Math.round(Number(f.size || 0) * 1000), // медиатека хранит КБ по 1000 байт
-        url: f.url || '',
-      })),
     };
   },
 
@@ -1292,7 +1243,7 @@ export default {
       throw new StaffError(400, 'bad_section', 'Неизвестная секция карточки');
     }
     const today = this._today(now);
-    const populate = section === 'private' ? { oficial: { populate: { documents: { fields: ['id'] } } } } : {};
+    const populate = section === 'private' ? { oficial: true } : {};
     const { doc, accounts } = await this._card(session, id, populate);
     assertBase(body?.base, doc);
     const documentId = doc.documentId;
@@ -1302,8 +1253,6 @@ export default {
       if (!changed.length) return { ...(await this.privateData({ session, id: documentId })), unchanged: true };
       const oficial: Record<string, any> = { ...next };
       if (doc.oficial?.id != null) oficial.id = doc.oficial.id;
-      // сканы в компоненте — только сохранить как были (правятся ручкой файлов / переносом)
-      oficial.documents = (doc.oficial?.documents || []).map((f) => f.id);
       await this._write(documentId, { oficial });
       const fields = changed.map((k) => PRIVATE_FIELDS[k].cs);
       this._log('staff_update', session, documentId, logSummary('private', doc.name, fields), { změněno: fields.join(', ') });
@@ -1461,150 +1410,6 @@ export default {
     return { document: docView({ ...meta, fileName, mime: type.mime, size, uploadedBy: session?.username || '', ...created }) };
   },
 
-  /**
-   * Перенос ОДНОГО старого скана из медиатеки (ImageKit, публичная ссылка) в закрытый
-   * каталог (s228, §3.11): скачать → сверить размер и сигнатуру → записать в каталог и
-   * завести staff-document → отвязать от `oficial.documents` → удалить из медиатеки и CDN.
-   * `dryRun` — только скачать и проверить, ничего не пишет.
-   *
-   * 🟥 Публикация: карточка без опубликованной версии (на проде — три старые «❌»-карточки)
-   * НЕ публикуется — пишется только черновик. Иначе ушедшие мастера всплыли бы в
-   * опубликованных списках. У остальных — как любая запись карточки: черновик + publish.
-   */
-  async migrateLegacyFile({ session, id, fileId, body, fetchImpl = fetch }: { session: any; id: unknown; fileId: unknown; body: any; fetchImpl?: typeof fetch }) {
-    const fid = Number(fileId);
-    if (!Number.isInteger(fid) || fid <= 0) throw new StaffError(404, 'legacy_not_found', 'Старый скан не найден');
-    const { doc } = await this._card(session, id, { oficial: { populate: { documents: { fields: ['name', 'mime', 'size', 'url'] } } } });
-    const documentId = doc.documentId;
-    const legacy = (doc.oficial?.documents || []).find((f) => Number(f.id) === fid);
-    if (!legacy) throw new StaffError(404, 'legacy_not_found', 'Старый скан не найден в карточке');
-
-    let res;
-    try {
-      res = await fetchImpl(legacyOriginalUrl(legacy.url), { signal: AbortSignal.timeout(30_000) });
-    } catch (e) {
-      throw new StaffError(502, 'legacy_download_failed', `Не удалось скачать файл: ${e.message}`);
-    }
-    if (!res?.ok) throw new StaffError(502, 'legacy_download_failed', `Не удалось скачать файл: HTTP ${res?.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > MAX_FILE_BYTES) throw new StaffError(413, 'file_too_big', 'Файл больше 10 МБ');
-    // acceptSizeBytes — ручное подтверждение для файла, у которого запись медиатеки врёт (на проде
-    // один такой: провайдер `local`, в ImageKit лежит единственная копия меньшего размера): принимается
-    // только если скачано ровно столько байт, сколько подтвердил человек
-    const confirmed = Number.isInteger(body?.acceptSizeBytes) && body.acceptSizeBytes === buf.length;
-    if (!confirmed && !legacySizeMatches(buf.length, legacy.size)) {
-      throw new StaffError(409, 'legacy_size_mismatch', `Скачано ${buf.length} байт, в медиатеке ${legacy.size} КБ — перенос остановлен`);
-    }
-    const type = detectFile(buf.subarray(0, 16));
-    if (!type) throw new StaffError(409, 'bad_file_type', 'Тип файла не JPG/PNG/WEBP/PDF — перенос вручную');
-    const fileName = safeFileName(legacy.name, type.ext);
-    const title = legacyTitle(legacy.name);
-    const check = { fileId: fid, fileName, title, mime: type.mime, size: buf.length };
-    if (body?.dryRun === true) return { dryRun: true, ...check };
-
-    // 1. копия в закрытый каталог + запись документа
-    const dir = await this._storageDir();
-    const storedName = crypto.randomBytes(16).toString('hex');
-    const full = path.join(dir, storedName);
-    await fs.promises.writeFile(`${full}.part`, buf, { mode: 0o600 });
-    await fs.promises.rename(`${full}.part`, full);
-    let created;
-    try {
-      created = await strapi.documents(DOC_UID).create({
-        data: {
-          personal: documentId,
-          kind: 'other',
-          title,
-          fileName,
-          mime: type.mime,
-          size: buf.length,
-          storedName,
-          uploadedBy: `${session?.username || ''} (перенос)`.trim(),
-        },
-      });
-    } catch (e) {
-      await fs.promises.unlink(full).catch(() => {});
-      throw e;
-    }
-
-    // 2. отвязать от компонента (правка на месте, с id); публиковать — только опубликованные карточки
-    const oficial: Record<string, any> = {
-      id: doc.oficial.id,
-      documents: (doc.oficial.documents || []).map((f) => f.id).filter((x) => Number(x) !== fid),
-    };
-    const pub = await strapi.documents(PERSONAL_UID).findOne({ documentId, status: 'published', fields: ['name'] });
-    await strapi.documents(PERSONAL_UID).update({ documentId, status: 'draft', data: { oficial } });
-    if (pub) await strapi.documents(PERSONAL_UID).publish({ documentId });
-
-    // 3. удалить из ImageKit, затем из медиатеки
-    let removed = false;
-    let cdnLeft = true;
-    try {
-      const r = await this._removeLibraryFile(fid, fetchImpl);
-      removed = r.removed;
-      cdnLeft = !r.cdnDeleted;
-    } catch (e) {
-      strapi.log.error(`staff: старый скан ${fid} перенесён, но не удалён из ImageKit/медиатеки: ${e.message}`);
-    }
-    this._log('staff_file_add', session, documentId, logSummary('file_migrate', doc.name, [title]), { název: title });
-    return { dryRun: false, ...check, document: created.documentId, published: Boolean(pub), removed, cdnLeft, url: legacy.url };
-  },
-
-  /**
-   * Файл медиатеки — из ImageKit и из медиатеки.
-   * 🟥 `upload.remove` Strapi зовёт удаление у провайдера, только если `file.provider` равен
-   * провайдеру из конфига upload; у нас там `local`, а у файлов — `imagekit` (плагин
-   * подменяет методы провайдера, а не имя) → из ImageKit ничего не удалялось никогда
-   * (найдено на проде 29.09 при переносе сканов). Поэтому CDN — явно, сервисом плагина по
-   * `provider_metadata.fileId` (и уменьшенные копии); запись медиатеки — только после
-   * успешного удаления в CDN, иначе ошибка и файл остаётся виден в панели.
-   */
-  async _removeLibraryFile(fid: number, fetchImpl: typeof fetch = fetch) {
-    const upload = strapi.plugin('upload').service('upload');
-    const file = await upload.findOne(fid);
-    if (!file) return { removed: false, cdnDeleted: false };
-    const ik = strapi.plugin('imagekit')?.service('upload');
-    // у файлов, перенесённых когда-то из Cloudinary, в метаданных `public_id`, а не fileId
-    // ImageKit (на проде — 18 из 22 старых сканов): находим fileId по точному пути ссылки
-    if (!file.provider_metadata?.fileId && ik) {
-      const found = await this._imagekitFileIdByUrl(file.url, fetchImpl);
-      if (found) file.provider_metadata = { ...(file.provider_metadata || {}), fileId: found };
-    }
-    const parts = [file, ...Object.values(file.formats || {})].filter((f: any) => f?.provider_metadata?.fileId);
-    if (parts.length && !ik) throw new Error('плагин ImageKit не найден — файл из CDN не удалён');
-    for (const f of parts) await ik.delete(f);
-    await upload.remove(file);
-    return { removed: true, cdnDeleted: parts.length > 0 };
-  },
-
-  /**
-   * fileId ImageKit по публичной ссылке: поиск по имени файла, берётся только ТОЧНОЕ совпадение
-   * пути (`/strapi-uploads/<имя>`) и только если оно одно — иначе null (удалять наугад нельзя).
-   */
-  async _imagekitFileIdByUrl(url: unknown, fetchImpl: typeof fetch = fetch): Promise<string | null> {
-    let filePath;
-    try {
-      const u = new URL(String(url ?? ''));
-      if (!u.hostname.endsWith('imagekit.io')) return null;
-      // https://ik.imagekit.io/<endpoint-id>/<путь в медиатеке ImageKit>
-      filePath = '/' + decodeURIComponent(u.pathname).split('/').slice(2).join('/');
-    } catch {
-      return null;
-    }
-    const name = filePath.split('/').pop();
-    const key = strapi.plugin('imagekit')?.config('privateKey');
-    if (!name || !key) return null;
-    const q = new URLSearchParams({ searchQuery: `name = "${name.replace(/"/g, '\\"')}"` });
-    const res = await fetchImpl(`https://api.imagekit.io/v1/files?${q}`, {
-      headers: { Authorization: `Basic ${Buffer.from(`${key}:`).toString('base64')}` },
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!res?.ok) throw new Error(`ImageKit: поиск файла — HTTP ${res?.status}`);
-    const list = await res.json();
-    const hits = (Array.isArray(list) ? list : []).filter((f) => f?.filePath === filePath && f?.fileId);
-    return hits.length === 1 ? String(hits[0].fileId) : null;
-  },
-
   /** Документ этой карточки (с storedName) или 404. */
   async _docOf(session: any, id: unknown, fileId: unknown) {
     const { doc } = await this._card(session, id);
@@ -1753,7 +1558,7 @@ export default {
       data.calendarOrder = await this._nextCalendarOrder();
       if (input.ratePercent != null) data.ratePercent = input.ratePercent;
     }
-    if (input.private) data.oficial = { ...input.private, documents: [] };
+    if (input.private) data.oficial = { ...input.private };
     const created = await strapi.documents(PERSONAL_UID).create({ data, status: 'published' });
     const documentId = created.documentId;
     let account = null;
@@ -1970,13 +1775,13 @@ export default {
 
   /**
    * {confirmName, base}: у ушедшего, если с даты ухода прошло 3 года. Стираются личные
-   * данные (`oficial`, банк, экстренный контакт), сканы (закрытый каталог и старые
-   * файлы медиатеки/ImageKit), заметки руководства. Остаются имя, должность, даты,
+   * данные (`oficial`, банк, экстренный контакт), сканы (закрытый каталог), заметки
+   * руководства. Остаются имя, должность, даты,
    * фото и вся зарплатная история. В журнал — только факт и автор.
    */
-  async erase({ session, id, body, now = new Date(), fetchImpl = fetch }: { session: any; id: unknown; body: any; now?: Date; fetchImpl?: typeof fetch }) {
+  async erase({ session, id, body, now = new Date() }: { session: any; id: unknown; body: any; now?: Date }) {
     const today = this._today(now);
-    const { doc } = await this._card(session, id, { oficial: { populate: { documents: { fields: ['id'] } } } });
+    const { doc } = await this._card(session, id, { oficial: true });
     assertBase(body?.base, doc);
     const documentId = doc.documentId;
     if (!isLeft(doc)) throw new StaffError(409, 'staff_not_left', 'Стирание — только у ушедших сотрудников');
@@ -1996,11 +1801,9 @@ export default {
       }),
       strapi.documents(NOTE_UID).findMany({ filters: { personal: { documentId: { $eq: documentId } } }, fields: ['text'], limit: 1000 }),
     ]);
-    const legacyIds = (doc.oficial?.documents || []).map((f) => f.id).filter((v) => v != null);
 
     const oficial: Record<string, any> = Object.fromEntries(PRIVATE_KEYS.map((k) => [k, '']));
     if (doc.oficial?.id != null) oficial.id = doc.oficial.id;
-    oficial.documents = [];
     await this._write(documentId, { oficial, privateErasedAt: now.toISOString() });
 
     const dir = files.length ? await this._storageDir().catch(() => null) : null;
@@ -2013,19 +1816,10 @@ export default {
       }
     }
     for (const n of notes) await strapi.documents(NOTE_UID).delete({ documentId: n.documentId });
-    // старые сканы из панели (ImageKit): после отвязки от обеих версий — из CDN и медиатеки
-    let legacyRemoved = 0;
-    for (const fid of legacyIds) {
-      try {
-        if ((await this._removeLibraryFile(fid, fetchImpl)).removed) legacyRemoved += 1;
-      } catch (e) {
-        strapi.log.error(`staff: старый скан ${fid} не удалён из медиатеки: ${e.message}`);
-      }
-    }
     this._log('staff_erase', session, documentId, logSummary('erase', doc.name));
     return {
       ...(await this.card({ session, id: documentId, now })),
-      erased: { documents: files.length, legacyFiles: legacyRemoved, notes: notes.length },
+      erased: { documents: files.length, notes: notes.length },
     };
   },
 };

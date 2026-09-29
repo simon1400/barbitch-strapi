@@ -18,6 +18,7 @@ import { pathToFileURL } from 'node:url';
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
 const root = path.resolve(import.meta.dirname, '..');
+const OFICIAL_SCHEMA = JSON.parse(fs.readFileSync(path.join(root, 'src/components/content/oficial-data.json'), 'utf8'));
 const toJs = (file) =>
   ts.transpileModule(fs.readFileSync(path.join(root, file), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
@@ -74,10 +75,17 @@ function makeStrapi() {
   let seq = 1000;
   let clock = Date.parse('2026-10-01T08:00:00Z');
   const tick = () => new Date((clock += 1000)).toISOString();
-  const files = new Map([
-    [301, { id: 301, name: 'pas.pdf', mime: 'application/pdf', size: 120.5, url: 'https://ik.imagekit.io/x/pas.pdf' }],
-    [302, { id: 302, name: 'visa.jpg', mime: 'image/jpeg', size: 80, url: 'https://ik.imagekit.io/x/visa.jpg' }],
-  ]);
+  // Strapi отвергает ключи компонента, которых нет в схеме: запись и populate сверяются с ней
+  const oficialKeys = new Set(['id', ...Object.keys(OFICIAL_SCHEMA.attributes)]);
+  const assertOficialKeys = (v, where) => {
+    for (const k of Object.keys(v || {})) assert.ok(oficialKeys.has(k), `${where}: поля oficial.${k} нет в схеме`);
+  };
+  const assertOficialPopulate = (populate) => {
+    const o = populate?.oficial;
+    if (!o || o === true) return;
+    for (const k of o.fields || []) assert.ok(oficialKeys.has(k), `populate: поля oficial.${k} нет в схеме`);
+    assert.ok(!o.populate, 'populate: у oficial нет связей и медиа');
+  };
   const person = (documentId, name, extra = {}) => ({
     documentId,
     name,
@@ -110,7 +118,6 @@ function makeStrapi() {
         documentNumber: SECRET.documentNumber,
         phone: SECRET.phone,
         email: 'v@example.com',
-        documents: [files.get(301), files.get(302)],
       },
     }),
     person(P.yana, 'Yana', { calendarOrder: 5, services: [], oficial: { id: 72, name: 'Yana', dateBirth: '' } }),
@@ -156,9 +163,6 @@ function makeStrapi() {
   const logs = [];
   const calls = [];
   const uploads = [];
-  const removed = [];
-  const ikDeleted = [];
-  let ikFail = null;
 
   const DP = new Set(['api::personal.personal']);
   const cond = (v, c) => {
@@ -194,12 +198,14 @@ function makeStrapi() {
   const docs = (uid) => ({
     async findMany(q = {}) {
       calls.push(['findMany', uid, q.status]);
+      assertOficialPopulate(q.populate);
       return sortRows(rowsOf(uid, q.status).filter((r) => match(r, q.filters)), q.sort)
         .slice(0, q.limit ?? 10)
         .map(out);
     },
     async findOne(q) {
       calls.push(['findOne', uid, q.documentId]);
+      assertOficialPopulate(q.populate);
       const r = rowsOf(uid, q.status).find((x) => x.documentId === q.documentId);
       return r ? out(r) : null;
     },
@@ -217,9 +223,12 @@ function makeStrapi() {
         return { id: row.id, documentId: `acc${seq}`, username: row.username };
       }
       if (DP.has(uid)) {
-        // Strapi: компоненты получают id, связь медиатеки — объект файла
+        // Strapi: компоненты получают id
         if (data.rates) data.rates = data.rates.map((x) => ({ ...x, id: ++seq }));
-        if (data.oficial) data.oficial = { ...data.oficial, id: ++seq, documents: (data.oficial.documents || []).map((id) => files.get(id)) };
+        if (data.oficial) {
+          assertOficialKeys(data.oficial, 'create');
+          data.oficial = { ...data.oficial, id: ++seq };
+        }
         const documentId = `new${String(seq).padStart(22, '0')}`;
         const at = tick();
         const draftRow = { ...data, id: ++seq, documentId, published: false, createdAt: at, updatedAt: at };
@@ -238,13 +247,12 @@ function makeStrapi() {
       const data = clone(q.data);
       if ('oficial' in data) {
         const v = data.oficial;
-        const docsFrom = (ids) => (ids || []).map((id) => files.get(id));
+        assertOficialKeys(v, 'update');
         if (v && v.id != null) {
           assert.equal(v.id, r.oficial?.id, 'компонент oficial не принадлежит карточке');
-          const keepDocs = 'documents' in v ? docsFrom(v.documents) : r.oficial.documents;
-          r.oficial = { ...r.oficial, ...v, documents: keepDocs };
+          r.oficial = { ...r.oficial, ...v };
         } else {
-          r.oficial = v ? { ...v, id: ++seq, documents: docsFrom(v.documents) } : null;
+          r.oficial = v ? { ...v, id: ++seq } : null;
         }
         delete data.oficial;
       }
@@ -303,34 +311,12 @@ function makeStrapi() {
       return { write: async (entry) => logs.push(entry) };
     },
     plugin: (name) => {
-      if (name === 'imagekit') {
-        // сервис плагина ImageKit: удаляет по provider_metadata.fileId
-        return {
-          config: (k) => (k === 'privateKey' ? 'private_test' : undefined),
-          service: (n) => {
-            assert.equal(n, 'upload');
-            return {
-              async delete(f) {
-                if (ikFail) throw new Error(ikFail);
-                ikDeleted.push(f.provider_metadata.fileId);
-              },
-            };
-          },
-        };
-      }
       assert.equal(name, 'upload');
       return {
         service: () => ({
           async upload({ data, files: f }) {
             uploads.push({ data, file: { ...f } });
             return [{ id: 900 + uploads.length, url: 'https://ik.imagekit.io/x/p.jpg' }];
-          },
-          async findOne(id) {
-            return files.get(id) || null;
-          },
-          async remove(file) {
-            removed.push(file.id);
-            files.delete(file.id);
           },
         }),
       };
@@ -339,7 +325,7 @@ function makeStrapi() {
   };
   const draft = (id) => store['api::personal.personal'].find((r) => r.documentId === id && !r.published);
   const pub = (id) => store['api::personal.personal'].find((r) => r.documentId === id && r.published);
-  return { store, accounts, logs, calls, uploads, removed, ikDeleted, files, draft, pub, setIkFail: (v) => (ikFail = v) };
+  return { store, accounts, logs, calls, uploads, draft, pub };
 }
 
 const expectErr = async (fn, status, code) => {
@@ -570,7 +556,7 @@ test('личные данные: ключ `private`, проходят через
   const r = await svc.privateData({ session: MANAGER, id: P.veronika });
   assert.equal(r.private.documentNumber, SECRET.documentNumber);
   assert.equal(r.private.dateBirthYmd, '1995-11-09');
-  assert.deepEqual(r.legacyFiles.map((f) => [f.id, f.name, f.size]), [[301, 'pas.pdf', 120500], [302, 'visa.jpg', 80000]]);
+  assert.ok(!('legacyFiles' in r), 'старых сканов медиатеки больше нет (s230)');
   assert.deepEqual(r.documents, []);
   const copy = structuredClone(r);
   assert.equal(mw.stripSecret(copy), false, 'middleware ничего не вырезал');
@@ -585,7 +571,7 @@ test('личные данные: ключ `private`, проходят через
 });
 
 // ── запись секций ──────────────────────────────────────────────────────────
-test('личные данные: правка на месте, старые сканы сохраняются, обе версии, журнал без значений', async () => {
+test('личные данные: правка на месте, обе версии, журнал без значений', async () => {
   const st = makeStrapi();
   const base = st.draft(P.veronika).updatedAt;
   const r = await svc.patch({
@@ -599,13 +585,12 @@ test('личные данные: правка на месте, старые ск
   assert.equal(r.private.dateBirth, '10.11.1995');
   const upd = st.calls.find((c) => c[0] === 'update');
   assert.equal(upd[3].oficial.id, 71, 'компонент правится по id');
-  assert.deepEqual(upd[3].oficial.documents, [301, 302], 'сканы переданы как были');
+  assert.ok(!('documents' in upd[3].oficial), 'сканов в компоненте нет (s230)');
   const i = st.calls.findIndex((c) => c[0] === 'update');
   assert.deepEqual(st.calls[i + 1], ['publish', 'api::personal.personal', P.veronika], 'сразу публикация');
   for (const v of [st.draft(P.veronika), st.pub(P.veronika)]) {
     assert.equal(v.oficial.phone, '+420777123456');
     assert.equal(v.oficial.documentNumber, SECRET.documentNumber, 'остальные поля не тронуты');
-    assert.deepEqual(v.oficial.documents.map((f) => f.id), [301, 302]);
   }
   assert.equal(st.logs.length, 1);
   const log = JSON.stringify(st.logs[0]);
@@ -1274,21 +1259,11 @@ test('стирание через 3 года: личные данные, ска�
   await expectErr(() => svc.erase({ session: OWNER, id: P.veronika, body: { base: st.draft(P.veronika).updatedAt }, now: NOW }), 400, 'confirm_mismatch');
   assert.equal(st.draft(P.veronika).oficial.documentNumber, SECRET.documentNumber, 'до подтверждения ничего не стёрто');
 
-  st.files.get(301).provider_metadata = { fileId: 'ik-e301' };
-  // файл 302 без fileId → поиск в ImageKit (заглушка: не найден) — в сеть тест не ходит
-  const ikCalls = [];
-  const fetchImpl = async (url) => {
-    ikCalls.push(url);
-    return { ok: true, status: 200, json: async () => [] };
-  };
-  const r = await svc.erase({ session: MANAGER, id: P.veronika, body: { confirmName: ' veronika ', base: st.draft(P.veronika).updatedAt }, now: NOW, fetchImpl });
-  assert.equal(ikCalls.length, 1);
-  assert.ok(ikCalls[0].startsWith('https://api.imagekit.io/v1/files?'));
-  assert.deepEqual(r.erased, { documents: 1, legacyFiles: 2, notes: 1 });
+  const r = await svc.erase({ session: MANAGER, id: P.veronika, body: { confirmName: ' veronika ', base: st.draft(P.veronika).updatedAt }, now: NOW });
+  assert.deepEqual(r.erased, { documents: 1, notes: 1 });
   for (const v of [st.draft(P.veronika), st.pub(P.veronika)]) {
     assert.equal(v.oficial.id, 71, 'компонент стёрт на месте');
     for (const k of Object.keys(S.PRIVATE_FIELDS)) assert.equal(v.oficial[k], '', k);
-    assert.deepEqual(v.oficial.documents, []);
     assert.equal(v.privateErasedAt, NOW.toISOString());
     assert.equal(v.name, 'Veronika', 'имя остаётся');
     assert.equal(v.ratePercent, 40, 'деньги остаются');
@@ -1297,12 +1272,9 @@ test('стирание через 3 года: личные данные, ска�
   assert.ok(!fs.existsSync(path.join(dir, stored)), 'скан удалён с диска');
   assert.deepEqual(st.store['api::staff-document.staff-document'].map((d) => d.documentId), ['sd2'], 'чужие документы целы');
   assert.deepEqual(st.store['api::staff-note.staff-note'].map((d) => d.documentId), ['n2']);
-  assert.deepEqual(st.removed, [301, 302], 'старые сканы удалены из медиатеки (ImageKit)');
-  assert.deepEqual(st.ikDeleted, ['ik-e301'], 'и из самого ImageKit — по fileId');
   assert.equal(r.erase.erasedAt, NOW.toISOString());
   const priv = await svc.privateData({ session: OWNER, id: P.veronika });
   assert.equal(priv.missing.length, 7);
-  assert.deepEqual(priv.legacyFiles, []);
   assert.equal(st.logs.at(-1).action, 'staff_erase');
   assert.equal(st.logs.at(-1).summary, 'Osobní údaje smazány: Veronika');
   assert.deepEqual(st.logs.at(-1).details, {});
@@ -1312,6 +1284,7 @@ test('стирание через 3 года: личные данные, ска�
 test('схема: privateErasedAt; lifecycle не хеширует готовый хэш повторно', () => {
   const personal = JSON.parse(fs.readFileSync(path.join(root, 'src/api/personal/content-types/personal/schema.json'), 'utf8'));
   assert.equal(personal.attributes.privateErasedAt.type, 'datetime');
+  assert.ok(!('documents' in OFICIAL_SCHEMA.attributes), 'сканов в компоненте oficial нет — панель их не принимает (s230)');
   assert.ok(!personal.attributes.privateErasedAt.required);
   const code = fs.readFileSync(path.join(root, 'src/api/admin-user/content-types/admin-user/lifecycles.ts'), 'utf8');
   const re = new RegExp(/const BCRYPT_HASH = \/(.+)\/\n/.exec(code)[1]);
@@ -1360,7 +1333,7 @@ test('buildReminders: срок документов 30 дней и просро�
 
 test('напоминания: сервис — владелец скрыт от управляющей, признак «есть что стирать», без значений личных данных', async () => {
   const st = makeStrapi();
-  for (const v of [st.draft(P.dima), st.pub(P.dima)]) v.oficial = { id: 90, name: 'Dima D.', documents: [] };
+  for (const v of [st.draft(P.dima), st.pub(P.dima)]) v.oficial = { id: 90, name: 'Dima D.' };
   for (const id of [P.olga, P.yana, P.newbie]) for (const v of [st.draft(id), st.pub(id)]) v.isActive = false;
   st.draft(P.olga).leftAt = '2023-09-01'; // данных нет, но есть заметка — есть что стирать
   st.draft(P.yana).leftAt = null; // имя в компоненте — есть данные, даты нет
@@ -1405,174 +1378,6 @@ test('основное: дата ухода — только ушедшим, н�
     'bad_date'
   );
   assert.equal(S.normalizeBasic({ hiredAt: '2025-06-30' }, st.draft(P.olga), '2026-10-05').patch.hiredAt, '2025-06-30');
-});
-
-// ── s228: перенос старых сканов из медиатеки в закрытый каталог ─────────────
-test('legacySizeMatches / legacyTitle', () => {
-  // Strapi: КБ по 1000 байт, два знака (прод: 122582 б → 122.58)
-  assert.equal(S.legacySizeMatches(122582, 122.58), true);
-  assert.equal(S.legacySizeMatches(7447296, 7447.3), true);
-  assert.equal(S.legacySizeMatches(122582, 119.71), false, 'КиБ (÷1024) — не наш формат');
-  assert.equal(S.legacySizeMatches(1166577, 3192.55), false, 'пережатая копия CDN');
-  assert.equal(S.legacySizeMatches(122590, 122.58), false);
-  assert.equal(S.legacyOriginalUrl('https://ik.imagekit.io/njc0tvfgn/a%20b.jpg'), 'https://ik.imagekit.io/njc0tvfgn/a%20b.jpg?tr=orig-true');
-  assert.equal(S.legacyOriginalUrl('https://ik.imagekit.io/x/p.pdf?tr=w-100'), 'https://ik.imagekit.io/x/p.pdf?tr=orig-true');
-  assert.equal(S.legacyOriginalUrl('https://example.com/p.pdf'), 'https://example.com/p.pdf');
-  assert.equal(S.legacySizeMatches(0, 1), false);
-  assert.equal(S.legacySizeMatches(100, null), false);
-  assert.equal(S.legacyTitle('Pas  Veronika.PDF'), 'Pas Veronika');
-  assert.equal(S.legacyTitle('.pdf'), 'Jiný doklad');
-});
-
-test('перенос старого скана: проверка, копия в каталог, отвязка в обеих версиях, удаление из медиатеки; черновик-только не публикуется', async () => {
-  const st = makeStrapi();
-  const dir = path.join(tmpRoot, 'store-legacy');
-  fs.mkdirSync(dir, { mode: 0o700 });
-  process.env.STAFF_FILES_DIR = dir;
-  // файлы медиатеки: 301 — PDF (ImageKit), 302 — JPEG с провайдером local
-  const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(123393, 5)]);
-  const jpg = Buffer.concat([JPG, Buffer.alloc(81920 - JPG.length, 2)]);
-  st.files.get(301).size = +(pdf.length / 1000).toFixed(2);
-  st.files.get(301).provider = 'imagekit';
-  st.files.get(301).provider_metadata = { fileId: 'ik301' };
-  st.files.get(302).size = +(81920 / 1000).toFixed(2);
-  st.files.get(302).provider = 'local'; // так на проде у одного файла: провайдер local, лежит в ImageKit
-  st.files.get(302).provider_metadata = { fileId: 'ik302' };
-  st.files.get(302).formats = { thumbnail: { url: 'https://ik.imagekit.io/x/t.jpg', provider_metadata: { fileId: 'ik302t' } } };
-  for (const v of [st.draft(P.veronika), st.pub(P.veronika)]) {
-    v.oficial.documents = v.oficial.documents.map((f) => st.files.get(f.id));
-  }
-  // CDN отдаёт оригинал только с tr=orig-true; по обычной ссылке — «пережатую» копию
-  const bodies = {
-    'https://ik.imagekit.io/x/pas.pdf?tr=orig-true': pdf,
-    'https://ik.imagekit.io/x/visa.jpg?tr=orig-true': jpg,
-    'https://ik.imagekit.io/x/visa.jpg': jpg.subarray(0, 40000),
-  };
-  const fetched = [];
-  let ikList = [];
-  const ikQueries = [];
-  const fetchImpl = async (url, init) => {
-    if (url.startsWith('https://api.imagekit.io/v1/files?')) {
-      ikQueries.push({ q: new URL(url).searchParams.get('searchQuery'), auth: init?.headers?.Authorization });
-      return { ok: true, status: 200, json: async () => ikList };
-    }
-    fetched.push(url);
-    const b = bodies[url];
-    return b ? { ok: true, status: 200, arrayBuffer: async () => b } : { ok: false, status: 404 };
-  };
-  const run = (fileId, body = {}, session = OWNER, id = P.veronika) => svc.migrateLegacyFile({ session, id, fileId, body, fetchImpl });
-
-  await expectErr(() => run(999), 404, 'legacy_not_found');
-  await expectErr(() => run('abc'), 404, 'legacy_not_found');
-  await expectErr(() => run(301, {}, OWNER, P.yana), 404, 'legacy_not_found');
-
-  const dry = await run(301, { dryRun: true });
-  assert.deepEqual(dry, { dryRun: true, fileId: 301, fileName: 'pas.pdf', title: 'pas', mime: 'application/pdf', size: pdf.length });
-  assert.equal(fs.readdirSync(dir).length, 0, 'проверка ничего не пишет');
-  assert.equal(st.store['api::staff-document.staff-document'].length, 0);
-  assert.deepEqual(st.removed, []);
-
-  const r = await run(301, {}, MANAGER);
-  assert.equal(r.dryRun, false);
-  assert.equal(r.published, true);
-  assert.equal(r.removed, true);
-  assert.equal(r.cdnLeft, false);
-  const files = fs.readdirSync(dir);
-  assert.equal(files.length, 1);
-  assert.match(files[0], /^[0-9a-f]{32}$/);
-  assert.equal(fs.statSync(path.join(dir, files[0])).mode & 0o777, 0o600);
-  assert.ok(fs.readFileSync(path.join(dir, files[0])).equals(pdf), 'байты те же');
-  const rec = st.store['api::staff-document.staff-document'][0];
-  assert.deepEqual(
-    { kind: rec.kind, title: rec.title, fileName: rec.fileName, mime: rec.mime, size: rec.size, storedName: rec.storedName, uploadedBy: rec.uploadedBy, personal: rec.personal },
-    { kind: 'other', title: 'pas', fileName: 'pas.pdf', mime: 'application/pdf', size: pdf.length, storedName: files[0], uploadedBy: 'Mariia Medvedeva (перенос)', personal: { documentId: P.veronika } }
-  );
-  for (const v of [st.draft(P.veronika), st.pub(P.veronika)]) {
-    assert.equal(v.oficial.id, 71, 'компонент правится на месте');
-    assert.deepEqual(v.oficial.documents.map((f) => f.id), [302], 'остальные старые сканы на месте');
-    assert.equal(v.oficial.documentNumber, SECRET.documentNumber, 'личные данные не тронуты');
-  }
-  assert.deepEqual(st.removed, [301]);
-  assert.deepEqual(st.ikDeleted, ['ik301'], 'удалён в ImageKit явно — upload.remove этого не делает');
-  assert.equal(st.logs.at(-1).summary, 'Dokument přenesen z knihovny médií: Veronika · pas');
-  assert.ok(!JSON.stringify(st.logs.at(-1)).includes(SECRET.documentNumber));
-  await expectErr(() => run(301), 404, 'legacy_not_found'); // повтор — уже перенесён
-
-  // размер не совпал — ничего не записано и не удалено
-  st.files.get(302).size = 81.93;
-  st.draft(P.veronika).oficial.documents = [st.files.get(302)];
-  await expectErr(() => run(302), 409, 'legacy_size_mismatch');
-  await expectErr(() => run(302, { dryRun: true, acceptSizeBytes: 81921 }), 409, 'legacy_size_mismatch');
-  await expectErr(() => run(302, { dryRun: true, acceptSizeBytes: '81920' }), 409, 'legacy_size_mismatch');
-  assert.equal((await run(302, { dryRun: true, acceptSizeBytes: 81920 })).size, 81920, 'подтверждённый размер — ровно скачанный');
-  assert.equal(fs.readdirSync(dir).length, 1);
-  assert.deepEqual(st.removed, [301]);
-
-  // карточка без опубликованной версии: пишется только черновик, publish не зовётся; провайдер local — CDN-копия остаётся
-  st.files.get(302).size = 81.92;
-  st.draft(P.veronika).oficial.documents = [st.files.get(302)];
-  // сбой ImageKit: скан уже в закрытом каталоге и отвязан, но запись медиатеки остаётся — видно, что CDN не чист
-  st.setIkFail('ImageKit 500')
-  const rFail = await run(302);
-  assert.equal(rFail.removed, false);
-  assert.equal(rFail.cdnLeft, true);
-  assert.ok(st.files.has(302), 'запись медиатеки не удалена, пока CDN не удалён');
-  st.setIkFail(null);
-  // повтор по тому же файлу: запись медиатеки есть, в карточке уже отвязан → 404; проверяем удаление отдельно
-  st.draft(P.veronika).oficial.documents = [st.files.get(302)];
-  const pubIdx0 = st.store['api::personal.personal'].findIndex((x) => x.documentId === P.veronika && x.published);
-  if (pubIdx0 >= 0) st.store['api::personal.personal'].splice(pubIdx0, 1);
-  const publishesBefore = st.calls.filter((c) => c[0] === 'publish').length;
-  const r2 = await run(302);
-  assert.equal(r2.published, false);
-  assert.equal(r2.cdnLeft, false, 'провайдер local, но fileId есть — удалён в ImageKit');
-  assert.deepEqual(st.ikDeleted, ['ik301', 'ik302', 'ik302t'], 'вместе с уменьшенной копией');
-  // файл без fileId (старый local) — из медиатеки удалён, но CDN-копию искать руками
-  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(992, 3)]);
-  st.files.set(305, { id: 305, name: 'old.png', mime: 'image/png', size: 1, url: 'https://ik.imagekit.io/x/old.png', provider: 'local' });
-  bodies['https://ik.imagekit.io/x/old.png?tr=orig-true'] = png;
-  st.draft(P.veronika).oficial.documents = [st.files.get(305)];
-  const r3 = await run(305);
-  assert.equal(r3.removed, true);
-  assert.equal(r3.cdnLeft, true, 'без fileId удалить в ImageKit нечем');
-  assert.equal(st.ikDeleted.length, 3);
-
-  // метаданные старого формата (Cloudinary public_id): fileId ищется в ImageKit по точному пути ссылки
-  const pdf2 = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(991, 4)]);
-  const clUrl = 'https://ik.imagekit.io/njc0tvfgn/strapi-uploads/Dohoda%20o.pdf';
-  st.files.set(306, { id: 306, name: 'Dohoda o.pdf', mime: 'application/pdf', size: 1, url: clUrl, provider: 'imagekit', provider_metadata: { public_id: 'Dohoda_o', resource_type: 'image' } });
-  bodies[`${clUrl}?tr=orig-true`] = pdf2;
-  ikList = [
-    { fileId: 'other-folder', filePath: '/jine/Dohoda o.pdf' },
-    { fileId: 'found-306', filePath: '/strapi-uploads/Dohoda o.pdf' },
-  ];
-  st.draft(P.veronika).oficial.documents = [st.files.get(306)];
-  const r4 = await run(306);
-  assert.equal(r4.cdnLeft, false);
-  assert.equal(st.ikDeleted.at(-1), 'found-306', 'только точное совпадение пути');
-  assert.equal(ikQueries.at(-1).q, 'name = "Dohoda o.pdf"');
-  assert.equal(ikQueries.at(-1).auth, `Basic ${Buffer.from('private_test:').toString('base64')}`);
-  // два точных совпадения — наугад не удаляется: из медиатеки убран, CDN — руками
-  st.files.set(309, { id: 309, name: 'Dohoda o.pdf', mime: 'application/pdf', size: 1, url: clUrl, provider: 'imagekit', provider_metadata: { public_id: 'x' } });
-  ikList = [{ fileId: 'a', filePath: '/strapi-uploads/Dohoda o.pdf' }, { fileId: 'b', filePath: '/strapi-uploads/Dohoda o.pdf' }];
-  st.draft(P.veronika).oficial.documents = [st.files.get(309)];
-  const r5 = await run(309);
-  assert.equal(r5.cdnLeft, true);
-  assert.equal(st.ikDeleted.length, 4, 'ничего лишнего не удалено');
-  assert.equal(st.calls.filter((c) => c[0] === 'publish').length, publishesBefore, 'черновик-только не публикуется');
-  assert.ok(!st.pub(P.veronika), 'опубликованной версии как не было, так и нет');
-  assert.deepEqual(st.draft(P.veronika).oficial.documents, []);
-  assert.ok(st.store['api::staff-document.staff-document'].some((d) => d.fileName === 'visa.jpg' && d.mime === 'image/jpeg'));
-
-  // сбой скачивания и неподдерживаемый тип
-  st.files.set(303, { id: 303, name: 'x.docx', mime: 'application/msword', size: 1.02, url: 'https://ik.imagekit.io/x/x.docx', provider: 'imagekit' });
-  st.files.set(304, { id: 304, name: 'gone.pdf', mime: 'application/pdf', size: 1, url: 'https://ik.imagekit.io/x/gone.pdf', provider: 'imagekit' });
-  bodies['https://ik.imagekit.io/x/x.docx?tr=orig-true'] = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(1020, 1)]);
-  st.draft(P.veronika).oficial.documents = [st.files.get(303), st.files.get(304)];
-  await expectErr(() => run(303), 409, 'bad_file_type');
-  await expectErr(() => run(304), 502, 'legacy_download_failed');
-  assert.ok(fetched.every((u) => u.endsWith('?tr=orig-true')), 'всегда качается оригинал');
-  assert.deepEqual(st.draft(P.veronika).oficial.documents.map((f) => f.id), [303, 304], 'при ошибке карточка не тронута');
 });
 
 // ───────────────────────── s229: связь учётки с карточкой (§5а.1) ─────────────────────────
