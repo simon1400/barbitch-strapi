@@ -1463,22 +1463,39 @@ export default {
     await strapi.documents(PERSONAL_UID).update({ documentId, status: 'draft', data: { oficial } });
     if (pub) await strapi.documents(PERSONAL_UID).publish({ documentId });
 
-    // 3. удалить из медиатеки (и из CDN — делает провайдер файла)
+    // 3. удалить из ImageKit, затем из медиатеки
     let removed = false;
-    let cdnLeft = false;
+    let cdnLeft = true;
     try {
-      const upload = strapi.plugin('upload').service('upload');
-      const file = await upload.findOne(fid);
-      if (file) {
-        cdnLeft = file.provider !== 'imagekit';
-        await upload.remove(file);
-        removed = true;
-      }
+      const r = await this._removeLibraryFile(fid);
+      removed = r.removed;
+      cdnLeft = !r.cdnDeleted;
     } catch (e) {
-      strapi.log.error(`staff: старый скан ${fid} перенесён, но не удалён из медиатеки: ${e.message}`);
+      strapi.log.error(`staff: старый скан ${fid} перенесён, но не удалён из ImageKit/медиатеки: ${e.message}`);
     }
     this._log('staff_file_add', session, documentId, logSummary('file_migrate', doc.name, [title]), { název: title });
     return { dryRun: false, ...check, document: created.documentId, published: Boolean(pub), removed, cdnLeft, url: legacy.url };
+  },
+
+  /**
+   * Файл медиатеки — из ImageKit и из медиатеки.
+   * 🟥 `upload.remove` Strapi зовёт удаление у провайдера, только если `file.provider` равен
+   * провайдеру из конфига upload; у нас там `local`, а у файлов — `imagekit` (плагин
+   * подменяет методы провайдера, а не имя) → из ImageKit ничего не удалялось никогда
+   * (найдено на проде 29.09 при переносе сканов). Поэтому CDN — явно, сервисом плагина по
+   * `provider_metadata.fileId` (и уменьшенные копии); запись медиатеки — только после
+   * успешного удаления в CDN, иначе ошибка и файл остаётся виден в панели.
+   */
+  async _removeLibraryFile(fid: number) {
+    const upload = strapi.plugin('upload').service('upload');
+    const file = await upload.findOne(fid);
+    if (!file) return { removed: false, cdnDeleted: false };
+    const ik = strapi.plugin('imagekit')?.service('upload');
+    const parts = [file, ...Object.values(file.formats || {})].filter((f: any) => f?.provider_metadata?.fileId);
+    if (parts.length && !ik) throw new Error('плагин ImageKit не найден — файл из CDN не удалён');
+    for (const f of parts) await ik.delete(f);
+    await upload.remove(file);
+    return { removed: true, cdnDeleted: parts.length > 0 };
   },
 
   /** Документ этой карточки (с storedName) или 404. */
@@ -1887,16 +1904,11 @@ export default {
       }
     }
     for (const n of notes) await strapi.documents(NOTE_UID).delete({ documentId: n.documentId });
-    // старые сканы из панели (ImageKit): после отвязки от обеих версий — из медиатеки и CDN
-    const upload = strapi.plugin('upload').service('upload');
+    // старые сканы из панели (ImageKit): после отвязки от обеих версий — из CDN и медиатеки
     let legacyRemoved = 0;
     for (const fid of legacyIds) {
       try {
-        const file = await upload.findOne(fid);
-        if (file) {
-          await upload.remove(file);
-          legacyRemoved += 1;
-        }
+        if ((await this._removeLibraryFile(fid)).removed) legacyRemoved += 1;
       } catch (e) {
         strapi.log.error(`staff: старый скан ${fid} не удалён из медиатеки: ${e.message}`);
       }

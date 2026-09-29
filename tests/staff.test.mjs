@@ -157,6 +157,8 @@ function makeStrapi() {
   const calls = [];
   const uploads = [];
   const removed = [];
+  const ikDeleted = [];
+  let ikFail = null;
 
   const DP = new Set(['api::personal.personal']);
   const cond = (v, c) => {
@@ -301,6 +303,20 @@ function makeStrapi() {
       return { write: async (entry) => logs.push(entry) };
     },
     plugin: (name) => {
+      if (name === 'imagekit') {
+        // сервис плагина ImageKit: удаляет по provider_metadata.fileId
+        return {
+          service: (n) => {
+            assert.equal(n, 'upload');
+            return {
+              async delete(f) {
+                if (ikFail) throw new Error(ikFail);
+                ikDeleted.push(f.provider_metadata.fileId);
+              },
+            };
+          },
+        };
+      }
       assert.equal(name, 'upload');
       return {
         service: () => ({
@@ -322,7 +338,7 @@ function makeStrapi() {
   };
   const draft = (id) => store['api::personal.personal'].find((r) => r.documentId === id && !r.published);
   const pub = (id) => store['api::personal.personal'].find((r) => r.documentId === id && r.published);
-  return { store, accounts, logs, calls, uploads, removed, files, draft, pub };
+  return { store, accounts, logs, calls, uploads, removed, ikDeleted, files, draft, pub, setIkFail: (v) => (ikFail = v) };
 }
 
 const expectErr = async (fn, status, code) => {
@@ -1221,6 +1237,7 @@ test('стирание через 3 года: личные данные, ска�
   await expectErr(() => svc.erase({ session: OWNER, id: P.veronika, body: { base: st.draft(P.veronika).updatedAt }, now: NOW }), 400, 'confirm_mismatch');
   assert.equal(st.draft(P.veronika).oficial.documentNumber, SECRET.documentNumber, 'до подтверждения ничего не стёрто');
 
+  st.files.get(301).provider_metadata = { fileId: 'ik-e301' };
   const r = await svc.erase({ session: MANAGER, id: P.veronika, body: { confirmName: ' veronika ', base: st.draft(P.veronika).updatedAt }, now: NOW });
   assert.deepEqual(r.erased, { documents: 1, legacyFiles: 2, notes: 1 });
   for (const v of [st.draft(P.veronika), st.pub(P.veronika)]) {
@@ -1236,6 +1253,7 @@ test('стирание через 3 года: личные данные, ска�
   assert.deepEqual(st.store['api::staff-document.staff-document'].map((d) => d.documentId), ['sd2'], 'чужие документы целы');
   assert.deepEqual(st.store['api::staff-note.staff-note'].map((d) => d.documentId), ['n2']);
   assert.deepEqual(st.removed, [301, 302], 'старые сканы удалены из медиатеки (ImageKit)');
+  assert.deepEqual(st.ikDeleted, ['ik-e301'], 'и из самого ImageKit — по fileId');
   assert.equal(r.erase.erasedAt, NOW.toISOString());
   const priv = await svc.privateData({ session: OWNER, id: P.veronika });
   assert.equal(priv.missing.length, 7);
@@ -1371,8 +1389,11 @@ test('перенос старого скана: проверка, копия в 
   const jpg = Buffer.concat([JPG, Buffer.alloc(81920 - JPG.length, 2)]);
   st.files.get(301).size = +(pdf.length / 1000).toFixed(2);
   st.files.get(301).provider = 'imagekit';
+  st.files.get(301).provider_metadata = { fileId: 'ik301' };
   st.files.get(302).size = +(81920 / 1000).toFixed(2);
-  st.files.get(302).provider = 'local';
+  st.files.get(302).provider = 'local'; // так на проде у одного файла: провайдер local, лежит в ImageKit
+  st.files.get(302).provider_metadata = { fileId: 'ik302' };
+  st.files.get(302).formats = { thumbnail: { url: 'https://ik.imagekit.io/x/t.jpg', provider_metadata: { fileId: 'ik302t' } } };
   for (const v of [st.draft(P.veronika), st.pub(P.veronika)]) {
     v.oficial.documents = v.oficial.documents.map((f) => st.files.get(f.id));
   }
@@ -1421,6 +1442,7 @@ test('перенос старого скана: проверка, копия в 
     assert.equal(v.oficial.documentNumber, SECRET.documentNumber, 'личные данные не тронуты');
   }
   assert.deepEqual(st.removed, [301]);
+  assert.deepEqual(st.ikDeleted, ['ik301'], 'удалён в ImageKit явно — upload.remove этого не делает');
   assert.equal(st.logs.at(-1).summary, 'Dokument přenesen z knihovny médií: Veronika · pas');
   assert.ok(!JSON.stringify(st.logs.at(-1)).includes(SECRET.documentNumber));
   await expectErr(() => run(301), 404, 'legacy_not_found'); // повтор — уже перенесён
@@ -1438,16 +1460,35 @@ test('перенос старого скана: проверка, копия в 
   // карточка без опубликованной версии: пишется только черновик, publish не зовётся; провайдер local — CDN-копия остаётся
   st.files.get(302).size = 81.92;
   st.draft(P.veronika).oficial.documents = [st.files.get(302)];
-  const pubIdx = st.store['api::personal.personal'].findIndex((x) => x.documentId === P.veronika && x.published);
-  st.store['api::personal.personal'].splice(pubIdx, 1);
+  // сбой ImageKit: скан уже в закрытом каталоге и отвязан, но запись медиатеки остаётся — видно, что CDN не чист
+  st.setIkFail('ImageKit 500')
+  const rFail = await run(302);
+  assert.equal(rFail.removed, false);
+  assert.equal(rFail.cdnLeft, true);
+  assert.ok(st.files.has(302), 'запись медиатеки не удалена, пока CDN не удалён');
+  st.setIkFail(null);
+  // повтор по тому же файлу: запись медиатеки есть, в карточке уже отвязан → 404; проверяем удаление отдельно
+  st.draft(P.veronika).oficial.documents = [st.files.get(302)];
+  const pubIdx0 = st.store['api::personal.personal'].findIndex((x) => x.documentId === P.veronika && x.published);
+  if (pubIdx0 >= 0) st.store['api::personal.personal'].splice(pubIdx0, 1);
   const publishesBefore = st.calls.filter((c) => c[0] === 'publish').length;
   const r2 = await run(302);
   assert.equal(r2.published, false);
-  assert.equal(r2.cdnLeft, true, 'файл с провайдером local — копию в ImageKit удалять руками');
+  assert.equal(r2.cdnLeft, false, 'провайдер local, но fileId есть — удалён в ImageKit');
+  assert.deepEqual(st.ikDeleted, ['ik301', 'ik302', 'ik302t'], 'вместе с уменьшенной копией');
+  // файл без fileId (старый local) — из медиатеки удалён, но CDN-копию искать руками
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(992, 3)]);
+  st.files.set(305, { id: 305, name: 'old.png', mime: 'image/png', size: 1, url: 'https://ik.imagekit.io/x/old.png', provider: 'local' });
+  bodies['https://ik.imagekit.io/x/old.png?tr=orig-true'] = png;
+  st.draft(P.veronika).oficial.documents = [st.files.get(305)];
+  const r3 = await run(305);
+  assert.equal(r3.removed, true);
+  assert.equal(r3.cdnLeft, true, 'без fileId удалить в ImageKit нечем');
+  assert.equal(st.ikDeleted.length, 3);
   assert.equal(st.calls.filter((c) => c[0] === 'publish').length, publishesBefore, 'черновик-только не публикуется');
   assert.ok(!st.pub(P.veronika), 'опубликованной версии как не было, так и нет');
   assert.deepEqual(st.draft(P.veronika).oficial.documents, []);
-  assert.equal(st.store['api::staff-document.staff-document'].at(-1).mime, 'image/jpeg');
+  assert.ok(st.store['api::staff-document.staff-document'].some((d) => d.fileName === 'visa.jpg' && d.mime === 'image/jpeg'));
 
   // сбой скачивания и неподдерживаемый тип
   st.files.set(303, { id: 303, name: 'x.docx', mime: 'application/msword', size: 1.02, url: 'https://ik.imagekit.io/x/x.docx', provider: 'imagekit' });
