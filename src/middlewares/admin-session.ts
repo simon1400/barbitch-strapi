@@ -23,9 +23,14 @@
  * Выигрыш в том, что доступ стал именным, истекающим и отзываемым (деактивация
  * пользователя), а вечный токен исчез из браузера. Разграничение по ролям —
  * отдельная задача.
+ *
+ * С тех пор правила ниже закрывают конкретные коллекции (s182, s218, s221, s223),
+ * а с s223 сессия на каждом запросе сверяется с учёткой в базе (utils/admin-account):
+ * отключение, смена роли или логина гасят её сразу, а не через 7 дней.
  */
 
 import { tokenFromCtx, verifySession } from '../utils/admin-jwt';
+import { loadAdminAccount, sessionMismatch } from '../utils/admin-account';
 
 // 🟥 РЕГРЕССИЯ 24.08.2026 — почему тут ДВА жёстких ограничения.
 // Панель Strapi (/admin) подписывает свои токены ТЕМ ЖЕ `ADMIN_JWT_SECRET`,
@@ -56,7 +61,15 @@ const STAFF_ROLES = new Set(['owner', 'manager', 'administrator', 'master']);
 // Панель Strapi и ручки движка тут не задеты: проверка только на /api/<коллекция>.
 const MASTER_DENIED = new Set(['bookings', 'clients', 'redemptions']);
 
-const collectionOf = (path: string): string => path.slice('/api/'.length).split(/[/?]/)[0];
+// 🟥 Регистр (s223). Роутер Strapi (@koa/router, `sensitive: false`) сопоставляет пути
+// БЕЗ учёта регистра: `/API/Time-Blocks` попадает в тот же роут, что `/api/time-blocks`.
+// Сравнение по имени коллекции как есть пропускало такие запросы мимо всех правил ниже
+// (s182, s218, s221), а `/API/...` — мимо middleware целиком. Поэтому путь сравнивается
+// только в нижнем регистре. Закодированные буквы (`%70ersonals`) роутер не раскодирует —
+// такой путь не совпадает ни с одним роутом.
+const segmentsOf = (path: string): string[] => path.toLowerCase().slice('/api/'.length).split(/[?]/)[0].split('/');
+
+const collectionOf = (path: string): string => segmentsOf(path)[0];
 
 const deniedForMaster = (path: string): boolean => MASTER_DENIED.has(collectionOf(path));
 
@@ -149,6 +162,66 @@ export const stripSecret = (body: unknown, depth = 0): boolean => {
   return hit;
 };
 
+// 🟥 Учётки и карточки сотрудников (s223, план «Карточка сотрудника» §3.9).
+//
+// Сессия получает права full-access токена, а у `admin-user` и `personal` есть штатный
+// REST. Поэтому любой сотрудник мог `PUT /api/admin-users/<id>` с `{role:'owner'}` или
+// новым паролем владельца (`GET /api/admin-users` отдавал все логины и роли), а мастер —
+// `PUT /api/personals/<id>` со своим процентом, ставкой или `isActive`.
+//   1. `/api/admin-users` — сессиям только три кастомные ручки (вход, свой статус,
+//      кабинет администратора); остальное 403. Метод и число сегментов сверяются точно:
+//      `PUT /api/admin-users/login` иначе попал бы в штатный `PUT /admin-users/:id`.
+//   2. `/api/personals` — чтение как было. Запись: мастеру — никакой; остальным — только
+//      `PUT /api/personals/<documentId>` с `{ data }` из трёх ключей, которые пишут
+//      существующие экраны: каталог (`services`), «Pořadí» календаря (`calendarOrder`),
+//      приоритет мастеров (`bookingPriority`). Создание, удаление, прочие поля — 403.
+// Панель Strapi (/admin/**) не задета — владелец правит учётки и карточки там же.
+const ADMIN_USERS_OPEN: ReadonlyArray<{ method: string; segment: string; length: number }> = [
+  { method: 'POST', segment: 'login', length: 2 },
+  { method: 'GET', segment: 'check-status', length: 3 },
+  { method: 'GET', segment: 'administrator-data', length: 3 },
+];
+
+const methodOf = (method: string): string => String(method || 'GET').toUpperCase();
+
+export const deniedAdminUsers = (path: string, method: string): boolean => {
+  const seg = segmentsOf(path);
+  if (seg[0] !== 'admin-users') return false;
+  const m = methodOf(method);
+  return !ADMIN_USERS_OPEN.some(
+    (r) => (r.method === m || (r.method === 'GET' && m === 'HEAD')) && seg[1] === r.segment && seg.length === r.length && seg.every(Boolean)
+  );
+};
+
+export const PERSONAL_WRITABLE = new Set(['calendarOrder', 'services', 'bookingPriority']);
+
+export const deniedPersonalWrite = (path: string, method: string, role: string, body: unknown): boolean => {
+  const seg = segmentsOf(path);
+  if (seg[0] !== 'personals') return false;
+  const m = methodOf(method);
+  if (READ_METHODS.has(m)) return false;
+  if (role === 'master') return true;
+  if (m !== 'PUT' || seg.length !== 2 || !seg[1]) return true;
+  if (!isPlain(body)) return true;
+  const top = Object.keys(body as Record<string, unknown>);
+  if (top.length !== 1 || top[0] !== 'data') return true;
+  const data = (body as Record<string, unknown>).data;
+  if (!isPlain(data)) return true;
+  const keys = Object.keys(data as Record<string, unknown>);
+  return keys.length === 0 || keys.some((k) => !PERSONAL_WRITABLE.has(k));
+};
+
+const denyStaffData = (ctx: any) => {
+  ctx.status = 403;
+  ctx.body = {
+    error: {
+      status: 403,
+      code: 'staff_data_closed',
+      message: 'Účty a karty zaměstnanců se mění jen v administraci Strapi',
+    },
+  };
+};
+
 const denySecret = (ctx: any) => {
   ctx.status = 403;
   ctx.body = {
@@ -164,7 +237,8 @@ export default (_config: unknown, { strapi }: { strapi: any }) => {
   let warned = false;
   return async (ctx: any, next: () => Promise<void>) => {
     const path: string = ctx?.request?.path || ctx?.path || '';
-    if (!path.startsWith('/api/')) {
+    // регистр — см. segmentsOf: `/API/engine/...` роутер тоже принимает
+    if (!path.toLowerCase().startsWith('/api/')) {
       await next();
       return;
     }
@@ -172,6 +246,32 @@ export default (_config: unknown, { strapi }: { strapi: any }) => {
     if (raw) {
       const session = verifySession(raw);
       if (session && STAFF_ROLES.has(session.role)) {
+        // s223: учётка отключена / роль или логин сменились — сессия больше не годится,
+        // на ЛЮБОМ /api/** (коллекции, ручки движка, кабинеты). См. utils/admin-account.
+        let account;
+        try {
+          account = await loadAdminAccount(strapi, session.id);
+        } catch (err: any) {
+          strapi.log.error(`admin-session: учётка ${session.id} не прочиталась: ${err?.message || err}`);
+          ctx.status = 503;
+          ctx.body = {
+            error: { status: 503, code: 'session_check_failed', message: 'Nepodařilo se ověřit přihlášení, zkuste to znovu' },
+          };
+          return;
+        }
+        const mismatch = sessionMismatch(session, account);
+        if (mismatch) {
+          ctx.status = 401;
+          ctx.body = {
+            error: {
+              status: 401,
+              code: 'session_revoked',
+              reason: mismatch,
+              message: 'Přihlášení už neplatí, přihlaste se znovu',
+            },
+          };
+          return;
+        }
         // сохраняем ДО подмены — иначе гейты собственных ручек ослепнут
         ctx.state.adminJwt = raw;
         ctx.state.adminSession = session;
@@ -203,6 +303,13 @@ export default (_config: unknown, { strapi }: { strapi: any }) => {
           bodyTouchesSecret(ctx.request?.body)
         ) {
           denySecret(ctx);
+          return;
+        }
+        if (
+          deniedAdminUsers(path, ctx.request?.method || ctx.method) ||
+          deniedPersonalWrite(path, ctx.request?.method || ctx.method, session.role, ctx.request?.body)
+        ) {
+          denyStaffData(ctx);
           return;
         }
         const proxyToken = process.env.ADMIN_PROXY_API_TOKEN;

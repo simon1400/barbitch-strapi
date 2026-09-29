@@ -1,0 +1,30 @@
+{
+  "kind": "collectionType",
+  "collectionName": "staff_notes",
+  "info": {
+    "singularName": "staff-note",
+    "pluralName": "staff-notes",
+    "displayName": "Заметка о сотруднике",
+    "description": "Заметки руководства в карточке сотрудника (s224). Правка и удаление — автор или владелец. REST-роутов нет: только ручки /engine/admin/staff"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "personal": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::personal.personal"
+    },
+    "text": {
+      "type": "text"
+    },
+    "authorName": {
+      "type": "string"
+    },
+    "authorAccountId": {
+      "type": "integer"
+    }
+  }
+}

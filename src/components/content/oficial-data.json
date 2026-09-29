@@ -7,32 +7,25 @@
   "options": {},
   "attributes": {
     "name": {
-      "type": "string",
-      "required": true
+      "type": "string"
     },
     "dateBirth": {
-      "type": "string",
-      "required": true
+      "type": "string"
     },
     "addressInCz": {
-      "type": "string",
-      "required": true
+      "type": "string"
     },
     "addressInHome": {
-      "type": "string",
-      "required": true
+      "type": "string"
     },
     "documentNumber": {
-      "type": "string",
-      "required": true
+      "type": "string"
     },
     "phone": {
-      "type": "string",
-      "required": true
+      "type": "string"
     },
     "email": {
-      "type": "string",
-      "required": true
+      "type": "string"
     },
     "documents": {
       "type": "media",
@@ -42,6 +35,15 @@
         "images",
         "files"
       ]
+    },
+    "bankAccount": {
+      "type": "string"
+    },
+    "emergencyName": {
+      "type": "string"
+    },
+    "emergencyPhone": {
+      "type": "string"
     }
   },
   "config": {}

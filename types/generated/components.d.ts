@@ -168,14 +168,17 @@ export interface ContentOficialData extends Struct.ComponentSchema {
     icon: 'alien';
   };
   attributes: {
-    addressInCz: Schema.Attribute.String & Schema.Attribute.Required;
-    addressInHome: Schema.Attribute.String & Schema.Attribute.Required;
-    dateBirth: Schema.Attribute.String & Schema.Attribute.Required;
-    documentNumber: Schema.Attribute.String & Schema.Attribute.Required;
+    addressInCz: Schema.Attribute.String;
+    addressInHome: Schema.Attribute.String;
+    bankAccount: Schema.Attribute.String;
+    dateBirth: Schema.Attribute.String;
+    documentNumber: Schema.Attribute.String;
     documents: Schema.Attribute.Media<'images' | 'files', true>;
-    email: Schema.Attribute.String & Schema.Attribute.Required;
-    name: Schema.Attribute.String & Schema.Attribute.Required;
-    phone: Schema.Attribute.String & Schema.Attribute.Required;
+    email: Schema.Attribute.String;
+    emergencyName: Schema.Attribute.String;
+    emergencyPhone: Schema.Attribute.String;
+    name: Schema.Attribute.String;
+    phone: Schema.Attribute.String;
   };
 }
 

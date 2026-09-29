@@ -2004,6 +2004,12 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
         };
       }> &
       Schema.Attribute.DefaultTo<0>;
+    hiredAt: Schema.Attribute.Date &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }>;
     isActive: Schema.Attribute.Boolean &
       Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
@@ -2012,6 +2018,12 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
         };
       }> &
       Schema.Attribute.DefaultTo<true>;
+    leftAt: Schema.Attribute.Date &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }>;
     locale: Schema.Attribute.String;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -2037,7 +2049,6 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       'api::service-provided.service-provided'
     >;
     oficial: Schema.Attribute.Component<'content.oficial-data', false> &
-      Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
           localized: true;
@@ -2061,6 +2072,12 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
         };
       }> &
       Schema.Attribute.DefaultTo<'master'>;
+    privateErasedAt: Schema.Attribute.DateTime &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }>;
     publishedAt: Schema.Attribute.DateTime;
     ratePercent: Schema.Attribute.Integer &
       Schema.Attribute.SetPluginOptions<{
@@ -2655,6 +2672,78 @@ export interface ApiSlotHoldSlotHold extends Struct.CollectionTypeSchema {
     sessionKey: Schema.Attribute.String;
     startsAt: Schema.Attribute.DateTime & Schema.Attribute.Required;
     totalPrice: Schema.Attribute.Decimal;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiStaffDocumentStaffDocument
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'staff_documents';
+  info: {
+    description: '\u0421\u043A\u0430\u043D \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0441\u043E\u0442\u0440\u0443\u0434\u043D\u0438\u043A\u0430 (s224, \u00AB\u041A\u0430\u0440\u0442\u043E\u0447\u043A\u0430 \u0441\u043E\u0442\u0440\u0443\u0434\u043D\u0438\u043A\u0430\u00BB \u00A73.11). \u0421\u0430\u043C \u0444\u0430\u0439\u043B \u2014 \u0432 \u0437\u0430\u043A\u0440\u044B\u0442\u043E\u043C \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0435 STAFF_FILES_DIR \u043D\u0430 \u0441\u0435\u0440\u0432\u0435\u0440\u0435 (storedName), \u043D\u0435 \u0432 \u043C\u0435\u0434\u0438\u0430\u0442\u0435\u043A\u0435 \u0438 \u043D\u0435 \u043D\u0430 CDN. REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/staff (\u0440\u0443\u043A\u043E\u0432\u043E\u0434\u0441\u0442\u0432\u043E)';
+    displayName: '\u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u0441\u043E\u0442\u0440\u0443\u0434\u043D\u0438\u043A\u0430';
+    pluralName: 'staff-documents';
+    singularName: 'staff-document';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    fileName: Schema.Attribute.String;
+    kind: Schema.Attribute.Enumeration<
+      ['passport', 'residence', 'health', 'contract', 'license', 'other']
+    >;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::staff-document.staff-document'
+    > &
+      Schema.Attribute.Private;
+    mime: Schema.Attribute.String;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    publishedAt: Schema.Attribute.DateTime;
+    size: Schema.Attribute.Integer;
+    storedName: Schema.Attribute.String & Schema.Attribute.Private;
+    title: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    uploadedBy: Schema.Attribute.String;
+    validUntil: Schema.Attribute.Date;
+  };
+}
+
+export interface ApiStaffNoteStaffNote extends Struct.CollectionTypeSchema {
+  collectionName: 'staff_notes';
+  info: {
+    description: '\u0417\u0430\u043C\u0435\u0442\u043A\u0438 \u0440\u0443\u043A\u043E\u0432\u043E\u0434\u0441\u0442\u0432\u0430 \u0432 \u043A\u0430\u0440\u0442\u043E\u0447\u043A\u0435 \u0441\u043E\u0442\u0440\u0443\u0434\u043D\u0438\u043A\u0430 (s224). \u041F\u0440\u0430\u0432\u043A\u0430 \u0438 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0435 \u2014 \u0430\u0432\u0442\u043E\u0440 \u0438\u043B\u0438 \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446. REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/staff';
+    displayName: '\u0417\u0430\u043C\u0435\u0442\u043A\u0430 \u043E \u0441\u043E\u0442\u0440\u0443\u0434\u043D\u0438\u043A\u0435';
+    pluralName: 'staff-notes';
+    singularName: 'staff-note';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    authorAccountId: Schema.Attribute.Integer;
+    authorName: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::staff-note.staff-note'
+    > &
+      Schema.Attribute.Private;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    publishedAt: Schema.Attribute.DateTime;
+    text: Schema.Attribute.Text;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -3585,6 +3674,8 @@ declare module '@strapi/strapi' {
       'api::service.service': ApiServiceService;
       'api::shift.shift': ApiShiftShift;
       'api::slot-hold.slot-hold': ApiSlotHoldSlotHold;
+      'api::staff-document.staff-document': ApiStaffDocumentStaffDocument;
+      'api::staff-note.staff-note': ApiStaffNoteStaffNote;
       'api::stock.stock': ApiStockStock;
       'api::tax.tax': ApiTaxTax;
       'api::time-block.time-block': ApiTimeBlockTimeBlock;

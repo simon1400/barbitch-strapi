@@ -17,6 +17,8 @@ const handle = async (ctx, fn) => {
     if (e instanceof EngineError || (typeof e?.status === 'number' && typeof e?.code === 'string')) {
       ctx.status = e.status;
       ctx.body = { error: { status: e.status, code: e.code, message: e.message } };
+      // карточка сотрудника (s224): 409 future_bookings несёт список броней
+      if (e.details) ctx.body.error.details = e.details;
       return;
     }
     strapi.log.error('booking-engine error:', e);
@@ -66,6 +68,7 @@ const timeOffsSvc = () => strapi.service('api::booking-engine.time-offs');
 const shiftsSvc = () => strapi.service('api::booking-engine.shifts');
 const scheduleSvc = () => strapi.service('api::booking-engine.master-schedule');
 const birthdaysSvc = () => strapi.service('api::booking-engine.birthdays');
+const staffSvc = () => strapi.service('api::booking-engine.staff');
 
 // personal.documentId по имени сотрудника (session.username = полное имя = personal.name)
 const resolvePersonalByName = async (name) => {
@@ -768,6 +771,163 @@ export default {
     await handle(ctx, () =>
       scheduleSvc().replaceLegacy({ session, personal: ctx.params.personal, body: ctx.request.body })
     );
+  },
+
+  // ── Карточка сотрудника (s224): только руководство; владелец скрыт от управляющей
+  // (правило в сервисе). Личные данные — отдельной ручкой /private.
+
+  // GET /api/engine/admin/staff — список без личных данных
+  async adminStaffList(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().list({ session }));
+  },
+
+  // GET /api/engine/admin/staff-reminders — «Сегодня» (s227): сроки документов работающих,
+  // стирание личных данных через 3 года после ухода, ушедшие без даты ухода
+  async adminStaffReminders(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().reminders({ session }));
+  },
+
+  // GET /api/engine/admin/staff/:id — карточка без личных данных
+  async adminStaffCard(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().card({ session, id: ctx.params.id }));
+  },
+
+  // GET /api/engine/admin/staff/:id/private — личные данные + документы
+  async adminStaffPrivate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => staffSvc().privateData({ session, id: ctx.params.id }));
+  },
+
+  // PATCH /api/engine/admin/staff/:id {section: basic|booking|pay|private, data, base}
+  async adminStaffPatch(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().patch({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/staff/:id/rates {typeWork, rate, hourlyRate?, from, base}
+  async adminStaffRate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().addRate({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/staff/:id/files — multipart: files, target=photo|document, kind, title, validUntil
+  async adminStaffFileUpload(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      staffSvc().uploadFile({ session, id: ctx.params.id, body: ctx.request.body, files: ctx.request.files })
+    );
+  },
+
+  // GET /api/engine/admin/staff/:id/files/:fileId — скан потоком (не кэшировать)
+  async adminStaffFileDownload(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const f = await staffSvc().download({ session, id: ctx.params.id, fileId: ctx.params.fileId });
+      ctx.set('Content-Type', f.mime);
+      ctx.set('Content-Length', String(f.size));
+      ctx.set('Content-Disposition', f.disposition);
+      ctx.set('Cache-Control', 'no-store');
+      ctx.set('X-Content-Type-Options', 'nosniff');
+      return f.stream;
+    });
+  },
+
+  // PATCH /api/engine/admin/staff/:id/files/:fileId {kind?, title?, validUntil?}
+  async adminStaffFileUpdate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      staffSvc().updateFile({ session, id: ctx.params.id, fileId: ctx.params.fileId, body: ctx.request.body })
+    );
+  },
+
+  // DELETE /api/engine/admin/staff/:id/files/:fileId
+  async adminStaffFileDelete(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().deleteFile({ session, id: ctx.params.id, fileId: ctx.params.fileId }));
+  },
+
+  // POST /api/engine/admin/staff/:id/notes {text}
+  async adminStaffNoteCreate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().addNote({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // PATCH /api/engine/admin/staff/:id/notes/:noteId {text} — автор или владелец
+  async adminStaffNoteUpdate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () =>
+      staffSvc().updateNote({ session, id: ctx.params.id, noteId: ctx.params.noteId, body: ctx.request.body })
+    );
+  },
+
+  // DELETE /api/engine/admin/staff/:id/notes/:noteId — автор или владелец
+  async adminStaffNoteDelete(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().deleteNote({ session, id: ctx.params.id, noteId: ctx.params.noteId }));
+  },
+
+  // ── Карточка сотрудника, шаг 4 (s225): создание, учётка, переименование, уход, стирание.
+  // Ответы с паролем (создание, учётка) — не кэшировать.
+
+  // POST /api/engine/admin/staff {name, position, tier?, hiredAt?, ratePercent?, rate?, private?, account?}
+  async adminStaffCreate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => staffSvc().create({ session, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/staff/:id/account {action: create|disable|enable|reset_password}
+  async adminStaffAccount(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => staffSvc().account({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/staff/:id/rename {name, base}
+  async adminStaffRename(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().rename({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // GET /api/engine/admin/staff/:id/leave — предпросмотр «Завершить работу»
+  async adminStaffLeavePreview(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().leavePreview({ session, id: ctx.params.id }));
+  },
+
+  // POST /api/engine/admin/staff/:id/leave {leftAt?, base}
+  async adminStaffLeave(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().leave({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/staff/:id/erase {confirmName, base} — через 3 года после ухода
+  async adminStaffErase(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => staffSvc().erase({ session, id: ctx.params.id, body: ctx.request.body }));
   },
 
   async adminPendingBlocks(ctx) {

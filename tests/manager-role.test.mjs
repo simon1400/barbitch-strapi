@@ -43,9 +43,13 @@ async function loadController(file, errImport, errName) {
 }
 
 const anyService = new Proxy({}, { get: () => async () => ({ ok: true }) });
+// s223: middleware сверяет сессию с учёткой в базе — у каждой роли своя активная учётка
+const ROLE_IDS = { owner: 1, manager: 2, administrator: 3, master: 4 };
+const ACCOUNTS = new Map(Object.entries(ROLE_IDS).map(([role, id]) => [id, { id, role, username: `u-${role}`, isActive: true }]));
 globalThis.strapi = {
   service: () => anyService,
   log: { info() {}, error() {}, warn() {} },
+  db: { query: () => ({ findOne: async ({ where }) => ACCOUNTS.get(where.id) ?? null }) },
 };
 
 const engine = await loadController(
@@ -66,7 +70,7 @@ const dedupe = await loadController(
 const shiftRevert = await loadController('src/api/shift-revert/controllers/shift-revert.ts');
 const reviewSync = await loadController('src/api/review-sync/controllers/review-sync.ts');
 
-const token = (role) => jwt.signSession({ id: 1, username: `u-${role}`, role });
+const token = (role) => jwt.signSession({ id: ROLE_IDS[role] ?? 99, username: `u-${role}`, role });
 const ctxFor = (role) => ({
   status: 200,
   body: undefined,
@@ -75,6 +79,7 @@ const ctxFor = (role) => ({
   request: { header: role ? { authorization: `Bearer ${token(role)}` } : {}, body: { status: 'approved' } },
   badRequest(msg) { this.status = 400; this.body = msg; },
   internalServerError(msg) { this.status = 500; this.body = msg; },
+  set() {},
 });
 async function statusOf(handler, role) {
   const ctx = ctxFor(role);
@@ -105,6 +110,26 @@ const CASES = [
   ['engine: смены — удалить неделю', engine.adminShiftDelete, ['owner', 'manager']],
   // дни рождения сотрудников (s221): руководство и администраторы, мастеру нет
   ['engine: дни рождения', engine.adminBirthdays, ['owner', 'manager', 'administrator']],
+  // карточка сотрудника (s224): только руководство — администраторам ничего (решение владельца)
+  ['engine: сотрудники — список', engine.adminStaffList, ['owner', 'manager']],
+  ['engine: сотрудники — карточка', engine.adminStaffCard, ['owner', 'manager']],
+  ['engine: сотрудники — личные данные', engine.adminStaffPrivate, ['owner', 'manager']],
+  ['engine: сотрудники — правка секции', engine.adminStaffPatch, ['owner', 'manager']],
+  ['engine: сотрудники — новая ставка', engine.adminStaffRate, ['owner', 'manager']],
+  ['engine: сотрудники — загрузка файла', engine.adminStaffFileUpload, ['owner', 'manager']],
+  ['engine: сотрудники — скачать документ', engine.adminStaffFileDownload, ['owner', 'manager']],
+  ['engine: сотрудники — правка документа', engine.adminStaffFileUpdate, ['owner', 'manager']],
+  ['engine: сотрудники — удалить документ', engine.adminStaffFileDelete, ['owner', 'manager']],
+  ['engine: сотрудники — новая заметка', engine.adminStaffNoteCreate, ['owner', 'manager']],
+  ['engine: сотрудники — правка заметки', engine.adminStaffNoteUpdate, ['owner', 'manager']],
+  ['engine: сотрудники — удалить заметку', engine.adminStaffNoteDelete, ['owner', 'manager']],
+  ['engine: сотрудники — новый сотрудник', engine.adminStaffCreate, ['owner', 'manager']],
+  ['engine: сотрудники — учётка', engine.adminStaffAccount, ['owner', 'manager']],
+  ['engine: сотрудники — переименование', engine.adminStaffRename, ['owner', 'manager']],
+  ['engine: сотрудники — предпросмотр ухода', engine.adminStaffLeavePreview, ['owner', 'manager']],
+  ['engine: сотрудники — завершить работу', engine.adminStaffLeave, ['owner', 'manager']],
+  ['engine: сотрудники — стереть личные данные', engine.adminStaffErase, ['owner', 'manager']],
+  ['engine: сотрудники — напоминания «Сегодня»', engine.adminStaffReminders, ['owner', 'manager']],
   ['engine: блок (админская ручка)', engine.adminCreateBlock, ['owner', 'manager', 'administrator']],
   // плановый график мастеров (s218): мастер сам себе ничего не меняет; администратор
   // смотрит и предлагает, шаблон / согласование / замена старых блоков — руководство
@@ -184,10 +209,11 @@ test('сайт и движок: мастера только position=master', ()
 });
 
 // ── s218: сессии сотрудников не пишут блоки / часы / план в обход движка ──
-const mwCode = src('src/middlewares/admin-session.ts').replace(
-  /from '\.\.\/utils\/admin-jwt';/,
-  `from '${JWT_URL}';`
-);
+const ACCOUNT_URL = dataUrl(toJs(src('src/utils/admin-account.ts')));
+const mwCode = src('src/middlewares/admin-session.ts')
+  .replace(/from '\.\.\/utils\/admin-jwt';/, `from '${JWT_URL}';`)
+  .replace(/from '\.\.\/utils\/admin-account';/, `from '${ACCOUNT_URL}';`);
+assert.ok(!/from '\.\.\/utils\//.test(mwCode), 'в middleware остался неподменённый импорт utils');
 const mw = await import(dataUrl(toJs(mwCode)));
 
 async function runMw(role, method, pathName) {
@@ -281,8 +307,9 @@ test('admin-session: запрос с oficial в query или теле — 403 д
       response: { data: [{ name: 'A' }] },
     });
     assert.equal(ok.passed, true);
+    // s223: мастер в карточки не пишет вовсе, остальные — три ключа экранов админки
     const put = await runMwFull(role, 'PUT', '/api/personals/abc', { body: { data: { bookingPriority: 3 } } });
-    assert.equal(put.passed, true);
+    assert.equal(put.passed, role !== 'master', `${role} bookingPriority`);
   }
 });
 

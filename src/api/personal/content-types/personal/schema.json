@@ -127,8 +127,7 @@
         }
       },
       "component": "content.oficial-data",
-      "repeatable": false,
-      "required": true
+      "repeatable": false
     },
     "excessThreshold": {
       "type": "integer",
@@ -201,6 +200,30 @@
       "allowedTypes": [
         "images"
       ],
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      }
+    },
+    "hiredAt": {
+      "type": "date",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      }
+    },
+    "leftAt": {
+      "type": "date",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      }
+    },
+    "privateErasedAt": {
+      "type": "datetime",
       "pluginOptions": {
         "i18n": {
           "localized": false

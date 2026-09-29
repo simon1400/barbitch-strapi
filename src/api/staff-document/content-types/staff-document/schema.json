@@ -1,0 +1,47 @@
+{
+  "kind": "collectionType",
+  "collectionName": "staff_documents",
+  "info": {
+    "singularName": "staff-document",
+    "pluralName": "staff-documents",
+    "displayName": "Документ сотрудника",
+    "description": "Скан документа сотрудника (s224, «Карточка сотрудника» §3.11). Сам файл — в закрытом каталоге STAFF_FILES_DIR на сервере (storedName), не в медиатеке и не на CDN. REST-роутов нет: только ручки /engine/admin/staff (руководство)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "personal": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::personal.personal"
+    },
+    "kind": {
+      "type": "enumeration",
+      "enum": ["passport", "residence", "health", "contract", "license", "other"]
+    },
+    "title": {
+      "type": "string"
+    },
+    "validUntil": {
+      "type": "date"
+    },
+    "fileName": {
+      "type": "string"
+    },
+    "mime": {
+      "type": "string"
+    },
+    "size": {
+      "type": "integer"
+    },
+    "storedName": {
+      "type": "string",
+      "private": true
+    },
+    "uploadedBy": {
+      "type": "string"
+    }
+  }
+}
