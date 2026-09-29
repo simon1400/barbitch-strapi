@@ -583,6 +583,7 @@ export const logSummary = (kind: string, name: string, parts: string[] = []) => 
     account_password: 'Nové heslo do administrace',
     leave: 'Ukončení spolupráce',
     erase: 'Osobní údaje smazány',
+    file_migrate: 'Dokument přenesen z knihovny médií',
   }[kind];
   return [`${head}: ${name}`, ...parts].join(' · ');
 };
@@ -729,6 +730,24 @@ export const eraseDueDate = (leftAt: string | null): string | null => {
   const yy = y + ERASE_AFTER_YEARS;
   const day = isRealDate(yy, m, d) ? d : d - 1;
   return `${yy}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+};
+
+// ── перенос старых сканов из медиатеки (s228, §3.11 плана) ────────────────
+
+/**
+ * Скачанный файл совпадает с записью медиатеки: Strapi хранит размер в КБ с двумя знаками,
+ * так что расхождение больше пары байт — это не тот файл (или обрезанная загрузка).
+ */
+export const legacySizeMatches = (bytes: number, sizeKb: unknown): boolean => {
+  const kb = Number(sizeKb);
+  if (!Number.isFinite(kb) || kb <= 0 || bytes <= 0) return false;
+  return Math.abs(bytes - kb * 1024) <= 16;
+};
+
+/** Название документа из имени старого файла: без расширения, пробелы схлопнуты. */
+export const legacyTitle = (name: unknown): string => {
+  const t = cleanText(String(name ?? '').replace(/\.[a-z0-9]{1,5}$/i, '')).slice(0, MAX_TITLE);
+  return t || DOC_KINDS.other;
 };
 
 // ── напоминания для «Сегодня» (s227, §3.12 и §8.2 плана) ──────────────────
@@ -1350,6 +1369,95 @@ export default {
       ...(meta.validUntil ? { platnost: fmtDay(meta.validUntil) } : {}),
     });
     return { document: docView({ ...meta, fileName, mime: type.mime, size, uploadedBy: session?.username || '', ...created }) };
+  },
+
+  /**
+   * Перенос ОДНОГО старого скана из медиатеки (ImageKit, публичная ссылка) в закрытый
+   * каталог (s228, §3.11): скачать → сверить размер и сигнатуру → записать в каталог и
+   * завести staff-document → отвязать от `oficial.documents` → удалить из медиатеки и CDN.
+   * `dryRun` — только скачать и проверить, ничего не пишет.
+   *
+   * 🟥 Публикация: карточка без опубликованной версии (на проде — три старые «❌»-карточки)
+   * НЕ публикуется — пишется только черновик. Иначе ушедшие мастера всплыли бы в
+   * опубликованных списках. У остальных — как любая запись карточки: черновик + publish.
+   */
+  async migrateLegacyFile({ session, id, fileId, body, fetchImpl = fetch }: { session: any; id: unknown; fileId: unknown; body: any; fetchImpl?: typeof fetch }) {
+    const fid = Number(fileId);
+    if (!Number.isInteger(fid) || fid <= 0) throw new StaffError(404, 'legacy_not_found', 'Старый скан не найден');
+    const { doc } = await this._card(session, id, { oficial: { populate: { documents: { fields: ['name', 'mime', 'size', 'url'] } } } });
+    const documentId = doc.documentId;
+    const legacy = (doc.oficial?.documents || []).find((f) => Number(f.id) === fid);
+    if (!legacy) throw new StaffError(404, 'legacy_not_found', 'Старый скан не найден в карточке');
+
+    let res;
+    try {
+      res = await fetchImpl(String(legacy.url || ''), { signal: AbortSignal.timeout(30_000) });
+    } catch (e) {
+      throw new StaffError(502, 'legacy_download_failed', `Не удалось скачать файл: ${e.message}`);
+    }
+    if (!res?.ok) throw new StaffError(502, 'legacy_download_failed', `Не удалось скачать файл: HTTP ${res?.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > MAX_FILE_BYTES) throw new StaffError(413, 'file_too_big', 'Файл больше 10 МБ');
+    if (!legacySizeMatches(buf.length, legacy.size)) {
+      throw new StaffError(409, 'legacy_size_mismatch', `Скачано ${buf.length} байт, в медиатеке ${legacy.size} КБ — перенос остановлен`);
+    }
+    const type = detectFile(buf.subarray(0, 16));
+    if (!type) throw new StaffError(409, 'bad_file_type', 'Тип файла не JPG/PNG/WEBP/PDF — перенос вручную');
+    const fileName = safeFileName(legacy.name, type.ext);
+    const title = legacyTitle(legacy.name);
+    const check = { fileId: fid, fileName, title, mime: type.mime, size: buf.length };
+    if (body?.dryRun === true) return { dryRun: true, ...check };
+
+    // 1. копия в закрытый каталог + запись документа
+    const dir = await this._storageDir();
+    const storedName = crypto.randomBytes(16).toString('hex');
+    const full = path.join(dir, storedName);
+    await fs.promises.writeFile(`${full}.part`, buf, { mode: 0o600 });
+    await fs.promises.rename(`${full}.part`, full);
+    let created;
+    try {
+      created = await strapi.documents(DOC_UID).create({
+        data: {
+          personal: documentId,
+          kind: 'other',
+          title,
+          fileName,
+          mime: type.mime,
+          size: buf.length,
+          storedName,
+          uploadedBy: `${session?.username || ''} (перенос)`.trim(),
+        },
+      });
+    } catch (e) {
+      await fs.promises.unlink(full).catch(() => {});
+      throw e;
+    }
+
+    // 2. отвязать от компонента (правка на месте, с id); публиковать — только опубликованные карточки
+    const oficial: Record<string, any> = {
+      id: doc.oficial.id,
+      documents: (doc.oficial.documents || []).map((f) => f.id).filter((x) => Number(x) !== fid),
+    };
+    const pub = await strapi.documents(PERSONAL_UID).findOne({ documentId, status: 'published', fields: ['name'] });
+    await strapi.documents(PERSONAL_UID).update({ documentId, status: 'draft', data: { oficial } });
+    if (pub) await strapi.documents(PERSONAL_UID).publish({ documentId });
+
+    // 3. удалить из медиатеки (и из CDN — делает провайдер файла)
+    let removed = false;
+    let cdnLeft = false;
+    try {
+      const upload = strapi.plugin('upload').service('upload');
+      const file = await upload.findOne(fid);
+      if (file) {
+        cdnLeft = file.provider !== 'imagekit';
+        await upload.remove(file);
+        removed = true;
+      }
+    } catch (e) {
+      strapi.log.error(`staff: старый скан ${fid} перенесён, но не удалён из медиатеки: ${e.message}`);
+    }
+    this._log('staff_file_add', session, documentId, logSummary('file_migrate', doc.name, [title]), { název: title });
+    return { dryRun: false, ...check, document: created.documentId, published: Boolean(pub), removed, cdnLeft, url: legacy.url };
   },
 
   /** Документ этой карточки (с storedName) или 404. */

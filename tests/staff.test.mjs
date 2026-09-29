@@ -1343,3 +1343,103 @@ test('основное: дата ухода — только ушедшим, н�
   );
   assert.equal(S.normalizeBasic({ hiredAt: '2025-06-30' }, st.draft(P.olga), '2026-10-05').patch.hiredAt, '2025-06-30');
 });
+
+// ── s228: перенос старых сканов из медиатеки в закрытый каталог ─────────────
+test('legacySizeMatches / legacyTitle', () => {
+  assert.equal(S.legacySizeMatches(123405, 120.51), true); // 120.51 КБ = 123402 б
+  assert.equal(S.legacySizeMatches(123500, 120.51), false);
+  assert.equal(S.legacySizeMatches(0, 1), false);
+  assert.equal(S.legacySizeMatches(100, null), false);
+  assert.equal(S.legacyTitle('Pas  Veronika.PDF'), 'Pas Veronika');
+  assert.equal(S.legacyTitle('.pdf'), 'Jiný doklad');
+});
+
+test('перенос старого скана: проверка, копия в каталог, отвязка в обеих версиях, удаление из медиатеки; черновик-только не публикуется', async () => {
+  const st = makeStrapi();
+  const dir = path.join(tmpRoot, 'store-legacy');
+  fs.mkdirSync(dir, { mode: 0o700 });
+  process.env.STAFF_FILES_DIR = dir;
+  // файлы медиатеки: 301 — PDF (ImageKit), 302 — JPEG с провайдером local
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(123393, 5)]);
+  const jpg = Buffer.concat([JPG, Buffer.alloc(81920 - JPG.length, 2)]);
+  st.files.get(301).size = +(pdf.length / 1024).toFixed(2);
+  st.files.get(301).provider = 'imagekit';
+  st.files.get(302).size = 80;
+  st.files.get(302).provider = 'local';
+  for (const v of [st.draft(P.veronika), st.pub(P.veronika)]) {
+    v.oficial.documents = v.oficial.documents.map((f) => st.files.get(f.id));
+  }
+  const bodies = { 'https://ik.imagekit.io/x/pas.pdf': pdf, 'https://ik.imagekit.io/x/visa.jpg': jpg };
+  const fetched = [];
+  const fetchImpl = async (url) => {
+    fetched.push(url);
+    const b = bodies[url];
+    return b ? { ok: true, status: 200, arrayBuffer: async () => b } : { ok: false, status: 404 };
+  };
+  const run = (fileId, body = {}, session = OWNER, id = P.veronika) => svc.migrateLegacyFile({ session, id, fileId, body, fetchImpl });
+
+  await expectErr(() => run(999), 404, 'legacy_not_found');
+  await expectErr(() => run('abc'), 404, 'legacy_not_found');
+  await expectErr(() => run(301, {}, OWNER, P.yana), 404, 'legacy_not_found');
+
+  const dry = await run(301, { dryRun: true });
+  assert.deepEqual(dry, { dryRun: true, fileId: 301, fileName: 'pas.pdf', title: 'pas', mime: 'application/pdf', size: pdf.length });
+  assert.equal(fs.readdirSync(dir).length, 0, 'проверка ничего не пишет');
+  assert.equal(st.store['api::staff-document.staff-document'].length, 0);
+  assert.deepEqual(st.removed, []);
+
+  const r = await run(301, {}, MANAGER);
+  assert.equal(r.dryRun, false);
+  assert.equal(r.published, true);
+  assert.equal(r.removed, true);
+  assert.equal(r.cdnLeft, false);
+  const files = fs.readdirSync(dir);
+  assert.equal(files.length, 1);
+  assert.match(files[0], /^[0-9a-f]{32}$/);
+  assert.equal(fs.statSync(path.join(dir, files[0])).mode & 0o777, 0o600);
+  assert.ok(fs.readFileSync(path.join(dir, files[0])).equals(pdf), 'байты те же');
+  const rec = st.store['api::staff-document.staff-document'][0];
+  assert.deepEqual(
+    { kind: rec.kind, title: rec.title, fileName: rec.fileName, mime: rec.mime, size: rec.size, storedName: rec.storedName, uploadedBy: rec.uploadedBy, personal: rec.personal },
+    { kind: 'other', title: 'pas', fileName: 'pas.pdf', mime: 'application/pdf', size: pdf.length, storedName: files[0], uploadedBy: 'Mariia Medvedeva (перенос)', personal: { documentId: P.veronika } }
+  );
+  for (const v of [st.draft(P.veronika), st.pub(P.veronika)]) {
+    assert.equal(v.oficial.id, 71, 'компонент правится на месте');
+    assert.deepEqual(v.oficial.documents.map((f) => f.id), [302], 'остальные старые сканы на месте');
+    assert.equal(v.oficial.documentNumber, SECRET.documentNumber, 'личные данные не тронуты');
+  }
+  assert.deepEqual(st.removed, [301]);
+  assert.equal(st.logs.at(-1).summary, 'Dokument přenesen z knihovny médií: Veronika · pas');
+  assert.ok(!JSON.stringify(st.logs.at(-1)).includes(SECRET.documentNumber));
+  await expectErr(() => run(301), 404, 'legacy_not_found'); // повтор — уже перенесён
+
+  // размер не совпал — ничего не записано и не удалено
+  st.files.get(302).size = 81;
+  st.draft(P.veronika).oficial.documents = [st.files.get(302)];
+  await expectErr(() => run(302), 409, 'legacy_size_mismatch');
+  assert.equal(fs.readdirSync(dir).length, 1);
+  assert.deepEqual(st.removed, [301]);
+
+  // карточка без опубликованной версии: пишется только черновик, publish не зовётся; провайдер local — CDN-копия остаётся
+  st.files.get(302).size = 80;
+  st.draft(P.veronika).oficial.documents = [st.files.get(302)];
+  const pubIdx = st.store['api::personal.personal'].findIndex((x) => x.documentId === P.veronika && x.published);
+  st.store['api::personal.personal'].splice(pubIdx, 1);
+  const publishesBefore = st.calls.filter((c) => c[0] === 'publish').length;
+  const r2 = await run(302);
+  assert.equal(r2.published, false);
+  assert.equal(r2.cdnLeft, true, 'файл с провайдером local — копию в ImageKit удалять руками');
+  assert.equal(st.calls.filter((c) => c[0] === 'publish').length, publishesBefore, 'черновик-только не публикуется');
+  assert.ok(!st.pub(P.veronika), 'опубликованной версии как не было, так и нет');
+  assert.deepEqual(st.draft(P.veronika).oficial.documents, []);
+  assert.equal(st.store['api::staff-document.staff-document'].at(-1).mime, 'image/jpeg');
+
+  // сбой скачивания и неподдерживаемый тип
+  st.files.set(303, { id: 303, name: 'x.docx', mime: 'application/msword', size: 1, url: 'https://ik.imagekit.io/x/x.docx', provider: 'imagekit' });
+  st.files.set(304, { id: 304, name: 'gone.pdf', mime: 'application/pdf', size: 1, url: 'https://ik.imagekit.io/x/gone.pdf', provider: 'imagekit' });
+  bodies['https://ik.imagekit.io/x/x.docx'] = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(1020, 1)]);
+  st.draft(P.veronika).oficial.documents = [st.files.get(303), st.files.get(304)];
+  await expectErr(() => run(303), 409, 'bad_file_type');
+  await expectErr(() => run(304), 502, 'legacy_download_failed');
+  assert.deepEqual(st.draft(P.veronika).oficial.documents.map((f) => f.id), [303, 304], 'при ошибке карточка не тронута');
+});

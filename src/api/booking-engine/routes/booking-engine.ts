@@ -123,6 +123,7 @@ export default {
     admin('GET', '/engine/admin/staff/:id/leave', 'booking-engine.adminStaffLeavePreview'),
     admin('POST', '/engine/admin/staff/:id/leave', 'booking-engine.adminStaffLeave'),
     admin('POST', '/engine/admin/staff/:id/erase', 'booking-engine.adminStaffErase'),
+    admin('POST', '/engine/admin/staff/:id/legacy/:fileId/migrate', 'booking-engine.adminStaffLegacyMigrate'),
     admin('POST', '/engine/admin/blocks', 'booking-engine.adminCreateBlock'),
     admin('GET', '/engine/admin/blocks/pending', 'booking-engine.adminPendingBlocks'),
     admin('POST', '/engine/admin/blocks/:id/approval', 'booking-engine.adminSetBlockApproval'),

@@ -130,6 +130,7 @@ const CASES = [
   ['engine: сотрудники — завершить работу', engine.adminStaffLeave, ['owner', 'manager']],
   ['engine: сотрудники — стереть личные данные', engine.adminStaffErase, ['owner', 'manager']],
   ['engine: сотрудники — напоминания «Сегодня»', engine.adminStaffReminders, ['owner', 'manager']],
+  ['engine: сотрудники — перенос старого скана', engine.adminStaffLegacyMigrate, ['owner', 'manager']],
   ['engine: блок (админская ручка)', engine.adminCreateBlock, ['owner', 'manager', 'administrator']],
   // плановый график мастеров (s218): мастер сам себе ничего не меняет; администратор
   // смотрит и предлагает, шаблон / согласование / замена старых блоков — руководство
