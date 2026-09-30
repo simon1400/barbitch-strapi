@@ -957,6 +957,38 @@ export default {
     };
   },
 
+  // ── хук: смена состава услуг дозаписи пересчитывает неопубликованную комиссию ──
+  // Скидку клиенту движок пересчитывает от новой полной цены
+  // (_repriceDiscountOnServiceChange) — комиссия администратора считается от той же
+  // цены и идёт следом. Опубликованную (смена закрыта, деньги посчитаны) НЕ трогаем.
+  // Возвращает { from, to } либо null (комиссии нет / опубликована / сумма та же).
+  async repriceCommissionDraft(bookingDocId, fullPrice) {
+    if (!bookingDocId) return null;
+    const knex = strapi.db.connection;
+    const row = (await knex('bookings').select('discount').where('document_id', bookingDocId))[0];
+    const d = jsonObj(row?.discount);
+    const moneyId = d?.commission?.addMoneyDocId;
+    if (!d || d.source !== 'admin' || !d.applied || !moneyId) return null;
+    const percent = Number(d.commission.percent) || UPSELL_COMMISSION_PERCENT;
+    const to = Math.round(((Number(fullPrice) || 0) * percent) / 100);
+    const from = Number(d.commission.kc) || 0;
+    if (to === from) return null;
+    const versions = await knex('add_moneys').select('published_at').where('document_id', moneyId);
+    if (!versions.length) return null;
+    if (versions.some((v) => v.published_at)) {
+      strapi.log.info(`upsell: commission ${moneyId} of booking ${bookingDocId} already published — not repriced`);
+      return null;
+    }
+    await knex.transaction(async (trx) => {
+      await trx('add_moneys').where('document_id', moneyId).update({ sum: String(to), updated_at: new Date() });
+      await trx('bookings')
+        .where('document_id', bookingDocId)
+        .update({ discount: JSON.stringify({ ...d, commission: { ...d.commission, kc: to } }) });
+    });
+    strapi.log.info(`upsell: commission ${moneyId} of booking ${bookingDocId} repriced ${from} → ${to} Kč`);
+    return { from, to };
+  },
+
   // ── хуки: отмена/неявка/удаление дозаписи убирают неопубликованную комиссию ──
   // Опубликованную (смена уже закрыта, деньги посчитаны) НЕ трогаем.
   async dropCommissionDraft(bookingDocId) {

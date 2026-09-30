@@ -1472,6 +1472,18 @@ export default {
     }
     strapi.log.info(`booking-engine: admin ${session?.username || '?'} patched booking ${bookingDocId} ${JSON.stringify(Object.keys(patch))}`);
 
+    // смена услуги у админской дозаписи: комиссия администратору — от новой полной
+    // цены, как и скидка клиенту (ждём результат — он идёт в журнал календаря)
+    if (discountReprice?.kind === 'rebook' && booking.discount?.source === 'admin') {
+      try {
+        discountReprice.commission = await strapi
+          .service('api::booking-engine.upsell')
+          .repriceCommissionDraft(bookingDocId, discountReprice.fullPrice);
+      } catch (e) {
+        strapi.log.error(`upsell commission reprice on service change failed: ${e.message}`);
+      }
+    }
+
     // отмена админом: применённая скидка bitchcard возвращается клиенту
     // (fire-and-forget, за гейтом LOYALTY_ENABLED; noshow скидку НЕ возвращает —
     // спорные случаи админ решает вручную в /global/loyalty)
@@ -1635,6 +1647,9 @@ export default {
         };
         if (discountReprice) {
           logDetails['sleva'] = `${discountReprice.label}: −${fmtKcLog(discountReprice.discountKc)} (z ${fmtKcLog(discountReprice.fullPrice)})`;
+          if (discountReprice.commission) {
+            logDetails['provize'] = arrowLog(fmtKcLog(discountReprice.commission.from), fmtKcLog(discountReprice.commission.to));
+          }
         }
       } else {
         // «Dorazila» (arrived) не логируем; если в PATCH менялся ТОЛЬКО arrived —
