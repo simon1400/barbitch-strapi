@@ -23,6 +23,5 @@ export default {
     route('GET', '/cabinet/loyalty', 'client-cabinet.loyalty'),
     route('POST', '/cabinet/bookings/:id/redemption', 'client-cabinet.applyRedemption'),
     route('DELETE', '/cabinet/bookings/:id/redemption', 'client-cabinet.releaseRedemption'),
-    route('POST', '/cabinet/loyalty/voucher', 'client-cabinet.claimVoucher'),
   ],
 };

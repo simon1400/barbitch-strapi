@@ -29,7 +29,6 @@ const TX_UID = 'api::loyalty-transaction.loyalty-transaction';
 const REWARD_UID = 'api::reward.reward';
 const REDEMPTION_UID = 'api::redemption.redemption';
 const CLIENT_UID = 'api::client.client';
-const VOUCHER_UID = 'api::voucher.voucher';
 
 // Окно ежедневного начисления: брони за последние N дней (не только «вчера») —
 // ловит поздние чекауты (смену закрыли/перезакрыли через день-два). Идемпотентно.
@@ -55,6 +54,12 @@ const genCode = () =>
 
 // 31.12 cardYear 23:59:59 Praha (зимой UTC+1) → UTC ISO.
 const endOfCardYearIso = (year: number) => `${year}-12-31T22:59:59.000Z`;
+
+// Ступень программы = включённая награда-скидка. Бонус-ваучера 10000 (тип
+// voucher, s131) в программе нет (решение владельца s234): строка награды и
+// выданные по ней коды могли остаться в базе — их не показываем, не выдаём и
+// не применяем. Выключенную ступень (active=false) — тоже.
+const isTrackReward = (r) => !!r && r.active !== false && r.discountType !== 'voucher';
 
 const shiftDate = (dateStr: string, days: number) => {
   const d = new Date(`${dateStr}T12:00:00Z`);
@@ -86,32 +91,24 @@ export default {
   },
 
   // ── сид трека bitchcard 2026 ──
-  // Идемпотентно по thresholdKc: досоздаёт недостающие ступени, не дублируя
-  // существующие. Так 4-я награда (voucher 10000) добавится и на уже засиженном
-  // проде без миграции — пропущенные пороги просто дозаведутся при первом проходе.
-  // Награда C (решение владельца 2026-07-19): порог 10000 → бонус-ваучер 1000 Kč,
-  // тип voucher (в трек кабинета НЕ рисуется — отдаётся отдельным bonusReward,
-  // применяется через claimVoucherReward, а НЕ applyRedemptionToBooking).
+  // Только на ПУСТОЙ таблице наград. Раньше сид был идемпотентен по thresholdKc и
+  // зовётся каждым кроном → удалённая в панели ступень назавтра появлялась снова
+  // (так мог возвращаться «Dárkový voucher 1000 Kč (od 10 000 Kč)», s234). Ступени,
+  // которые уже есть, — дело владельца (/global/loyalty), сид их не трогает.
+  // Бонус-ваучера 10000 в программе нет (s234) — в сиде его нет.
   async ensureSeedRewards() {
     const seed = [
       { title: 'Sleva 20 %', thresholdKc: 3000, discountType: 'percent', discountValue: 20, order: 1 },
       { title: 'Sleva 400 Kč', thresholdKc: 5000, discountType: 'fixed', discountValue: 400, order: 2 },
       { title: 'Sleva 50 %', thresholdKc: 8000, discountType: 'percent', discountValue: 50, order: 3 },
-      { title: 'Dárkový voucher 1000 Kč', thresholdKc: 10000, discountType: 'voucher', discountValue: 1000, order: 4 },
     ];
-    const existing = await strapi.documents(REWARD_UID).findMany({
-      fields: ['thresholdKc'],
-      limit: 100,
-    });
-    const haveThresholds = new Set(existing.map((r) => Number(r.thresholdKc)));
-    let seeded = 0;
+    const existing = await strapi.documents(REWARD_UID).findMany({ fields: ['thresholdKc'], limit: 1 });
+    if (existing.length > 0) return { seeded: 0 };
     for (const r of seed) {
-      if (haveThresholds.has(r.thresholdKc)) continue;
       await strapi.documents(REWARD_UID).create({ data: { ...r, active: true } });
-      seeded++;
     }
-    if (seeded) strapi.log.info(`loyalty: seeded ${seeded} bitchcard reward(s)`);
-    return { seeded };
+    strapi.log.info(`loyalty: seeded ${seed.length} bitchcard reward(s)`);
+    return { seeded: seed.length };
   },
 
   // ── начисление ──
@@ -251,11 +248,13 @@ export default {
   // Уникальность client+reward+cardYear — каждая ступень раз в карточный год.
   async recomputeClientRewards(clientDocId: string, cardYear: number) {
     const balance = await this.balanceOf(clientDocId, cardYear);
-    const rewards = await strapi.documents(REWARD_UID).findMany({
-      filters: { active: { $eq: true } },
-      sort: 'thresholdKc:asc',
-      limit: 50,
-    });
+    const rewards = (
+      await strapi.documents(REWARD_UID).findMany({
+        filters: { active: { $eq: true } },
+        sort: 'thresholdKc:asc',
+        limit: 50,
+      })
+    ).filter(isTrackReward);
     let created = 0;
     let revoked = 0;
     for (const reward of rewards) {
@@ -301,9 +300,8 @@ export default {
     // нового порога нижние available гасятся. Именно status='used', НЕ delete —
     // удалённую этот же recompute тут же пересоздал бы (порог достигнут, награды
     // нет), а used считается существующей и в кабинете показывается «✓ Uplatněno»
-    // (та же механика, что разовый каскад s139 от 2026-07-22). Voucher-бонус
-    // (10000) в каскаде не участвует ни триггером, ни целью — сюрприз не трогаем.
-    const track = rewards.filter((r) => r.discountType !== 'voucher');
+    // (та же механика, что разовый каскад s139 от 2026-07-22).
+    const track = rewards;
     const reachedTiers = track.filter((r) => balance >= Number(r.thresholdKc));
     let cascaded = 0;
     if (reachedTiers.length > 0) {
@@ -340,7 +338,7 @@ export default {
 
   // ── применение награды к брони (К4) ──
 
-  // Скидка К БРОНИ клиента: percent → totalPrice×(1−v/100), fixed/voucher →
+  // Скидка К БРОНИ клиента: percent → totalPrice×(1−v/100), fixed →
   // max(0, totalPrice−v) — на ВЕСЬ чек визита (решение (г)/(д)). В одной
   // knex-транзакции: redemption available→used (условный UPDATE по текущему
   // статусу — защита от гонки/повтора) + totalPrice брони (priceOverride).
@@ -369,10 +367,9 @@ export default {
     if (!redemption || !redemption.reward) {
       throw new LoyaltyError(404, 'redemption_not_found', 'Kód slevy nenalezen');
     }
-    // Бонус-ваучер — не скидка на чек: его нельзя «уплатнить на бронь», только
-    // получить как подарочный voucher (claimVoucherReward).
-    if (redemption.reward.discountType === 'voucher') {
-      throw new LoyaltyError(409, 'voucher_not_applicable', 'Bonusový voucher nelze uplatnit na rezervaci');
+    // Бонус-ваучера в программе нет, выключенная ступень не действует (s234).
+    if (!isTrackReward(redemption.reward)) {
+      throw new LoyaltyError(409, 'redemption_unavailable', 'Tuto slevu nelze uplatnit');
     }
     if (redemption.status !== 'available') {
       throw new LoyaltyError(409, 'redemption_unavailable', 'Sleva už byla uplatněna nebo vypršela');
@@ -568,8 +565,10 @@ export default {
       sort: 'createdAt:asc',
       limit: 20,
     });
+    // available — только ступени программы: без этого шторка предлагала
+    // «Uplatnit slevu» на бонус-ваучер 10000 (s234). Применённую к брони — всегда.
     return rows
-      .filter((r) => r.reward)
+      .filter((r) => r.reward && (r.status !== 'available' || isTrackReward(r.reward)))
       .map((r) => ({
         documentId: r.documentId,
         status: r.status,
@@ -592,8 +591,6 @@ export default {
   // emailVerifiedAt тут нет намеренно — это информация для админа («до скидки
   // 400 Kč вам не хватает 400 — зарегистрируйтесь в кабинете»), сами available-
   // награды незарегистрированным по-прежнему не отдаются (redemptionsForAdmin).
-  // Voucher-ступень (бонус-сюрприз 10000) следующей наградой НЕ считается —
-  // как в треке кабинета (loyaltyForClient), чтобы не спойлерить сюрприз.
   async clientProgress(clientDocId) {
     const cardYear = Number(pragueDateOf(new Date()).slice(0, 4));
     const [balanceKc, rewards] = await Promise.all([
@@ -605,8 +602,7 @@ export default {
       }),
     ]);
     const next =
-      rewards.find((r) => r.discountType !== 'voucher' && Number(r.thresholdKc) > balanceKc) ||
-      null;
+      rewards.find((r) => isTrackReward(r) && Number(r.thresholdKc) > balanceKc) || null;
     return {
       cardYear,
       balanceKc,
@@ -618,98 +614,6 @@ export default {
           }
         : null,
     };
-  },
-
-  // ── награда C: получение бонусного подарочного ваучера (решение 2026-07-19) ──
-  // Клиент с available voucher-наградой «обналичивает» её в реальный voucher-запись
-  // (сразу оплаченную/активную, бесплатную — заработана). Себе (email из client)
-  // или в подарок (recipientName + recipientEmail). Генерация PDF/письма — на
-  // клиенте (кабинет зовёт /api/send-mail-voucher same-origin, как VoucherForm);
-  // здесь только атомарно гасим redemption и создаём voucher-запись.
-  //
-  // Порядок ради «no double-issue»: сначала условный UPDATE redemption→used
-  // (гонка/повтор → 409), потом create voucher. Если create упал — redemption
-  // возвращается в available (ничего не выдано → retry возможен). Сбой ПИСЬМА
-  // (уже на клиенте) redemption НЕ откатывает — voucher-запись существует.
-  async claimVoucherReward(clientDocId, { recipientName, recipientEmail } = {}) {
-    this.assertEnabled();
-    if (!clientDocId) throw new LoyaltyError(409, 'no_client', 'Chybí klient');
-
-    const rows = await strapi.documents(REDEMPTION_UID).findMany({
-      filters: {
-        client: { documentId: { $eq: clientDocId } },
-        status: { $eq: 'available' },
-      },
-      populate: { reward: true },
-      sort: 'createdAt:asc',
-      limit: 20,
-    });
-    const redemption = rows.find((r) => r.reward?.discountType === 'voucher');
-    if (!redemption) {
-      throw new LoyaltyError(409, 'no_voucher_reward', 'Nemáte k dispozici bonusový voucher');
-    }
-    if (redemption.expiresAt && new Date(redemption.expiresAt).getTime() < Date.now()) {
-      throw new LoyaltyError(409, 'redemption_unavailable', 'Platnost bonusu vypršela');
-    }
-
-    const client = await strapi.documents(CLIENT_UID).findOne({
-      documentId: clientDocId,
-      fields: ['name', 'email'],
-    });
-    const forName = String(recipientName || '').trim() || client?.name || 'Zákazník';
-    const email = String(recipientEmail || '').trim().toLowerCase() || String(client?.email || '').toLowerCase();
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
-      throw new LoyaltyError(400, 'invalid_email', 'Zadejte platný e-mail příjemce');
-    }
-    const sum = Number(redemption.reward.discountValue) || 1000;
-
-    const knex = strapi.db.connection;
-    const updated = await knex('redemptions')
-      .where({ document_id: redemption.documentId, status: 'available' })
-      .update({ status: 'used', updated_at: new Date() });
-    if (updated !== 1) {
-      throw new LoyaltyError(409, 'redemption_unavailable', 'Bonus už byl uplatněn');
-    }
-
-    const idVoucher = String(crypto.randomInt(10000000, 100000000));
-    let voucher;
-    try {
-      const today = pragueDateOf(new Date());
-      voucher = await strapi.documents(VOUCHER_UID).create({
-        data: {
-          name: client?.name || forName, // «покупатель» = клиент, заработавший бонус
-          for: forName,
-          sum,
-          dateOrder: today,
-          datePay: today, // бесплатный/заработан → уже оплачен
-          deliveryMethod: 'email',
-          idVoucher,
-          email,
-          commentAdmin: `bitchcard bonus ${redemption.reward.thresholdKc}`,
-        },
-      });
-    } catch (e) {
-      // ничего не выдано → вернуть награду в трек, чтобы клиент повторил
-      await knex('redemptions')
-        .where({ document_id: redemption.documentId, status: 'used' })
-        .update({ status: 'available', updated_at: new Date() });
-      strapi.log.error(
-        `loyalty: claimVoucher create failed, redemption ${redemption.code} released: ${e?.message || e}`
-      );
-      throw new LoyaltyError(500, 'voucher_create_failed', 'Voucher se nepodařilo vytvořit');
-    }
-    // публикуем запись (draft→published), чтобы ваучер был «активным» в системе;
-    // сбой публикации не критичен — черновик с datePay всё равно валиден
-    try {
-      await strapi.documents(VOUCHER_UID).publish({ documentId: voucher.documentId });
-    } catch (e) {
-      strapi.log.warn(`loyalty: voucher ${idVoucher} created as draft, publish failed: ${e?.message || e}`);
-    }
-
-    strapi.log.info(
-      `loyalty: voucher reward ${redemption.code} claimed by client ${clientDocId} → voucher ${idVoucher} (${sum} Kč) → ${email}`
-    );
-    return { idVoucher, sum, recipientName: forName, email };
   },
 
   // ── бонус за регистрацию (SIGNUP_BONUS_KC при первом входе; по умолч. 0 = выкл) ──
@@ -797,14 +701,7 @@ export default {
       redemptions.filter((r) => r.reward).map((r) => [r.reward.documentId, r])
     );
 
-    // Награда C (voucher) в обычный трек кабинета НЕ рисуется (иначе стала бы
-    // 4-й ступенью и сломала бы «сюрприз»). Отдаём её ОТДЕЛЬНЫМ полем bonusReward,
-    // видимым в UI только после закрытия карты (stamps>=8).
-    const trackRewards = rewards.filter((r) => r.discountType !== 'voucher');
-    const voucherReward = rewards.find((r) => r.discountType === 'voucher') || null;
-    const voucherRedemption = voucherReward
-      ? redemptionByReward.get(voucherReward.documentId) || null
-      : null;
+    const trackRewards = rewards.filter(isTrackReward);
 
     return {
       cardYear,
@@ -833,21 +730,9 @@ export default {
             : null,
         };
       }),
-      // Бонус-ваучер 1000 Kč: available = награда заработана и ещё не обналичена;
-      // claimed = уже получен (voucher создан); expired = сгорел 31.12.
-      // available гейтим и балансом (баланс мог упасть ниже порога до recompute).
-      bonusReward: voucherReward
-        ? {
-            thresholdKc: Number(voucherReward.thresholdKc),
-            value: Number(voucherReward.discountValue),
-            available:
-              voucherRedemption?.status === 'available' &&
-              balanceKc >= Number(voucherReward.thresholdKc),
-            claimed: voucherRedemption?.status === 'used',
-            expired: voucherRedemption?.status === 'expired',
-            expiresAt: voucherRedemption?.expiresAt || null,
-          }
-        : null,
+      // Бонус-ваучера в программе нет (s234); поле оставлено для старого
+      // кабинета — при null блок-сюрприз не рисуется.
+      bonusReward: null,
       transactions: transactions.map((t) => ({
         delta: Number(t.delta) || 0,
         reason: t.reason,
