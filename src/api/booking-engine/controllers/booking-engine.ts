@@ -49,6 +49,17 @@ const requireManagement = (ctx) => {
   return session;
 };
 
+// только владелец (s236): одобрение и отклонение запросов управляющей по затратам
+const requireOwner = (ctx) => {
+  const session = sessionFromCtx(ctx);
+  if (!session || session.role !== 'owner') {
+    ctx.status = 401;
+    ctx.body = { error: { status: 401, code: 'owner_only', message: 'Tuto akci může provést jen majitel' } };
+    return null;
+  }
+  return session;
+};
+
 // любой залогиненный сотрудник (owner/administrator/master) — для push-подписки
 const requireStaff = (ctx) => {
   const session = sessionFromCtx(ctx);
@@ -71,6 +82,7 @@ const scheduleSvc = () => strapi.service('api::booking-engine.master-schedule');
 const birthdaysSvc = () => strapi.service('api::booking-engine.birthdays');
 const staffSvc = () => strapi.service('api::booking-engine.staff');
 const myMonthSvc = () => strapi.service('api::booking-engine.my-month');
+const costsSvc = () => strapi.service('api::booking-engine.costs');
 
 // personal.documentId сотрудника сессии: по связи учётки, без связи — по имени (s229, §5а.1)
 const resolveSessionPersonalDocId = async (session) =>
@@ -654,6 +666,73 @@ export default {
     await handle(ctx, () =>
       correctionsSvc().remove({ session, kind: ctx.params.kind, documentId: ctx.params.id })
     );
+  },
+
+  // Затраты салона (s236): список, автодополнение, запись — руководство; правка и
+  // удаление — владелец сразу, управляющая через запрос (сервис отвечает 403
+  // approval_required); одобрение и отклонение запросов — только владелец
+  // GET /api/engine/admin/costs?month=YYYY-MM
+  async adminCostsList(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => costsSvc().list({ session, month: ctx.query?.month }));
+  },
+
+  // GET /api/engine/admin/costs/suggest — названия за 12 месяцев
+  async adminCostsSuggest(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => costsSvc().suggest());
+  },
+
+  // POST /api/engine/admin/costs {date, name, category, sum, noDph, payment, comment?}
+  async adminCostCreate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => costsSvc().create({ session, body: ctx.request.body }));
+  },
+
+  // PATCH /api/engine/admin/costs/:id — владелец
+  async adminCostUpdate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => costsSvc().update({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // DELETE /api/engine/admin/costs/:id — владелец, навсегда
+  async adminCostDelete(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => costsSvc().remove({ session, id: ctx.params.id }));
+  },
+
+  // POST /api/engine/admin/costs/:id/requests {action: edit|delete, changes?} — управляющая
+  async adminCostRequest(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => costsSvc().request({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // DELETE /api/engine/admin/costs/requests/:rid — отозвать свой запрос
+  async adminCostRequestCancel(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => costsSvc().cancelRequest({ session, rid: ctx.params.rid }));
+  },
+
+  // POST /api/engine/admin/costs/requests/:rid/approve
+  async adminCostRequestApprove(ctx) {
+    const session = requireOwner(ctx);
+    if (!session) return;
+    await handle(ctx, () => costsSvc().approve({ session, rid: ctx.params.rid }));
+  },
+
+  // POST /api/engine/admin/costs/requests/:rid/reject {note?}
+  async adminCostRequestReject(ctx) {
+    const session = requireOwner(ctx);
+    if (!session) return;
+    await handle(ctx, () => costsSvc().reject({ session, rid: ctx.params.rid, body: ctx.request.body }));
   },
 
   // Отпуска / больничные (s216): запись + серия блоков мастеру — руководство

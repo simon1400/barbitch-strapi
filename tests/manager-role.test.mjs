@@ -103,6 +103,18 @@ const CASES = [
   ['engine: корректировки — список', engine.adminCorrectionsList, ['owner', 'manager']],
   ['engine: корректировки — создать', engine.adminCorrectionCreate, ['owner', 'manager']],
   ['engine: корректировки — удалить', engine.adminCorrectionDelete, ['owner', 'manager']],
+  // затраты (s236): руководство; администратору и мастеру — ничего (решение владельца);
+  // правка/удаление гейтом — руководство, управляющей сервис отвечает 403 approval_required;
+  // одобрение и отклонение запросов — только владелец
+  ['engine: затраты — месяц', engine.adminCostsList, ['owner', 'manager']],
+  ['engine: затраты — автодополнение', engine.adminCostsSuggest, ['owner', 'manager']],
+  ['engine: затраты — добавить', engine.adminCostCreate, ['owner', 'manager']],
+  ['engine: затраты — изменить', engine.adminCostUpdate, ['owner', 'manager']],
+  ['engine: затраты — удалить', engine.adminCostDelete, ['owner', 'manager']],
+  ['engine: затраты — запрос', engine.adminCostRequest, ['owner', 'manager']],
+  ['engine: затраты — отозвать запрос', engine.adminCostRequestCancel, ['owner', 'manager']],
+  ['engine: затраты — одобрить запрос', engine.adminCostRequestApprove, ['owner']],
+  ['engine: затраты — отклонить запрос', engine.adminCostRequestReject, ['owner']],
   ['engine: отпуска — брони на эти дни', engine.adminTimeOffConflicts, ['owner', 'manager']],
   ['engine: отпуска — создать', engine.adminTimeOffCreate, ['owner', 'manager']],
   ['engine: отпуска — изменить', engine.adminTimeOffUpdate, ['owner', 'manager']],
@@ -265,6 +277,53 @@ test('admin-session: блоки, часы салона и план — толь�
   assert.equal((await runMw('master', 'POST', '/api/engine/admin/blocks')).passed, true);
   // панель Strapi не трогается вообще
   assert.equal((await runMw('master', 'POST', '/admin/content-manager/collection-types/api::time-block.time-block')).passed, true);
+});
+
+// ── s236: затраты — запись только ручками движка; администратору costs и журнал закрыты ──
+test('admin-session: costs — только чтение для всех ролей сотрудников', async () => {
+  for (const role of ['owner', 'manager', 'administrator', 'master']) {
+    for (const [method, p] of [['POST', '/api/costs'], ['PUT', '/api/costs/abc'], ['DELETE', '/api/costs/abc'], ['PATCH', '/API/Costs/abc']]) {
+      const r = await runMw(role, method, p);
+      assert.equal(r.passed, false, `${role} ${method} ${p} прошёл`);
+      assert.equal(r.status, 403);
+    }
+  }
+  for (const role of ['owner', 'manager']) {
+    assert.equal((await runMw(role, 'GET', '/api/costs')).passed, true, `${role} GET costs`);
+    assert.equal((await runMw(role, 'POST', '/api/costs')).code, 'engine_only');
+    assert.equal((await runMw(role, 'GET', '/api/calendar-logs')).passed, true, `${role} GET calendar-logs`);
+    // журнал руководство по-прежнему чистит из модалки
+    assert.equal((await runMw(role, 'DELETE', '/api/calendar-logs/abc')).passed, true, `${role} DELETE calendar-logs`);
+  }
+  // ручки движка не задеты — у них свой гейт
+  for (const role of ['owner', 'manager', 'administrator', 'master']) {
+    assert.equal((await runMw(role, 'POST', '/api/engine/admin/costs')).passed, true);
+  }
+  // панель Strapi не трогается
+  assert.equal((await runMw('owner', 'POST', '/admin/content-manager/collection-types/api::cost.cost')).passed, true);
+});
+
+test('admin-session: администратору costs и calendar-logs закрыты целиком (чтение тоже)', async () => {
+  for (const [method, p] of [
+    ['GET', '/api/costs'],
+    ['GET', '/api/costs?filters[date][$gte]=2026-10-01'],
+    ['GET', '/API/COSTS'],
+    ['GET', '/api/calendar-logs'],
+    ['GET', '/api/calendar-logs/abc'],
+    ['DELETE', '/api/calendar-logs/abc'],
+    ['POST', '/api/calendar-logs'],
+    ['GET', '/api/Calendar-Logs'],
+  ]) {
+    const r = await runMw('administrator', method, p);
+    assert.equal(r.passed, false, `administrator ${method} ${p} прошёл`);
+    assert.equal(r.status, 403);
+    assert.equal(r.code, 'forbidden_for_administrator', p);
+  }
+  // мастеру оба закрыты белым списком (s229) — проверяет master-scope.test.mjs
+  // остальное администратору как было: брони (график кабинета), смены, блоки
+  for (const p of ['/api/bookings', '/api/shifts', '/api/time-blocks', '/api/cost-requests-x']) {
+    assert.equal((await runMw('administrator', 'GET', p)).passed, true, p);
+  }
 });
 
 // ── s221: паспортные данные сотрудников (personal.oficial) закрыты любой сессии ──

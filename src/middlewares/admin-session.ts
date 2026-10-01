@@ -174,6 +174,23 @@ const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 export const deniedWriteForStaff = (path: string, method: string): boolean =>
   STAFF_READ_ONLY.has(collectionOf(path)) && !READ_METHODS.has(String(method || 'GET').toUpperCase());
 
+// 🟥 Затраты (s236, план EXPENSES §3.7). Админка пишет затраты только ручками движка
+// (`/api/engine/admin/costs`): там белый список полей, автор, журнал и одобрение
+// владельцем правок управляющей. Прямой REST `POST/PUT/DELETE /api/costs` обходил всё
+// это, а администратор (full-access токен) мог так завести или стереть любую затрату.
+//   1. `costs` — только чтение для ЛЮБОЙ сессии сотрудника (итоги месяца читают REST).
+//   2. Роль ADMINISTRATOR: `costs` и журнал `calendar-logs` закрыты целиком, чтение тоже
+//      (решение владельца: затраты администраторам не показывать). Кабинет администратора
+//      больше не грузит данные месяца — график «Записи» берёт брони напрямую.
+// Мастеру оба уже закрыты белым списком (s229). Панель Strapi (/admin/**) не задета.
+const ENGINE_WRITE_ONLY = new Set(['costs']);
+export const ADMINISTRATOR_DENIED = new Set(['costs', 'calendar-logs']);
+
+export const deniedCostWrite = (path: string, method: string): boolean =>
+  ENGINE_WRITE_ONLY.has(collectionOf(path)) && !READ_METHODS.has(String(method || 'GET').toUpperCase());
+
+export const deniedForAdministrator = (path: string): boolean => ADMINISTRATOR_DENIED.has(collectionOf(path));
+
 // 🟥 Паспортные данные сотрудников закрыты ЛЮБОЙ сессии сотрудника (s221).
 //
 // Компонент `personal.oficial` — номер документа, адреса, дата рождения, телефон,
@@ -386,6 +403,20 @@ export default (_config: unknown, { strapi }: { strapi: any }) => {
               code: 'engine_only',
               message: 'Změny bloků jen přes kalendář nebo plán směn',
             },
+          };
+          return;
+        }
+        if (session.role === 'administrator' && deniedForAdministrator(path)) {
+          ctx.status = 403;
+          ctx.body = {
+            error: { status: 403, code: 'forbidden_for_administrator', message: 'Tato data jsou dostupná jen vedení salonu' },
+          };
+          return;
+        }
+        if (deniedCostWrite(path, ctx.request?.method || ctx.method)) {
+          ctx.status = 403;
+          ctx.body = {
+            error: { status: 403, code: 'engine_only', message: 'Náklady se mění jen v administraci (modul Náklady)' },
           };
           return;
         }

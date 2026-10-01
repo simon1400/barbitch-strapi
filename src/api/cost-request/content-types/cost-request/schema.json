@@ -1,0 +1,55 @@
+{
+  "kind": "collectionType",
+  "collectionName": "cost_requests",
+  "info": {
+    "singularName": "cost-request",
+    "pluralName": "cost-requests",
+    "displayName": "Затраты — запрос на правку",
+    "description": "Запрос управляющей на правку или удаление затраты; применяет владелец (s236). REST-роутов нет: только ручки /engine/admin/costs"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "costDocId": {
+      "type": "string"
+    },
+    "action": {
+      "type": "enumeration",
+      "enum": ["edit", "delete", "file_delete"]
+    },
+    "changes": {
+      "type": "json"
+    },
+    "fileId": {
+      "type": "string"
+    },
+    "before": {
+      "type": "json"
+    },
+    "baseUpdatedAt": {
+      "type": "datetime"
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["pending", "approved", "rejected", "cancelled"],
+      "default": "pending"
+    },
+    "requestedBy": {
+      "type": "string"
+    },
+    "requestedById": {
+      "type": "integer"
+    },
+    "decidedBy": {
+      "type": "string"
+    },
+    "decidedAt": {
+      "type": "datetime"
+    },
+    "decisionNote": {
+      "type": "text"
+    }
+  }
+}

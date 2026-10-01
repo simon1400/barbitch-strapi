@@ -86,6 +86,16 @@ export default {
     admin('GET', '/engine/admin/corrections', 'booking-engine.adminCorrectionsList'),
     admin('POST', '/engine/admin/corrections', 'booking-engine.adminCorrectionCreate'),
     admin('DELETE', '/engine/admin/corrections/:kind/:id', 'booking-engine.adminCorrectionDelete'),
+    // Затраты салона (s236): руководство; правка/удаление — владелец, управляющая — запросом
+    admin('GET', '/engine/admin/costs', 'booking-engine.adminCostsList'),
+    admin('GET', '/engine/admin/costs/suggest', 'booking-engine.adminCostsSuggest'),
+    admin('POST', '/engine/admin/costs', 'booking-engine.adminCostCreate'),
+    admin('PATCH', '/engine/admin/costs/:id', 'booking-engine.adminCostUpdate'),
+    admin('DELETE', '/engine/admin/costs/:id', 'booking-engine.adminCostDelete'),
+    admin('POST', '/engine/admin/costs/:id/requests', 'booking-engine.adminCostRequest'),
+    admin('DELETE', '/engine/admin/costs/requests/:rid', 'booking-engine.adminCostRequestCancel'),
+    admin('POST', '/engine/admin/costs/requests/:rid/approve', 'booking-engine.adminCostRequestApprove'),
+    admin('POST', '/engine/admin/costs/requests/:rid/reject', 'booking-engine.adminCostRequestReject'),
     // Отпуска / больничные + автоблоки мастеру (s216) — только руководство
     admin('GET', '/engine/admin/time-offs/conflicts', 'booking-engine.adminTimeOffConflicts'),
     admin('POST', '/engine/admin/time-offs', 'booking-engine.adminTimeOffCreate'),

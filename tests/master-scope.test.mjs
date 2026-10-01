@@ -123,8 +123,12 @@ test('мастеру: денежные и прочие коллекции — 40
 
 test('остальным ролям белый список не мешает', async () => {
   for (const role of ['owner', 'manager', 'administrator']) {
-    for (const c of ['penalties', 'add-moneys', 'payrolls', 'services-provided', 'vouchers', 'costs']) {
+    for (const c of ['penalties', 'add-moneys', 'payrolls', 'services-provided', 'vouchers']) {
       assert.equal((await run(role, 'GET', `/api/${c}`)).passed, true, `${role} ${c}`);
+    }
+    // s236: затраты и журнал администратору закрыты (решение владельца), руководству — открыты
+    for (const c of ['costs', 'calendar-logs']) {
+      assert.equal((await run(role, 'GET', `/api/${c}`)).passed, role !== 'administrator', `${role} ${c}`);
     }
   }
   // без сессии (сайт) — не наше дело

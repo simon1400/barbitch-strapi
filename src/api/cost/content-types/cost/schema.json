@@ -46,6 +46,18 @@
         "Оптовые закупки",
         "Другое"
       ]
+    },
+    "payment": {
+      "type": "enumeration",
+      "enum": [
+        "card",
+        "cash",
+        "transfer",
+        "owner"
+      ]
+    },
+    "author": {
+      "type": "string"
     }
   }
 }

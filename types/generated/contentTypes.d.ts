@@ -1470,6 +1470,49 @@ export interface ApiContactContact extends Struct.SingleTypeSchema {
   };
 }
 
+export interface ApiCostRequestCostRequest extends Struct.CollectionTypeSchema {
+  collectionName: 'cost_requests';
+  info: {
+    description: '\u0417\u0430\u043F\u0440\u043E\u0441 \u0443\u043F\u0440\u0430\u0432\u043B\u044F\u044E\u0449\u0435\u0439 \u043D\u0430 \u043F\u0440\u0430\u0432\u043A\u0443 \u0438\u043B\u0438 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0435 \u0437\u0430\u0442\u0440\u0430\u0442\u044B; \u043F\u0440\u0438\u043C\u0435\u043D\u044F\u0435\u0442 \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446 (s236). REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/costs';
+    displayName: '\u0417\u0430\u0442\u0440\u0430\u0442\u044B \u2014 \u0437\u0430\u043F\u0440\u043E\u0441 \u043D\u0430 \u043F\u0440\u0430\u0432\u043A\u0443';
+    pluralName: 'cost-requests';
+    singularName: 'cost-request';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    action: Schema.Attribute.Enumeration<['edit', 'delete', 'file_delete']>;
+    baseUpdatedAt: Schema.Attribute.DateTime;
+    before: Schema.Attribute.JSON;
+    changes: Schema.Attribute.JSON;
+    costDocId: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    decidedAt: Schema.Attribute.DateTime;
+    decidedBy: Schema.Attribute.String;
+    decisionNote: Schema.Attribute.Text;
+    fileId: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::cost-request.cost-request'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    requestedBy: Schema.Attribute.String;
+    requestedById: Schema.Attribute.Integer;
+    status: Schema.Attribute.Enumeration<
+      ['pending', 'approved', 'rejected', 'cancelled']
+    > &
+      Schema.Attribute.DefaultTo<'pending'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiCostCost extends Struct.CollectionTypeSchema {
   collectionName: 'costs';
   info: {
@@ -1482,6 +1525,7 @@ export interface ApiCostCost extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    author: Schema.Attribute.String;
     category: Schema.Attribute.Enumeration<
       [
         '\u041C\u0430\u0440\u043A\u0435\u0442\u0438\u043D\u0433',
@@ -1507,6 +1551,9 @@ export interface ApiCostCost extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     noDph: Schema.Attribute.BigInteger & Schema.Attribute.Required;
+    payment: Schema.Attribute.Enumeration<
+      ['card', 'cash', 'transfer', 'owner']
+    >;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
@@ -3712,6 +3759,7 @@ declare module '@strapi/strapi' {
       'api::client.client': ApiClientClient;
       'api::comeback-reminder-log.comeback-reminder-log': ApiComebackReminderLogComebackReminderLog;
       'api::contact.contact': ApiContactContact;
+      'api::cost-request.cost-request': ApiCostRequestCostRequest;
       'api::cost.cost': ApiCostCost;
       'api::email-campaign-log.email-campaign-log': ApiEmailCampaignLogEmailCampaignLog;
       'api::extra-profit.extra-profit': ApiExtraProfitExtraProfit;
