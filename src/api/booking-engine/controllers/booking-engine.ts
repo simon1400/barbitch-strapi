@@ -735,6 +735,58 @@ export default {
     await handle(ctx, () => costsSvc().reject({ session, rid: ctx.params.rid, body: ctx.request.body }));
   },
 
+  // Фаза 2 (s237). GET /api/engine/admin/costs/recurring?month=YYYY-MM — записи прошлого месяца к повтору
+  async adminCostsRecurring(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => costsSvc().recurring({ month: ctx.query?.month }));
+  },
+
+  // POST /api/engine/admin/costs/batch {items: [...]} — всё или ничего
+  async adminCostsBatch(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => costsSvc().batch({ session, body: ctx.request.body }));
+  },
+
+  // GET /api/engine/admin/costs/attention — «Сегодня»: запросы (владельцу), не внесённые постоянные
+  async adminCostsAttention(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => costsSvc().attention({ session }));
+  },
+
+  // POST /api/engine/admin/costs/:id/files — multipart: files (один файл)
+  async adminCostFileUpload(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => costsSvc().uploadFile({ session, id: ctx.params.id, files: ctx.request.files }));
+  },
+
+  // GET /api/engine/admin/costs/:id/files/:fid — чек потоком (не кэшировать)
+  async adminCostFileDownload(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const f = await costsSvc().downloadFile({ id: ctx.params.id, fid: ctx.params.fid });
+      ctx.set('Content-Type', f.mime);
+      ctx.set('Content-Length', String(f.size));
+      ctx.set('Content-Disposition', f.disposition);
+      ctx.set('Cache-Control', 'private, no-store');
+      ctx.set('X-Content-Type-Options', 'nosniff');
+      return f.stream;
+    });
+  },
+
+  // DELETE /api/engine/admin/costs/:id/files/:fid — владелец; управляющая — запросом file_delete
+  async adminCostFileDelete(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => costsSvc().deleteFile({ session, id: ctx.params.id, fid: ctx.params.fid }));
+  },
+
   // Отпуска / больничные (s216): запись + серия блоков мастеру — руководство
   // GET /api/engine/admin/time-offs/conflicts?personal=&startDate=&endDate= — брони мастера на эти дни
   async adminTimeOffConflicts(ctx) {

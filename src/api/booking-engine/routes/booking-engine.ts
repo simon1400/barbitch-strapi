@@ -96,6 +96,13 @@ export default {
     admin('DELETE', '/engine/admin/costs/requests/:rid', 'booking-engine.adminCostRequestCancel'),
     admin('POST', '/engine/admin/costs/requests/:rid/approve', 'booking-engine.adminCostRequestApprove'),
     admin('POST', '/engine/admin/costs/requests/:rid/reject', 'booking-engine.adminCostRequestReject'),
+    // Фаза 2 (s237): повтор прошлого месяца, сигналы «Сегодня», чеки (закрытый каталог)
+    admin('GET', '/engine/admin/costs/recurring', 'booking-engine.adminCostsRecurring'),
+    admin('POST', '/engine/admin/costs/batch', 'booking-engine.adminCostsBatch'),
+    admin('GET', '/engine/admin/costs/attention', 'booking-engine.adminCostsAttention'),
+    admin('POST', '/engine/admin/costs/:id/files', 'booking-engine.adminCostFileUpload'),
+    admin('GET', '/engine/admin/costs/:id/files/:fid', 'booking-engine.adminCostFileDownload'),
+    admin('DELETE', '/engine/admin/costs/:id/files/:fid', 'booking-engine.adminCostFileDelete'),
     // Отпуска / больничные + автоблоки мастеру (s216) — только руководство
     admin('GET', '/engine/admin/time-offs/conflicts', 'booking-engine.adminTimeOffConflicts'),
     admin('POST', '/engine/admin/time-offs', 'booking-engine.adminTimeOffCreate'),

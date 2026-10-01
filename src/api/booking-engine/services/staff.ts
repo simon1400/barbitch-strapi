@@ -36,11 +36,21 @@
  */
 
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
 import bcrypt from 'bcryptjs';
 import { invalidateAdminAccount } from '../../../utils/admin-account';
 import { findSessionPersonal } from '../../../utils/staff-identity';
+import {
+  MAX_FILE_BYTES,
+  STORED_NAME,
+  contentDisposition,
+  detectFile,
+  openPrivateFile,
+  privateDir,
+  readHead,
+  removePrivateFile,
+  safeFileName,
+  storePrivateFile,
+} from '../../../utils/private-files';
 import { minToHHMM, pragueDateOf, pragueMinOf } from './slots-core';
 
 const PERSONAL_UID = 'api::personal.personal';
@@ -101,8 +111,8 @@ export const CORE_PRIVATE_KEYS = PRIVATE_KEYS.filter((k) => PRIVATE_FIELDS[k].co
 export const MAX_TEXT = 200;
 export const MAX_TITLE = 120;
 export const MAX_NOTE = 2000;
-export const MAX_FILE_NAME = 150;
-export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+// файлы — общие помощники закрытого хранилища (s237, utils/private-files.ts)
+export { MAX_FILE_BYTES, MAX_FILE_NAME, contentDisposition, detectFile, safeFileName } from '../../../utils/private-files';
 export const RATE_MAX = 1_000_000;
 export const HOURLY_MAX = 10_000;
 export const THRESHOLD_MAX = 1_000_000;
@@ -121,7 +131,6 @@ export const ERASE_AFTER_YEARS = 3;
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const DMY = /^\s*(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{4})\s*$/;
 const DOC_ID = /^[a-z0-9]{10,40}$/;
-const STORED_NAME = /^[a-f0-9]{32}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const PHONE = /^\+\d{8,15}$/;
 
@@ -783,39 +792,6 @@ export const normalizeChecklistItem = (data: any, { create = false } = {}) => {
   }
   if (keys.includes('order')) out.order = intIn(data.order, 0, 10_000, 'bad_order', 'Порядок');
   return out;
-};
-
-/** Тип файла по сигнатуре (не по расширению и не по заголовку браузера). */
-export const detectFile = (head: Buffer | Uint8Array) => {
-  const b = Buffer.from(head || []);
-  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return { mime: 'image/jpeg', ext: 'jpg', image: true };
-  if (b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
-    return { mime: 'image/png', ext: 'png', image: true };
-  }
-  if (b.length >= 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') {
-    return { mime: 'image/webp', ext: 'webp', image: true };
-  }
-  if (b.length >= 5 && b.toString('latin1', 0, 5) === '%PDF-') return { mime: 'application/pdf', ext: 'pdf', image: false };
-  return null;
-};
-
-/** Имя файла для показа: без пути и управляющих символов, с нормальной длиной. */
-export const safeFileName = (raw: unknown, ext = ''): string => {
-  let s = String(raw ?? '').split(/[\\/]/).pop() || '';
-  s = s.replace(/[\u0000-\u001f\u007f"<>|*?:]/g, '').replace(/\s+/g, ' ').trim();
-  if (!s || /^\.+$/.test(s)) s = ext ? `dokument.${ext}` : 'dokument';
-  if (s.length > MAX_FILE_NAME) {
-    const dot = s.lastIndexOf('.');
-    const tail = dot > 0 && s.length - dot <= 6 ? s.slice(dot) : '';
-    s = s.slice(0, MAX_FILE_NAME - tail.length) + tail;
-  }
-  return s;
-};
-
-/** Content-Disposition с именем в UTF-8 (чешские и русские буквы). */
-export const contentDisposition = (name: string): string => {
-  const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
-  return `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 };
 
 /** Метаданные документа: тип, название, «действует до». create — значения по умолчанию. */
@@ -1867,28 +1843,9 @@ export default {
 
   /** Закрытый каталог сканов (вне репозитория и public/). Без env — загрузка выключена. */
   async _storageDir() {
-    const dir = String(process.env.STAFF_FILES_DIR || '').trim();
-    if (!dir || !path.isAbsolute(dir)) {
-      throw new StaffError(503, 'storage_not_configured', 'Хранилище документов на сервере не настроено');
-    }
-    await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 });
-    // каталог на проде создаётся руками (шаг деплоя) — mode у mkdir его не касается
-    const st = await fs.promises.stat(dir);
-    if (st.mode & 0o077) {
-      await fs.promises.chmod(dir, 0o700).catch((e) => strapi.log.warn(`staff: права каталога ${dir} не поджаты: ${e.message}`));
-    }
+    const dir = await privateDir(process.env.STAFF_FILES_DIR, 'staff');
+    if (!dir) throw new StaffError(503, 'storage_not_configured', 'Хранилище документов на сервере не настроено');
     return dir;
-  },
-
-  async _readHead(filepath: string) {
-    const fh = await fs.promises.open(filepath, 'r');
-    try {
-      const buf = Buffer.alloc(16);
-      const { bytesRead } = await fh.read(buf, 0, 16, 0);
-      return buf.subarray(0, bytesRead);
-    } finally {
-      await fh.close();
-    }
   },
 
   /**
@@ -1906,7 +1863,7 @@ export default {
     if (size <= 0) throw new StaffError(400, 'file_empty', 'Файл пустой');
     if (size > MAX_FILE_BYTES) throw new StaffError(413, 'file_too_big', 'Файл больше 10 МБ');
     const { doc } = await this._card(session, id);
-    const type = detectFile(await this._readHead(file.filepath));
+    const type = detectFile(await readHead(file.filepath));
     if (!type) throw new StaffError(400, 'bad_file_type', 'Поддерживаются JPG, PNG, WEBP и PDF');
     const documentId = doc.documentId;
 
@@ -1926,19 +1883,14 @@ export default {
     const fileName = safeFileName(file.originalFilename, type.ext);
     const meta = normalizeDocMeta(body, { create: true, fileName });
     const dir = await this._storageDir();
-    const storedName = crypto.randomBytes(16).toString('hex');
-    const full = path.join(dir, storedName);
-    const part = `${full}.part`;
-    await fs.promises.copyFile(file.filepath, part);
-    await fs.promises.chmod(part, 0o600);
-    await fs.promises.rename(part, full);
+    const { storedName } = await storePrivateFile(dir, file.filepath);
     let created;
     try {
       created = await strapi.documents(DOC_UID).create({
         data: { personal: documentId, ...meta, fileName, mime: type.mime, size, storedName, uploadedBy: session?.username || '' },
       });
     } catch (e) {
-      await fs.promises.unlink(full).catch(() => {});
+      await removePrivateFile(dir, storedName, `staff: скан ${storedName}`);
       throw e;
     }
     this._log('staff_file_add', session, documentId, logSummary('file_add', doc.name, [DOC_KINDS[meta.kind], meta.title]), {
@@ -1967,12 +1919,11 @@ export default {
   async download({ session, id, fileId }: { session: any; id: unknown; fileId: unknown }) {
     const { file } = await this._docOf(session, id, fileId);
     if (!STORED_NAME.test(String(file.storedName ?? ''))) throw new StaffError(404, 'file_not_found', 'Документ не найден');
-    const full = path.join(await this._storageDir(), file.storedName);
-    const stat = await fs.promises.stat(full).catch(() => null);
-    if (!stat?.isFile()) throw new StaffError(404, 'file_missing', 'Файл документа на сервере не найден');
+    const opened = await openPrivateFile(await this._storageDir(), file.storedName);
+    if (!opened) throw new StaffError(404, 'file_missing', 'Файл документа на сервере не найден');
     return {
-      stream: fs.createReadStream(full),
-      size: stat.size,
+      stream: opened.stream,
+      size: opened.size,
       mime: file.mime || 'application/octet-stream',
       fileName: safeFileName(file.fileName),
       disposition: contentDisposition(safeFileName(file.fileName)),
@@ -2002,11 +1953,7 @@ export default {
     await strapi.documents(DOC_UID).delete({ documentId: file.documentId });
     if (STORED_NAME.test(String(file.storedName ?? ''))) {
       const dir = await this._storageDir().catch(() => null);
-      if (dir) {
-        await fs.promises.unlink(path.join(dir, file.storedName)).catch((e) => {
-          if (e?.code !== 'ENOENT') strapi.log.error(`staff: файл ${file.documentId} не удалён с диска: ${e.message}`);
-        });
-      }
+      await removePrivateFile(dir, file.storedName, `staff: файл ${file.documentId}`);
     }
     this._log('staff_file_delete', session, doc.documentId, logSummary('file_delete', doc.name, [DOC_KINDS[file.kind] || '—', file.title || '']));
     return { deleted: file.documentId };
@@ -2348,11 +2295,7 @@ export default {
     const dir = files.length ? await this._storageDir().catch(() => null) : null;
     for (const f of files) {
       await strapi.documents(DOC_UID).delete({ documentId: f.documentId });
-      if (dir && STORED_NAME.test(String(f.storedName ?? ''))) {
-        await fs.promises.unlink(path.join(dir, f.storedName)).catch((e) => {
-          if (e?.code !== 'ENOENT') strapi.log.error(`staff: скан ${f.documentId} не удалён с диска: ${e.message}`);
-        });
-      }
+      await removePrivateFile(dir, f.storedName, `staff: скан ${f.documentId}`);
     }
     for (const n of notes) await strapi.documents(NOTE_UID).delete({ documentId: n.documentId });
     this._log('staff_erase', session, documentId, logSummary('erase', doc.name));

@@ -30,8 +30,8 @@ for (const [from, to] of [
   ["from '../../../utils/staff-identity'", `from '${dataUrl(toJs('src/utils/staff-identity.ts'))}'`],
   ["from './slots-core'", `from '${dataUrl(toJs('src/api/booking-engine/services/slots-core.ts'))}'`],
   ["from 'crypto'", "from 'node:crypto'"],
-  ["from 'fs'", "from 'node:fs'"],
-  ["from 'path'", "from 'node:path'"],
+  // s237: файлы — общие помощники закрытого хранилища
+  ["from '../../../utils/private-files'", `from '${dataUrl(toJs('src/utils/private-files.ts'))}'`],
   ["from 'bcryptjs'", `from '${pathToFileURL(require.resolve('bcryptjs')).href}'`],
 ]) {
   assert.ok(svcJs.includes(from), `импорт ${from} не найден`);

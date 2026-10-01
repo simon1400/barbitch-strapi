@@ -7,6 +7,8 @@
 // 🟥 Чат дайджеста читают и администраторы: документы — только имя, тип и срок
 // (номеров и сканов нет), договоры — имя, тип и дата (без IČO, фаза 2 карточки),
 // дни рождения — только день и месяц.
+// Запросы управляющей по затратам (s237) — только ЧИСЛО: администраторам затраты
+// не показываются (решение владельца, план затрат §0.1).
 
 export const BIRTHDAY_DAYS = 7;
 export const MAX_ROWS = 8;
@@ -63,6 +65,8 @@ export interface AttentionInput {
   /** undefined — источник упал (раздел не выводится); '' — в графике не указан */
   admin?: string;
   pending?: { items: any[]; planRequests: any[] };
+  /** запросов управляющей по затратам ждёт владельца (s237); undefined — источник упал */
+  costRequests?: number;
   vouchers?: { paidRecent: any[]; unpaid: any[] };
   staffDocs?: any[];
   /** staff.reminders().contracts: конец договора / испытательного срока */
@@ -107,6 +111,14 @@ export const buildAttention = (input: AttentionInput): { adminLine: string | nul
       rows.push(`• ${dm(r.date)} <b>${esc(r.employeeName || '—')}</b> — графік${label}${by}`);
     }
     if (rows.length) sections.push([`⏳ <b>Чекає підтвердження (Ke schválení): ${rows.length}</b>`, ...capped(rows, more)]);
+  }
+  // ── Затраты: только число, без сумм и названий ──
+  const costReq = Number(input.costRequests) || 0;
+  if (costReq > 0) {
+    const line = `• Витрати — запитів на зміну чи видалення: <b>${costReq}</b> (адмінка → Затраты)`;
+    const ke = sections.find((sec) => sec[0].startsWith('⏳'));
+    if (ke) ke.push(line);
+    else sections.push(['⏳ <b>Чекає підтвердження (Ke schválení):</b>', line]);
   }
 
   // ── Ваучеры: оплачены за 7 дней и ещё не реализованы — проверить potvrzení ──

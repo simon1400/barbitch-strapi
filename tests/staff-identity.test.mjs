@@ -32,8 +32,8 @@ for (const [from, to] of [
   ["from './slots-core'", `from '${dataUrl(toJs(src('src/api/booking-engine/services/slots-core.ts')))}'`],
   ["from '../../../utils/staff-identity'", `from '${dataUrl(toJs(src('src/utils/staff-identity.ts')))}'`],
   ["from 'crypto'", "from 'node:crypto'"],
-  ["from 'fs'", "from 'node:fs'"],
-  ["from 'path'", "from 'node:path'"],
+  // s237: файлы — общие помощники закрытого хранилища
+  ["from '../../../utils/private-files'", `from '${dataUrl(toJs(src('src/utils/private-files.ts')))}'`],
   ["from 'bcryptjs'", `from '${pathToFileURL(require.resolve('bcryptjs')).href}'`],
 ]) {
   assert.ok(staffJs.includes(from), `staff.ts: импорт ${from} не найден`);

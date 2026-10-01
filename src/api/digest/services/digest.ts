@@ -474,6 +474,7 @@ export default {
         return adminOnDate(weeks?.[0], today);
       }),
       settle('pending', () => engine('booking-engine').adminPendingBlocks()),
+      settle('costRequests', () => engine('costs').pendingCount()),
       settle('vouchers', () => engine('today').vouchers(todayRanges(today))),
       // роль manager: карточки владельцев не попадают (чат читают и администраторы)
       // один запрос на документы и договоры; договоры — без IČO (только имя, тип, дата)

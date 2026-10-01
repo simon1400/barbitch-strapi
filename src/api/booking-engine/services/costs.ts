@@ -19,8 +19,26 @@
  * entityType `cost`. Записи из панели обходят одобрение и журнал — это владелец,
  * так задумано; `author` у них пуст → в таблице «панель».
  *
+ * Фаза 2 (s237): чеки — фото/PDF в закрытом каталоге `COST_FILES_DIR` (как сканы
+ * сотрудников, utils/private-files.ts; коллекция `cost-file` без REST). Добавить чек
+ * может и управляющая сразу (деньги не меняются), удалить — владелец сразу,
+ * управляющая — запросом `file_delete`. «Повторить с прошлого месяца» (`recurring` +
+ * `batch`, всё или ничего) и сигналы для «Сегодня» и дайджеста (`attention`).
+ *
  * Верх файла — чистые функции (tests/costs.test.mjs), ниже — сервис.
  */
+
+import {
+  MAX_FILE_BYTES,
+  detectFile,
+  contentDisposition,
+  openPrivateFile,
+  privateDir,
+  readHead,
+  removePrivateFile,
+  safeFileName,
+  storePrivateFile,
+} from '../../../utils/private-files';
 
 export class CostError extends Error {
   status: number;
@@ -36,6 +54,17 @@ export class CostError extends Error {
 
 export const COST_UID = 'api::cost.cost';
 export const REQUEST_UID = 'api::cost-request.cost-request';
+export const FILE_UID = 'api::cost-file.cost-file';
+
+/** Чеков на одну затрату — не больше. */
+export const MAX_FILES_PER_COST = 5;
+/** «Повторить с прошлого месяца» — затрат за один раз. */
+export const MAX_BATCH = 30;
+/** Постоянная — была в прошлом месяце и всего в ≥ 2 из стольких прошлых месяцев. */
+export const RECURRING_MONTHS = 3;
+export const RECURRING_MIN = 2;
+/** «Ещё не внесена» — через столько дней после обычного дня. */
+export const RECURRING_GRACE_DAYS = 3;
 
 /** Способ оплаты — enum `cost.payment`; значение — подпись в журнале. */
 export const PAYMENTS = {
@@ -192,8 +221,18 @@ export const vatFromRatio = (sum: number, noDph: number): 21 | 12 | 0 | 'manual'
 /** Сумма без DPH по ставке — так же считает форма админки. */
 export const noDphFor = (sum: number, vat: number): number => (vat ? Math.round(sum / (1 + vat / 100)) : sum);
 
-/** Строка ответа списка. `pending` — ожидающий запрос по этой затрате. */
-export const toRow = (doc: any, pending?: any) => {
+/** Чек наружу: без имени на диске. */
+export const fileView = (f: any) => ({
+  id: f.documentId,
+  fileName: f.fileName || 'doklad',
+  mime: f.mime || null,
+  size: Number(f.size) || 0,
+  uploadedBy: f.uploadedBy || null,
+  createdAt: f.createdAt ?? null,
+});
+
+/** Строка ответа списка. `pending` — ожидающий запрос по этой затрате, `files` — её чеки. */
+export const toRow = (doc: any, pending?: any, files: any[] = []) => {
   const s = snapshotOf(doc);
   const author = String(doc?.author ?? '').trim() || null;
   return {
@@ -203,9 +242,9 @@ export const toRow = (doc: any, pending?: any) => {
     author,
     // записи без автора внесены в панели Strapi (все до s236)
     viaPanel: !author,
-    files: 0,
+    files: files.map(fileView),
     pendingRequest: pending
-      ? { id: pending.documentId, action: pending.action, requestedBy: pending.requestedBy || null }
+      ? { id: pending.documentId, action: pending.action, fileId: pending.fileId || null, requestedBy: pending.requestedBy || null }
       : null,
     createdAt: doc.createdAt ?? null,
     updatedAt: doc.updatedAt ?? null,
@@ -216,6 +255,7 @@ export const requestRow = (r: any) => ({
   id: r.documentId,
   costDocId: r.costDocId,
   action: r.action,
+  fileId: r.fileId || null,
   changes: r.changes ?? null,
   before: r.before ?? null,
   status: r.status,
@@ -274,6 +314,121 @@ export const suggestFrom = (rows: any[], limit = MAX_SUGGEST) => {
     .slice(0, limit);
 };
 
+/** Предыдущие `n` месяцев до `month` (YYYY-MM), ближний первым. */
+export const prevMonths = (month: string, n: number): string[] => {
+  const [y, m] = month.split('-').map(Number);
+  const out = [];
+  for (let i = 1; i <= n; i += 1) {
+    const d = new Date(Date.UTC(y, m - 1 - i, 1));
+    out.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+};
+
+const lastDayOf = (month: string): number => {
+  const [y, m] = month.split('-').map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+};
+
+/** День `day` в месяце `month`; 31-е в коротком месяце — последний день. */
+export const dayInMonth = (month: string, day: number): string =>
+  `${month}-${String(Math.min(Math.max(1, day), lastDayOf(month))).padStart(2, '0')}`;
+
+/**
+ * Постоянные расходы по записям прошлых месяцев: название (ключ без диакритики)
+ * было в прошлом месяце И всего в ≥ RECURRING_MIN из RECURRING_MONTHS прошлых.
+ * Требование «был в прошлом» отсекает брошенные названия (Noona после ухода,
+ * «Google ADS» → «Google and Meta» в 09.2026). `usualDay` — медиана дней.
+ */
+export const recurringStats = (rows: any[], month: string) => {
+  const prev = prevMonths(month, RECURRING_MONTHS);
+  const byKey = new Map<string, { months: Set<string>; days: number[] }>();
+  for (const r of rows) {
+    const m = String(r.date ?? '').slice(0, 7);
+    if (!prev.includes(m)) continue;
+    const key = nameKey(r.name);
+    if (!key) continue;
+    const g = byKey.get(key) ?? { months: new Set(), days: [] };
+    g.months.add(m);
+    g.days.push(Number(String(r.date).slice(8, 10)));
+    byKey.set(key, g);
+  }
+  const out = new Map<string, { usualDay: number; months: number }>();
+  for (const [key, g] of byKey) {
+    if (!g.months.has(prev[0]) || g.months.size < RECURRING_MIN) continue;
+    const days = [...g.days].sort((a, b) => a - b);
+    out.set(key, { usualDay: days[Math.floor((days.length - 1) / 2)], months: g.months.size });
+  }
+  return out;
+};
+
+/**
+ * «Повторить с прошлого месяца»: записи прошлого месяца, кроме названий, уже
+ * внесённых в `month`. Дата — тот же день в `month`; постоянные отмечены.
+ */
+export const repeatCandidates = (rows: any[], month: string) => {
+  const [prev] = prevMonths(month, 1);
+  const stats = recurringStats(rows, month);
+  const have = new Set(rows.filter((r) => String(r.date ?? '').startsWith(month)).map((r) => nameKey(r.name)));
+  return sortRows(rows.filter((r) => String(r.date ?? '').startsWith(prev)).map((r) => ({ ...r })))
+    .reverse()
+    .filter((r) => !have.has(nameKey(r.name)))
+    .map((r) => {
+      const st = stats.get(nameKey(r.name));
+      return {
+        sourceId: r.documentId,
+        date: dayInMonth(month, Number(String(r.date).slice(8, 10))),
+        name: r.name,
+        category: r.category,
+        sum: r.sum,
+        noDph: r.noDph,
+        vat: vatFromRatio(r.sum, r.noDph),
+        payment: r.payment || null,
+        recurring: !!st,
+        usualDay: st?.usualDay ?? null,
+      };
+    });
+};
+
+/**
+ * Постоянные, которые в месяце `today` ещё не внесены, хотя обычный день прошёл
+ * на RECURRING_GRACE_DAYS (не позже последнего дня месяца).
+ */
+export const missingRecurring = (rows: any[], today: string) => {
+  const month = today.slice(0, 7);
+  const day = Number(today.slice(8, 10));
+  const stats = recurringStats(rows, month);
+  const have = new Set(rows.filter((r) => String(r.date ?? '').startsWith(month)).map((r) => nameKey(r.name)));
+  const [prev] = prevMonths(month, 1);
+  const last = new Map();
+  for (const r of sortRows(rows.filter((x) => String(x.date ?? '').startsWith(prev)).map((x) => ({ ...x })))) {
+    if (!last.has(nameKey(r.name))) last.set(nameKey(r.name), r);
+  }
+  const out = [];
+  for (const [key, st] of stats) {
+    if (have.has(key)) continue;
+    if (day < Math.min(st.usualDay + RECURRING_GRACE_DAYS, lastDayOf(month))) continue;
+    const r = last.get(key);
+    out.push({ name: r.name, category: r.category, usualDay: st.usualDay, lastSum: r.sum, lastDate: r.date });
+  }
+  return out.sort((a, b) => a.usualDay - b.usualDay || a.name.localeCompare(b.name));
+};
+
+/** Пачка «повтора»: 1…MAX_BATCH записей, каждая — как новая затрата; ошибка — с номером строки. */
+export const normalizeBatch = (body: any, today: string, categories: readonly string[]) => {
+  const items = body && typeof body === 'object' ? body.items : null;
+  if (!Array.isArray(items) || items.length === 0) throw new CostError(400, 'batch_empty', 'Выберите хотя бы одну затрату');
+  if (items.length > MAX_BATCH) throw new CostError(400, 'batch_too_big', `За один раз — не больше ${MAX_BATCH} затрат`);
+  return items.map((it, i) => {
+    try {
+      return normalizeCostInput(it, today, categories);
+    } catch (e) {
+      if (e instanceof CostError) throw new CostError(e.status, e.code, `Строка ${i + 1}: ${e.message}`, { index: i });
+      throw e;
+    }
+  });
+};
+
 const fmtDay = (ymd: unknown) => {
   const [y, m, d] = String(ymd ?? '').split('-');
   return d ? `${d}.${m}.${y}` : '—';
@@ -316,6 +471,10 @@ export const logSummary = (head: string, row: any): string => {
   return `${head}: ${cut(row.name, 80)} ${fmtKc(row.sum)} · ${fmtDay(row.date)} · ${row.category || '—'}${pay}`;
 };
 
+/** Что просили — для журнала. */
+const requestWhat = (req: any): string =>
+  req.action === 'delete' ? 'smazání' : req.action === 'file_delete' ? 'smazání dokladu' : diffSummary(req.before, req.changes);
+
 const PRAGUE_DAY = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Europe/Prague',
   year: 'numeric',
@@ -328,6 +487,9 @@ const COST_FIELDS = ['date', 'name', 'category', 'sum', 'noDph', 'comment', 'pay
 const isOwner = (session: any) => session?.role === 'owner';
 
 const notFound = () => new CostError(404, 'not_found', 'Затрата не найдена');
+const fileNotFound = () => new CostError(404, 'file_not_found', 'Чек не найден');
+
+const FILE_FIELDS = ['costDocId', 'fileName', 'mime', 'size', 'uploadedBy', 'createdAt'];
 
 const toDbData = (v: any) => {
   const data = { ...v };
@@ -408,9 +570,10 @@ export default {
     return strapi.documents(COST_UID).findOne({ documentId, status: 'published', fields: COST_FIELDS });
   },
 
-  /** Удаление навсегда (все версии) + ожидающие запросы по ней — `cancelled`. */
+  /** Удаление навсегда (все версии) + её чеки с диска + ожидающие запросы по ней — `cancelled`. */
   async _delete(session: any, documentId: string, now: Date) {
     await strapi.documents(COST_UID).delete({ documentId });
+    await this._deleteFilesOf(documentId);
     await strapi.db.query(REQUEST_UID).updateMany({
       where: { costDocId: documentId, status: 'pending' },
       data: { status: 'cancelled', decidedBy: session?.username || null, decidedAt: now, decisionNote: 'затрата удалена' },
@@ -430,7 +593,8 @@ export default {
       this._pendingRequests(),
     ]);
     const byCost = new Map(pendingAll.map((r) => [r.costDocId, r]));
-    const rows = sortRows(docs.map((d) => toRow(d, byCost.get(d.documentId))));
+    const files = await this._filesFor(docs.map((d) => d.documentId));
+    const rows = sortRows(docs.map((d) => toRow(d, byCost.get(d.documentId), files.get(d.documentId))));
 
     // владелец видит все запросы, управляющая — свои
     const mine = isOwner(session) ? pendingAll : pendingAll.filter((r) => Number(r.requestedById) === Number(session?.id));
@@ -445,9 +609,10 @@ export default {
       });
       for (const d of other) inMonth.set(d.documentId, d);
     }
+    const otherFiles = missing.length ? await this._filesFor(missing) : new Map();
     const pending = mine.map((r) => {
       const cur = inMonth.get(r.costDocId);
-      return { ...requestRow(r), cost: cur ? toRow(cur, r) : null };
+      return { ...requestRow(r), cost: cur ? toRow(cur, r, files.get(r.costDocId) || otherFiles.get(r.costDocId)) : null };
     });
 
     return { month: from.slice(0, 7), rows, categories: this.categories(), payments: Object.keys(PAYMENTS), pending };
@@ -508,8 +673,11 @@ export default {
     if (isOwner(session)) throw new CostError(400, 'owner_direct', 'Владелец правит и удаляет затраты сразу');
     const b = body && typeof body === 'object' ? body : {};
     const action = String(b.action ?? '');
-    if (action !== 'edit' && action !== 'delete') throw new CostError(400, 'bad_action', 'Неизвестный тип запроса');
+    if (action !== 'edit' && action !== 'delete' && action !== 'file_delete') {
+      throw new CostError(400, 'bad_action', 'Неизвестный тип запроса');
+    }
     const doc = await this._findCost(id);
+    const file = action === 'file_delete' ? await this._findFile(doc.documentId, b.fileId) : null;
     const already = await this._pendingRequests({ costDocId: { $eq: doc.documentId } });
     if (already.length) throw new CostError(409, 'request_pending', 'По этой затрате уже есть запрос — дождитесь решения');
 
@@ -520,6 +688,7 @@ export default {
         costDocId: doc.documentId,
         action,
         changes,
+        fileId: file ? file.documentId : null,
         before,
         baseUpdatedAt: doc.updatedAt ?? null,
         status: 'pending',
@@ -528,8 +697,8 @@ export default {
       },
     });
     const row = toRow(doc, req);
-    const diff = action === 'edit' ? diffSummary(before, changes) : '';
-    const head = action === 'edit' ? 'Žádost o změnu' : 'Žádost o smazání';
+    const diff = action === 'edit' ? diffSummary(before, changes) : action === 'file_delete' ? `doklad ${cut(file.fileName, 60)}` : '';
+    const head = action === 'edit' ? 'Žádost o změnu' : action === 'file_delete' ? 'Žádost o smazání dokladu' : 'Žádost o smazání';
     this._log('cost_request', session, doc.documentId, `${logSummary(head, row)}${diff ? ` — ${diff}` : ''}`, {
       ...this._details(row),
       žádost: diff || 'smazání',
@@ -546,7 +715,7 @@ export default {
     if (req.status !== 'pending') throw new CostError(409, 'request_closed', 'Запрос уже решён или отозван');
     await this._claim(req.documentId, { status: 'cancelled', decidedBy: session?.username || null, decidedAt: now });
     this._log('cost_cancel', session, req.costDocId, logSummary('Žádost stažena', req.before || {}), {
-      žádost: req.action === 'delete' ? 'smazání' : diffSummary(req.before, req.changes),
+      žádost: requestWhat(req),
     });
     return { request: requestRow({ ...req, status: 'cancelled' }) };
   },
@@ -563,6 +732,7 @@ export default {
       throw notFound();
     }
     const current = snapshotOf(doc);
+    if (req.action === 'file_delete') return this._approveFileDelete(session, req, doc, now);
     if (!sameSnapshot(current, req.before)) {
       throw new CostError(409, 'cost_changed', 'Затрату изменили после запроса — проверьте и решите заново', {
         cost: toRow(doc, req),
@@ -615,12 +785,229 @@ export default {
       decidedAt: now,
       decisionNote: note || null,
     });
-    const what = req.action === 'delete' ? 'smazání' : diffSummary(req.before, req.changes);
+    const what = requestWhat(req);
     this._log('cost_reject', session, req.costDocId, `${logSummary('Žádost zamítnuta', req.before || {})} — ${what}${note ? ` · ${cut(note, 80)}` : ''}`, {
       žádost: what,
       podal: req.requestedBy || '—',
       důvod: note || '—',
     });
     return { request: requestRow({ ...req, status: 'rejected', decidedBy: session?.username || null, decidedAt: now, decisionNote: note || null }) };
+  },
+
+  // ── чеки (Фаза 2) ──────────────────────────────────────────────────────
+
+  /** Закрытый каталог чеков. Без env — чеки выключены (503). */
+  async _filesDir() {
+    const dir = await privateDir(process.env.COST_FILES_DIR, 'costs');
+    if (!dir) throw new CostError(503, 'storage_not_configured', 'Хранилище чеков на сервере не настроено');
+    return dir;
+  },
+
+  /** Чеки затрат: costDocId → [запись]. */
+  async _filesFor(costDocIds: string[]) {
+    const out = new Map<string, any[]>();
+    const ids = [...new Set(costDocIds.filter(Boolean))];
+    if (!ids.length) return out;
+    const rows = await strapi.documents(FILE_UID).findMany({
+      filters: { costDocId: { $in: ids } },
+      fields: FILE_FIELDS,
+      sort: [{ createdAt: 'asc' }],
+      limit: ids.length * MAX_FILES_PER_COST + 50,
+    });
+    for (const f of rows) {
+      if (!out.has(f.costDocId)) out.set(f.costDocId, []);
+      out.get(f.costDocId).push(f);
+    }
+    return out;
+  },
+
+  /** Чек этой затраты (со storedName) или 404. */
+  async _findFile(costDocId: string, fid: unknown) {
+    const documentId = String(fid ?? '').trim();
+    if (!DOC_ID.test(documentId)) throw fileNotFound();
+    const rows = await strapi.documents(FILE_UID).findMany({
+      filters: { documentId: { $eq: documentId }, costDocId: { $eq: costDocId } },
+      fields: [...FILE_FIELDS, 'storedName'],
+      limit: 1,
+    });
+    if (!rows[0]) throw fileNotFound();
+    return rows[0];
+  },
+
+  /** Все чеки затраты — записи и файлы с диска (при удалении затраты). */
+  async _deleteFilesOf(costDocId: string) {
+    const rows = await strapi.documents(FILE_UID).findMany({
+      filters: { costDocId: { $eq: costDocId } },
+      fields: ['storedName'],
+      limit: 100,
+    });
+    if (!rows.length) return;
+    const dir = await this._filesDir().catch(() => null);
+    for (const f of rows) {
+      await strapi.documents(FILE_UID).delete({ documentId: f.documentId });
+      await removePrivateFile(dir, f.storedName, `costs: чек ${f.documentId}`);
+    }
+  },
+
+  async _removeFile(session: any, doc: any, file: any) {
+    await strapi.documents(FILE_UID).delete({ documentId: file.documentId });
+    await removePrivateFile(await this._filesDir().catch(() => null), file.storedName, `costs: чек ${file.documentId}`);
+  },
+
+  /**
+   * Чек к затрате (multipart, поле `files`, один файл): JPG/PNG/WEBP/PDF по сигнатуре,
+   * ≤ 10 МБ, ≤ MAX_FILES_PER_COST на затрату. Руководство — сразу (деньги не меняются).
+   */
+  async uploadFile({ session, id, files }: { session: any; id: unknown; files: any }) {
+    const file = files?.files;
+    if (!file || Array.isArray(file) || !file.filepath) throw new CostError(400, 'file_required', 'Выберите один файл');
+    const size = Number(file.size) || 0;
+    if (size <= 0) throw new CostError(400, 'file_empty', 'Файл пустой');
+    if (size > MAX_FILE_BYTES) throw new CostError(413, 'file_too_big', 'Файл больше 10 МБ');
+    const doc = await this._findCost(id);
+    const type = detectFile(await readHead(file.filepath));
+    if (!type) throw new CostError(400, 'bad_file_type', 'Поддерживаются JPG, PNG, WEBP и PDF');
+    const existing = (await this._filesFor([doc.documentId])).get(doc.documentId) || [];
+    if (existing.length >= MAX_FILES_PER_COST) {
+      throw new CostError(409, 'too_many_files', `К затрате — не больше ${MAX_FILES_PER_COST} чеков`);
+    }
+    const fileName = safeFileName(file.originalFilename, type.ext, 'doklad');
+    const dir = await this._filesDir();
+    const { storedName } = await storePrivateFile(dir, file.filepath);
+    let created;
+    try {
+      created = await strapi.documents(FILE_UID).create({
+        data: { costDocId: doc.documentId, fileName, mime: type.mime, size, storedName, uploadedBy: session?.username || null },
+      });
+    } catch (e) {
+      await removePrivateFile(dir, storedName, `costs: чек ${storedName}`);
+      throw e;
+    }
+    const row = toRow(doc);
+    this._log('cost_file_add', session, doc.documentId, `${logSummary('Doklad přidán', row)} — ${cut(fileName, 60)}`, {
+      ...this._details(row),
+      doklad: fileName,
+    });
+    return { file: fileView({ ...created, fileName, mime: type.mime, size, uploadedBy: session?.username || null }) };
+  },
+
+  /** Чек потоком (контроллер ставит заголовки). */
+  async downloadFile({ id, fid }: { id: unknown; fid: unknown }) {
+    const doc = await this._findCost(id);
+    const file = await this._findFile(doc.documentId, fid);
+    const opened = await openPrivateFile(await this._filesDir(), file.storedName);
+    if (!opened) throw new CostError(404, 'file_missing', 'Файл чека на сервере не найден');
+    const name = safeFileName(file.fileName, '', 'doklad');
+    return { stream: opened.stream, size: opened.size, mime: file.mime || 'application/octet-stream', disposition: contentDisposition(name) };
+  },
+
+  /** Удалить чек — владелец сразу; управляющая — запросом `file_delete`. */
+  async deleteFile({ session, id, fid }: { session: any; id: unknown; fid: unknown }) {
+    if (!isOwner(session)) throw new CostError(403, 'approval_required', 'Удаление чека — через одобрение владельца');
+    const doc = await this._findCost(id);
+    const file = await this._findFile(doc.documentId, fid);
+    await this._removeFile(session, doc, file);
+    const row = toRow(doc);
+    this._log('cost_file_delete', session, doc.documentId, `${logSummary('Doklad smazán', row)} — ${cut(file.fileName, 60)}`, {
+      ...this._details(row),
+      doklad: file.fileName || '—',
+    });
+    return { deleted: file.documentId };
+  },
+
+  /** Одобрение запроса на удаление чека: затрата не трогается, снимок не сверяется. */
+  async _approveFileDelete(session: any, req: any, doc: any, now: Date) {
+    let file;
+    try {
+      file = await this._findFile(doc.documentId, req.fileId);
+    } catch (e) {
+      await this._claim(req.documentId, { status: 'cancelled', decidedBy: session?.username || null, decidedAt: now, decisionNote: 'чек уже удалён' });
+      throw e;
+    }
+    await this._claim(req.documentId, { status: 'approved', decidedBy: session?.username || null, decidedAt: now });
+    await this._removeFile(session, doc, file);
+    const row = toRow(doc);
+    this._log('cost_approve', session, doc.documentId, `${logSummary('Žádost schválena', row)} — smazání dokladu ${cut(file.fileName, 60)}`, {
+      ...this._details(row),
+      žádost: `smazání dokladu ${file.fileName || ''}`.trim(),
+      podal: req.requestedBy || '—',
+    });
+    return {
+      request: requestRow({ ...req, status: 'approved', decidedBy: session?.username || null, decidedAt: now }),
+      row,
+      deleted: null,
+      deletedFile: file.documentId,
+      before: snapshotOf(doc),
+    };
+  },
+
+  // ── «Повторить с прошлого месяца», «Сегодня», дайджест (Фаза 2) ────────
+
+  /** Записи за RECURRING_MONTHS месяцев до `month` и сам `month` — строки toRow. */
+  async _historyRows(month: string) {
+    const from = `${prevMonths(month, RECURRING_MONTHS).at(-1)}-01`;
+    const { to } = monthRange(month);
+    const docs = await strapi.documents(COST_UID).findMany({
+      status: 'published',
+      filters: { date: { $gte: from, $lte: to } },
+      fields: COST_FIELDS,
+      limit: 5000,
+    });
+    return docs.map((d) => toRow(d));
+  },
+
+  /** Кандидаты на повтор в `month`: прошлый месяц без уже внесённых названий. */
+  async recurring({ month }: { month: unknown }) {
+    const { from } = monthRange(month);
+    const key = from.slice(0, 7);
+    return { month: key, items: repeatCandidates(await this._historyRows(key), key) };
+  },
+
+  /** Несколько затрат за раз: всё проверяется до записи; сбой посередине — созданные удаляются. */
+  async batch({ session, body, now = new Date() }: { session: any; body: any; now?: Date }) {
+    const inputs = normalizeBatch(body, this._today(now), this.categories());
+    const created = [];
+    try {
+      for (const input of inputs) {
+        created.push(
+          await strapi.documents(COST_UID).create({
+            status: 'published',
+            data: toDbData({ ...input, author: session?.username || null }),
+            fields: COST_FIELDS,
+          })
+        );
+      }
+    } catch (e) {
+      for (const d of created) {
+        await strapi.documents(COST_UID).delete({ documentId: d.documentId }).catch((err) => {
+          strapi.log.error(`costs: откат пачки — затрата ${d.documentId} не удалена: ${err.message}`);
+        });
+      }
+      throw e;
+    }
+    const rows = created.map((d) => toRow(d));
+    for (const row of rows) {
+      this._log('cost_create', session, row.documentId, logSummary('Náklad (opakování)', row), this._details(row));
+    }
+    return { rows };
+  },
+
+  /** Ожидающих запросов (всех) — для дайджеста: только число, чат читают и администраторы. */
+  async pendingCount() {
+    return (await this._pendingRequests()).length;
+  },
+
+  /** «Сегодня»: запросы ждут одобрения (владельцу) и не внесённые постоянные расходы. */
+  async attention({ session, now = new Date() }: { session: any; now?: Date }) {
+    const today = this._today(now);
+    const [rows, pending] = await Promise.all([
+      this._historyRows(today.slice(0, 7)),
+      isOwner(session) ? this._pendingRequests() : Promise.resolve(null),
+    ]);
+    return {
+      today,
+      pending: pending ? pending.length : null,
+      missingRecurring: missingRecurring(rows, today),
+    };
   },
 };

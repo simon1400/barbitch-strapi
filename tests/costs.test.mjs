@@ -4,23 +4,36 @@
 // (две версии документа затраты — draft/published — как в Strapi 5) и db.query
 // для условного перевода запроса из pending.
 //
+// Фаза 2 (s237): чеки в закрытом каталоге (настоящая запись на диск во временный
+// каталог), «повторить с прошлого месяца», пачка всё-или-ничего, «Сегодня».
+//
 // Запуск: cd strapi && node --test tests/costs.test.mjs
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
-const SRC = fs.readFileSync(path.resolve(import.meta.dirname, '../src/api/booking-engine/services/costs.ts'), 'utf8');
-const js = ts.transpileModule(SRC, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
-const C = await import('data:text/javascript;base64,' + Buffer.from(js, 'utf8').toString('base64'));
+const toJs = (file) =>
+  ts.transpileModule(fs.readFileSync(path.resolve(import.meta.dirname, '..', file), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+const dataUrl = (js) => 'data:text/javascript;base64,' + Buffer.from(js, 'utf8').toString('base64');
+const PF_FROM = "from '../../../utils/private-files'";
+const js = toJs('src/api/booking-engine/services/costs.ts');
+assert.ok(js.includes(PF_FROM), 'импорт private-files не найден');
+const C = await import(dataUrl(js.split(PF_FROM).join(`from '${dataUrl(toJs('src/utils/private-files.ts'))}'`)));
 const svc = C.default;
 
 const SCHEMA = JSON.parse(
   fs.readFileSync(path.resolve(import.meta.dirname, '../src/api/cost/content-types/cost/schema.json'), 'utf8')
+);
+const FILE_SCHEMA = JSON.parse(
+  fs.readFileSync(path.resolve(import.meta.dirname, '../src/api/cost-file/content-types/cost-file/schema.json'), 'utf8')
 );
 const REQ_SCHEMA = JSON.parse(
   fs.readFileSync(path.resolve(import.meta.dirname, '../src/api/cost-request/content-types/cost-request/schema.json'), 'utf8')
@@ -36,6 +49,7 @@ function makeStrapi(seed = [], { categories = CATS } = {}) {
   const stamp = () => new Date(Date.UTC(2026, 9, 5, 10, 0, ++tick)).toISOString();
   const costs = []; // {documentId, status, ...}
   const reqs = [];
+  const files = [];
   const logs = [];
   const calls = [];
   for (const c of seed) {
@@ -123,6 +137,22 @@ function makeStrapi(seed = [], { categories = CATS } = {}) {
         },
       };
     }
+    if (uid === C.FILE_UID) {
+      const matchFile = (r, f) =>
+        Object.entries(f || {}).every(([k, v]) => ('$in' in v ? v.$in.includes(r[k]) : r[k] === v.$eq));
+      return {
+        findMany: async (q) => files.filter((r) => matchFile(r, q.filters)).map((r) => project(r, q.fields)),
+        create: async ({ data }) => {
+          const r = { documentId: `file${String(++seq).padStart(20, '0')}`, createdAt: stamp(), ...data };
+          files.push(r);
+          return { ...r };
+        },
+        delete: async ({ documentId }) => {
+          const i = files.findIndex((x) => x.documentId === documentId);
+          if (i >= 0) files.splice(i, 1);
+        },
+      };
+    }
     throw new Error(`unexpected uid ${uid}`);
   };
   globalThis.strapi = {
@@ -143,7 +173,7 @@ function makeStrapi(seed = [], { categories = CATS } = {}) {
     service: () => ({ write: async (e) => { logs.push(e); } }),
     log: { error() {}, warn() {}, info() {} },
   };
-  return { costs, reqs, logs, calls, failNext, published: (id) => costs.find((x) => x.documentId === id && x.status === 'published') };
+  return { costs, reqs, files, logs, calls, failNext, published: (id) => costs.find((x) => x.documentId === id && x.status === 'published') };
 }
 
 const OWNER = { id: 1, username: 'Dima', role: 'owner' };
@@ -396,7 +426,9 @@ test('запрос управляющей → одобрение владель�
   await expectErr(() => svc.request({ session: MANAGER, id: NAJEM, body: { action: 'delete' }, now: NOW }), 409, 'request_pending');
   // владельцу запрос не нужен
   await expectErr(() => svc.request({ session: OWNER, id: NAJEM, body: { action: 'delete' }, now: NOW }), 400, 'owner_direct');
-  await expectErr(() => svc.request({ session: MANAGER, id: 'ucetni00000000000000001', body: { action: 'file_delete' }, now: NOW }), 400, 'bad_action');
+  await expectErr(() => svc.request({ session: MANAGER, id: 'ucetni00000000000000001', body: { action: 'move' }, now: NOW }), 400, 'bad_action');
+  // s237: file_delete — действие Фазы 2, без чека этой затраты — 404
+  await expectErr(() => svc.request({ session: MANAGER, id: 'ucetni00000000000000001', body: { action: 'file_delete' }, now: NOW }), 404, 'file_not_found');
   await expectErr(() => svc.request({ session: MANAGER, id: 'ucetni00000000000000001', body: { action: 'edit', changes: {} }, now: NOW }), 400, 'no_changes');
 
   // список: строка помечена, владелец видит запрос, другая управляющая — нет
@@ -521,4 +553,282 @@ test('suggest: записи за год, частые сверху', async () =>
   assert.equal(items[0].count, 2);
   assert.equal(items[0].lastSum, 17000);
   assert.ok(!items.some((i) => i.name === 'Stará'), 'старше года не берётся');
+});
+
+// ── Фаза 2 (s237) ─────────────────────────────────────────────────────────────
+const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'costs-test-'));
+process.on('exit', () => fs.rmSync(tmpRoot, { recursive: true, force: true }));
+let tmpSeq = 0;
+const upload = (bytes, name) => {
+  const filepath = path.join(tmpRoot, `upload-${++tmpSeq}`);
+  fs.writeFileSync(filepath, bytes);
+  return { files: { filepath, originalFilename: name, mimetype: 'application/octet-stream', size: bytes.length } };
+};
+const PDF = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(200, 7)]);
+const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(100, 1)]);
+const useDir = (name) => {
+  const dir = path.join(tmpRoot, name);
+  fs.mkdirSync(dir, { mode: 0o755 }); // как созданный руками на сервере
+  process.env.COST_FILES_DIR = dir;
+  return dir;
+};
+const readAll = async (stream) => {
+  const chunks = [];
+  for await (const c of stream) chunks.push(c);
+  return Buffer.concat(chunks);
+};
+
+test('cost-file: без draftAndPublish, storedName private, без REST', () => {
+  assert.equal(FILE_SCHEMA.options.draftAndPublish, false);
+  assert.equal(FILE_SCHEMA.attributes.storedName.private, true);
+  assert.equal(fs.existsSync(path.resolve(import.meta.dirname, '../src/api/cost-file/routes')), false);
+  assert.equal(fs.existsSync(path.resolve(import.meta.dirname, '../src/api/cost-file/controllers')), false);
+  assert.ok(REQ_SCHEMA.attributes.action.enum.includes('file_delete'));
+});
+
+test('чек: закрытый каталог 700/600, в списке — без storedName, выдача потоком, удаление владельцем', async () => {
+  const st = makeStrapi(SEED);
+  const dir = useDir('store1');
+  const { file } = await svc.uploadFile({ session: MANAGER, id: NAJEM, files: upload(PDF, '../../účtenka "září".pdf') });
+  assert.equal(file.fileName, 'účtenka září.pdf');
+  assert.equal(file.mime, 'application/pdf');
+  assert.equal(file.uploadedBy, 'Mariia Medvedeva');
+  assert.ok(!('storedName' in file));
+  const rec = st.files[0];
+  assert.match(rec.storedName, /^[a-f0-9]{32}$/);
+  const onDisk = path.join(dir, rec.storedName);
+  assert.ok(fs.readFileSync(onDisk).equals(PDF));
+  assert.equal(fs.statSync(onDisk).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
+  assert.deepEqual(fs.readdirSync(dir), [rec.storedName], 'без хвостов .part');
+  assert.equal(st.logs.at(-1).action, 'cost_file_add');
+  assert.match(st.logs.at(-1).summary, /^Doklad přidán: Najem 17 000 Kč .* — účtenka září\.pdf$/);
+
+  const month = await svc.list({ session: OWNER, month: '2026-09' });
+  const row = month.rows.find((r) => r.documentId === NAJEM);
+  assert.equal(row.files.length, 1);
+  assert.equal(row.files[0].id, rec.documentId);
+  assert.ok(!JSON.stringify(month).includes(rec.storedName), 'имя на диске наружу не отдаётся');
+  assert.equal(month.rows.find((r) => r.documentId !== NAJEM).files.length, 0);
+
+  const dl = await svc.downloadFile({ id: NAJEM, fid: rec.documentId });
+  assert.ok((await readAll(dl.stream)).equals(PDF));
+  assert.equal(dl.mime, 'application/pdf');
+  assert.match(dl.disposition, /^inline; filename="__tenka z___\.pdf"; filename\*=UTF-8''%C3%BA%C4%8Dtenka/);
+  // чек чужой затраты по её id — 404
+  await expectErr(() => svc.downloadFile({ id: 'ucetni00000000000000001', fid: rec.documentId }), 404, 'file_not_found');
+  await expectErr(() => svc.downloadFile({ id: NAJEM, fid: '../etc' }), 404, 'file_not_found');
+
+  await expectErr(() => svc.deleteFile({ session: MANAGER, id: NAJEM, fid: rec.documentId }), 403, 'approval_required');
+  assert.ok(fs.existsSync(onDisk));
+  await svc.deleteFile({ session: OWNER, id: NAJEM, fid: rec.documentId });
+  assert.equal(st.files.length, 0);
+  assert.ok(!fs.existsSync(onDisk), 'файл удалён с диска');
+  assert.equal(st.logs.at(-1).action, 'cost_file_delete');
+});
+
+test('чек: сигнатура, размер, один файл, не больше 5, хранилище не настроено, затраты нет', async () => {
+  const st = makeStrapi(SEED);
+  useDir('store2');
+  const exe = Buffer.concat([Buffer.from('MZ\x90\x00'), Buffer.alloc(50)]);
+  await expectErr(() => svc.uploadFile({ session: OWNER, id: NAJEM, files: upload(exe, 'a.pdf') }), 400, 'bad_file_type');
+  await expectErr(() => svc.uploadFile({ session: OWNER, id: NAJEM, files: upload(Buffer.from('<svg xmlns='), 'a.jpg') }), 400, 'bad_file_type');
+  const big = upload(PDF, 'big.pdf');
+  big.files.size = 10 * 1024 * 1024 + 1;
+  await expectErr(() => svc.uploadFile({ session: OWNER, id: NAJEM, files: big }), 413, 'file_too_big');
+  const two = upload(PDF, 'a.pdf');
+  await expectErr(() => svc.uploadFile({ session: OWNER, id: NAJEM, files: { files: [two.files, two.files] } }), 400, 'file_required');
+  await expectErr(() => svc.uploadFile({ session: OWNER, id: NAJEM, files: {} }), 400, 'file_required');
+  await expectErr(() => svc.uploadFile({ session: OWNER, id: 'nenalezeno00000000001', files: upload(PDF, 'a.pdf') }), 404, 'not_found');
+  for (let i = 0; i < C.MAX_FILES_PER_COST; i++) await svc.uploadFile({ session: OWNER, id: NAJEM, files: upload(JPG, `f${i}.jpg`) });
+  await expectErr(() => svc.uploadFile({ session: OWNER, id: NAJEM, files: upload(JPG, 'x.jpg') }), 409, 'too_many_files');
+  assert.equal(st.files.length, C.MAX_FILES_PER_COST);
+  for (const env of ['', 'relative/dir']) {
+    process.env.COST_FILES_DIR = env;
+    await expectErr(() => svc.uploadFile({ session: OWNER, id: 'ucetni00000000000000001', files: upload(PDF, 'a.pdf') }), 503, 'storage_not_configured');
+  }
+});
+
+test('удаление затраты (сразу и по одобрению) удаляет её чеки с диска', async () => {
+  const st = makeStrapi(SEED);
+  const dir = useDir('store3');
+  await svc.uploadFile({ session: OWNER, id: NAJEM, files: upload(PDF, 'a.pdf') });
+  await svc.uploadFile({ session: OWNER, id: 'ucetni00000000000000001', files: upload(JPG, 'b.jpg') });
+  assert.equal(fs.readdirSync(dir).length, 2);
+  await svc.remove({ session: OWNER, id: NAJEM, now: NOW });
+  assert.deepEqual(st.files.map((f) => f.costDocId), ['ucetni00000000000000001']);
+  assert.deepEqual(fs.readdirSync(dir), [st.files[0].storedName]);
+
+  const { request } = await svc.request({ session: MANAGER, id: 'ucetni00000000000000001', body: { action: 'delete' }, now: NOW });
+  await svc.approve({ session: OWNER, rid: request.id, now: NOW });
+  assert.equal(st.files.length, 0);
+  assert.deepEqual(fs.readdirSync(dir), []);
+});
+
+test('запрос file_delete: чек этой затраты, одобрение удаляет только чек (затрату правили — не мешает)', async () => {
+  const st = makeStrapi(SEED);
+  const dir = useDir('store4');
+  const { file } = await svc.uploadFile({ session: MANAGER, id: NAJEM, files: upload(PDF, 'a.pdf') });
+  await expectErr(() => svc.request({ session: MANAGER, id: NAJEM, body: { action: 'file_delete', fileId: 'cizi0000000000000000001' }, now: NOW }), 404, 'file_not_found');
+  await expectErr(() => svc.request({ session: MANAGER, id: NAJEM, body: { action: 'file_delete' }, now: NOW }), 404, 'file_not_found');
+  const { request } = await svc.request({ session: MANAGER, id: NAJEM, body: { action: 'file_delete', fileId: file.id }, now: NOW });
+  assert.equal(request.action, 'file_delete');
+  assert.equal(request.fileId, file.id);
+  assert.equal(st.logs.at(-1).action, 'cost_request');
+  assert.match(st.logs.at(-1).summary, /^Žádost o smazání dokladu: Najem .* — doklad a\.pdf$/);
+  const month = await svc.list({ session: MANAGER, month: '2026-09' });
+  assert.deepEqual(month.rows.find((r) => r.documentId === NAJEM).pendingRequest, {
+    id: request.id,
+    action: 'file_delete',
+    fileId: file.id,
+    requestedBy: 'Mariia Medvedeva',
+  });
+  // владелец успел поправить сумму — удалению чека это не мешает
+  await svc.update({ session: OWNER, id: NAJEM, body: { sum: 16500, noDph: 16500 }, now: NOW });
+  const res = await svc.approve({ session: OWNER, rid: request.id, now: NOW });
+  assert.equal(res.deletedFile, file.id);
+  assert.equal(res.deleted, null);
+  assert.equal(st.files.length, 0);
+  assert.deepEqual(fs.readdirSync(dir), []);
+  assert.ok(st.published(NAJEM), 'затрата на месте');
+  assert.equal(st.published(NAJEM).sum, '16500');
+  assert.equal(st.reqs[0].status, 'approved');
+  assert.match(st.logs.at(-1).summary, /Žádost schválena: .* — smazání dokladu a\.pdf$/);
+});
+
+test('file_delete: чек уже удалён владельцем → 404, запрос закрыт; отклонение и отзыв — по журналу', async () => {
+  const st = makeStrapi(SEED);
+  useDir('store5');
+  const { file } = await svc.uploadFile({ session: MANAGER, id: NAJEM, files: upload(PDF, 'a.pdf') });
+  const { request } = await svc.request({ session: MANAGER, id: NAJEM, body: { action: 'file_delete', fileId: file.id }, now: NOW });
+  await svc.deleteFile({ session: OWNER, id: NAJEM, fid: file.id });
+  await expectErr(() => svc.approve({ session: OWNER, rid: request.id, now: NOW }), 404, 'file_not_found');
+  assert.equal(st.reqs[0].status, 'cancelled');
+
+  const f2 = (await svc.uploadFile({ session: MANAGER, id: NAJEM, files: upload(PDF, 'b.pdf') })).file;
+  const r2 = (await svc.request({ session: MANAGER, id: NAJEM, body: { action: 'file_delete', fileId: f2.id }, now: NOW })).request;
+  await svc.reject({ session: OWNER, rid: r2.id, body: { note: 'чек нужен účetní' }, now: NOW });
+  assert.match(st.logs.at(-1).summary, /— smazání dokladu · чек нужен účetní$/);
+  assert.equal(st.files.length, 1, 'чек остался');
+});
+
+const HISTORY = [
+  // июль–сентябрь: Najem каждый месяц (20/21/20), Ucetni 08 и 09, Google ADS 07 и 08 (в 09 — «Google and Meta»),
+  // Noona 07 и 08 (после ухода с Noona нет), Telefon только 09, Expert dev 08 и 09
+  ...[['07', '21'], ['08', '20'], ['09', '20']].map(([m, d], i) => ({ documentId: `najem${i}000000000000000001`, date: `2026-${m}-${d}`, name: i === 1 ? 'Nájem' : 'Najem', category: 'Коммунальные', sum: '17000', noDph: '17000', payment: 'transfer' })),
+  { documentId: 'ucet08000000000000000001', date: '2026-08-08', name: 'Ucetni', category: 'Услуги', sum: '9000', noDph: '7438', payment: 'transfer' },
+  { documentId: 'ucet09000000000000000001', date: '2026-09-12', name: 'Ucetni', category: 'Услуги', sum: '10285', noDph: '8500', payment: 'transfer' },
+  { documentId: 'goog07000000000000000001', date: '2026-07-01', name: 'Google ADS', category: 'Маркетинг', sum: '10500', noDph: '10500' },
+  { documentId: 'goog08000000000000000001', date: '2026-08-01', name: 'Google ADS', category: 'Маркетинг', sum: '10500', noDph: '10500' },
+  { documentId: 'gome09000000000000000001', date: '2026-09-01', name: 'Google and Meta', category: 'Маркетинг', sum: '16500', noDph: '16500', payment: 'card' },
+  { documentId: 'noon07000000000000000001', date: '2026-07-01', name: 'Noona', category: 'Услуги', sum: '1200', noDph: '1200' },
+  { documentId: 'noon08000000000000000001', date: '2026-08-01', name: 'Noona', category: 'Услуги', sum: '1700', noDph: '1700' },
+  { documentId: 'tele09000000000000000001', date: '2026-09-30', name: 'Telefon', category: 'Коммунальные', sum: '200', noDph: '200' },
+  { documentId: 'expe08000000000000000001', date: '2026-08-18', name: 'Expert dev', category: 'Маркетинг', sum: '9680', noDph: '8000', payment: 'transfer' },
+  { documentId: 'expe09000000000000000001', date: '2026-09-17', name: 'Expert dev', category: 'Маркетинг', sum: '9680', noDph: '8000', payment: 'transfer' },
+  { documentId: 'star06000000000000000001', date: '2026-06-20', name: 'Najem', category: 'Коммунальные', sum: '17000', noDph: '17000' },
+];
+
+test('prevMonths / dayInMonth / recurringStats: «был в прошлом месяце и ≥ 2 из 3»', () => {
+  assert.deepEqual(C.prevMonths('2026-01', 3), ['2025-12', '2025-11', '2025-10']);
+  assert.equal(C.dayInMonth('2026-02', 31), '2026-02-28');
+  assert.equal(C.dayInMonth('2028-02', 30), '2028-02-29');
+  const rows = HISTORY.map((d) => C.toRow(d));
+  const st = C.recurringStats(rows, '2026-10');
+  assert.deepEqual([...st.keys()].sort(), ['expert dev', 'najem', 'ucetni']);
+  assert.equal(st.get('najem').usualDay, 20);
+  assert.equal(st.get('najem').months, 3, 'июнь в окно не входит');
+  assert.equal(st.get('ucetni').usualDay, 8, 'медиана двух — меньший');
+});
+
+test('repeatCandidates: прошлый месяц без уже внесённых, тот же день, постоянные отмечены', () => {
+  const rows = [...HISTORY, { documentId: 'najemX0000000000000001', date: '2026-10-01', name: 'NÁJEM ', category: 'Коммунальные', sum: '17000', noDph: '17000' }].map((d) => C.toRow(d));
+  const items = C.repeatCandidates(rows, '2026-10');
+  assert.deepEqual(items.map((i) => i.name), ['Google and Meta', 'Ucetni', 'Expert dev', 'Telefon']);
+  const ucet = items.find((i) => i.name === 'Ucetni');
+  assert.deepEqual(
+    { date: ucet.date, sum: ucet.sum, noDph: ucet.noDph, vat: ucet.vat, payment: ucet.payment, recurring: ucet.recurring, sourceId: ucet.sourceId },
+    { date: '2026-10-12', sum: 10285, noDph: 8500, vat: 21, payment: 'transfer', recurring: true, sourceId: 'ucet09000000000000000001' }
+  );
+  assert.equal(items.find((i) => i.name === 'Google and Meta').recurring, false);
+  assert.equal(items.find((i) => i.name === 'Telefon').date, '2026-10-30');
+  // ноябрь: 30-е → 30-е; февраль: 30-е → 28-е
+  assert.equal(C.repeatCandidates(HISTORY.map((d) => C.toRow({ ...d, date: d.date.replace('2026-09', '2027-01') })), '2027-02').find((i) => i.name === 'Telefon').date, '2027-02-28');
+});
+
+test('missingRecurring: через 3 дня после обычного дня, не позже конца месяца; внесённая — нет', () => {
+  const rows = HISTORY.map((d) => C.toRow(d));
+  assert.deepEqual(C.missingRecurring(rows, '2026-10-10').map((m) => m.name), []);
+  assert.deepEqual(C.missingRecurring(rows, '2026-10-11').map((m) => m.name), ['Ucetni']);
+  const m = C.missingRecurring(rows, '2026-10-23');
+  assert.deepEqual(m.map((x) => x.name), ['Ucetni', 'Expert dev', 'Najem']);
+  assert.deepEqual(m[2], { name: 'Najem', category: 'Коммунальные', usualDay: 20, lastSum: 17000, lastDate: '2026-09-20' });
+  const withOct = [...rows, C.toRow({ documentId: 'x', date: '2026-10-09', name: 'účetní', category: 'Услуги', sum: '10285', noDph: '8500' })];
+  assert.deepEqual(C.missingRecurring(withOct, '2026-10-23').map((x) => x.name), ['Expert dev', 'Najem']);
+  // обычный день 30 в феврале: показывается в последний день месяца
+  const feb = [
+    { date: '2027-01-30', name: 'Pozdní' },
+    { date: '2026-12-30', name: 'Pozdní' },
+  ].map((d, i) => C.toRow({ documentId: `p${i}`, category: 'Другое', sum: '1', noDph: '1', ...d }));
+  assert.deepEqual(C.missingRecurring(feb, '2027-02-27'), []);
+  assert.equal(C.missingRecurring(feb, '2027-02-28').length, 1);
+});
+
+test('normalizeBatch: 1…30, каждая — как новая затрата, ошибка с номером строки', () => {
+  assert.throws(() => C.normalizeBatch({ items: [] }, TODAY, CATS), (e) => e.code === 'batch_empty');
+  assert.throws(() => C.normalizeBatch({}, TODAY, CATS), (e) => e.code === 'batch_empty');
+  assert.throws(() => C.normalizeBatch({ items: Array(31).fill(VALID) }, TODAY, CATS), (e) => e.code === 'batch_too_big');
+  assert.throws(
+    () => C.normalizeBatch({ items: [VALID, { ...VALID, payment: '' }] }, TODAY, CATS),
+    (e) => e.code === 'payment_required' && e.message.startsWith('Строка 2:') && e.details.index === 1
+  );
+  assert.equal(C.normalizeBatch({ items: [VALID, VALID] }, TODAY, CATS).length, 2);
+});
+
+test('recurring + batch: всё или ничего, автор и журнал у каждой; сбой посередине — созданные удалены', async () => {
+  const st = makeStrapi(HISTORY);
+  const { month, items } = await svc.recurring({ month: '2026-10' });
+  assert.equal(month, '2026-10');
+  assert.ok(items.some((i) => i.name === 'Najem' && i.recurring));
+  await expectErr(() => svc.recurring({ month: '2026-13' }), 400, 'bad_month');
+
+  const pick = items.filter((i) => i.recurring).map((i) => ({ ...i, payment: i.payment || 'transfer', comment: '' }));
+  // ошибка во второй строке — ничего не записано
+  const before = st.costs.length;
+  await expectErr(() => svc.batch({ session: MANAGER, body: { items: [pick[0], { ...pick[1], sum: 0 }] }, now: NOW }), 400, 'bad_sum');
+  assert.equal(st.costs.length, before);
+
+  const { rows } = await svc.batch({ session: MANAGER, body: { items: pick }, now: NOW });
+  assert.equal(rows.length, pick.length);
+  assert.ok(rows.every((r) => r.author === 'Mariia Medvedeva' && r.date.startsWith('2026-10')));
+  assert.equal(st.logs.filter((l) => l.action === 'cost_create').length, pick.length);
+  assert.match(st.logs.at(-1).summary, /^Náklad \(opakování\): /);
+  assert.deepEqual((await svc.recurring({ month: '2026-10' })).items.filter((i) => i.recurring), [], 'внесённые больше не предлагаются');
+
+  // сбой записи на третьей — первые две удаляются
+  const st2 = makeStrapi(HISTORY);
+  const real = globalThis.strapi.documents;
+  let n = 0;
+  globalThis.strapi.documents = (uid) => {
+    const d = real(uid);
+    if (uid !== C.COST_UID) return d;
+    return { ...d, create: async (q) => (++n === 3 ? Promise.reject(new Error('db down')) : d.create(q)) };
+  };
+  await assert.rejects(() => svc.batch({ session: OWNER, body: { items: pick }, now: NOW }), /db down/);
+  assert.equal(st2.costs.filter((c) => c.date?.startsWith('2026-10')).length, 0, 'откат пачки');
+  assert.equal(st2.logs.length, 0, 'журнал не пишется');
+});
+
+test('attention: владельцу — число запросов, управляющей — null; постоянные не внесены', async () => {
+  makeStrapi(HISTORY);
+  const NOW23 = new Date('2026-10-23T08:00:00Z');
+  const req = await svc.request({ session: MANAGER, id: 'najem2000000000000000001', body: { action: 'delete' }, now: NOW23 });
+  assert.ok(req.request.id);
+  const o = await svc.attention({ session: OWNER, now: NOW23 });
+  assert.equal(o.today, '2026-10-23');
+  assert.equal(o.pending, 1);
+  assert.deepEqual(o.missingRecurring.map((m) => m.name), ['Ucetni', 'Expert dev', 'Najem']);
+  const m = await svc.attention({ session: MANAGER, now: NOW23 });
+  assert.equal(m.pending, null);
+  assert.equal(await svc.pendingCount(), 1);
 });

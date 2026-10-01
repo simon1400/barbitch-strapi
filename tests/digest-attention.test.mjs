@@ -60,6 +60,21 @@ test('Ke schválení: новый блок, правка блока, предло
   assert.equal(A.buildAttention({ today: TODAY, pending: { items: [], planRequests: [] } }).sections.length, 0, 'пусто — раздела нет');
 });
 
+test('затраты (s237): только число запросов — без сумм и названий; к блокам или своим разделом', () => {
+  const alone = A.buildAttention({ today: TODAY, costRequests: 2 }).sections;
+  assert.equal(alone.length, 1);
+  assert.match(alone[0][0], /Ke schválení/);
+  assert.equal(alone[0][1], '• Витрати — запитів на зміну чи видалення: <b>2</b> (адмінка → Затраты)');
+  const withBlocks = A.buildAttention({
+    today: TODAY,
+    costRequests: 1,
+    pending: { items: [{ kind: 'new', date: '2026-10-02', employeeName: 'Veronika', startMin: 600, endMin: 720 }], planRequests: [] },
+  }).sections;
+  assert.equal(withBlocks.length, 1, 'одним разделом с блоками');
+  assert.match(withBlocks[0].at(-1), /Витрати — запитів на зміну чи видалення: <b>1<\/b>/);
+  for (const v of [0, undefined, NaN]) assert.equal(A.buildAttention({ today: TODAY, costRequests: v }).sections.length, 0);
+});
+
 test('длинный список обрезается с «і ще N»', () => {
   const items = Array.from({ length: A.MAX_ROWS + 3 }, (_, i) => ({ kind: 'new', date: '2026-10-02', employeeName: `M${i}` }));
   const sec = A.buildAttention({ today: TODAY, pending: { items, planRequests: [] } }).sections[0];
@@ -141,8 +156,9 @@ test('digest.ts: разделы подключены, источники по о
   const src = fs.readFileSync(path.join(root, 'src/api/digest/services/digest.ts'), 'utf8');
   assert.match(src, /buildAttention\(attention\)/);
   assert.match(src, /const settle = async \(key, fn\) => \{\s*try \{\s*attention\[key\] = await fn\(\);\s*\} catch/);
-  for (const k of ['admin', 'pending', 'vouchers', 'staffDocs', 'birthdays']) assert.match(src, new RegExp(`settle\\('${k}'`), k);
+  for (const k of ['admin', 'pending', 'costRequests', 'vouchers', 'staffDocs', 'birthdays']) assert.match(src, new RegExp(`settle\\('${k}'`), k);
   assert.match(src, /reminders\(\{ session: \{ role: 'manager' \} \}\)/, 'карточки владельцев в чат не попадают');
+  assert.match(src, /settle\('costRequests', \(\) => engine\('costs'\)\.pendingCount\(\)\)/, 'затраты — только число');
   // договоры — из того же ответа, только имя/тип/дата/дни (без IČO)
   assert.match(src, /attention\.staffContracts = \(r\.contracts \|\| \[\]\)\.map\(\(c\) => \(\{ name: c\.name, kind: c\.kind, type: c\.type, date: c\.date, daysLeft: c\.daysLeft \}\)\)/);
   assert.match(src, /\.\.\.\(adminLine \? \[adminLine\] : \[\]\)/);

@@ -1,0 +1,35 @@
+{
+  "kind": "collectionType",
+  "collectionName": "cost_files",
+  "info": {
+    "singularName": "cost-file",
+    "pluralName": "cost-files",
+    "displayName": "Затраты — чек",
+    "description": "Чек затраты — фото или PDF (s237). Сам файл — в закрытом каталоге COST_FILES_DIR на сервере (storedName), не в медиатеке и не на CDN. REST-роутов нет: только ручки /engine/admin/costs (руководство)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "costDocId": {
+      "type": "string"
+    },
+    "fileName": {
+      "type": "string"
+    },
+    "mime": {
+      "type": "string"
+    },
+    "size": {
+      "type": "integer"
+    },
+    "storedName": {
+      "type": "string",
+      "private": true
+    },
+    "uploadedBy": {
+      "type": "string"
+    }
+  }
+}
