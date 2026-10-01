@@ -11,6 +11,11 @@
  *     руководству (поправить в панели Strapi).
  * Браузеру компонент `oficial` закрыт совсем — см. middlewares/admin-session.ts.
  *
+ * Кроме сотрудников в списке всегда есть две постоянные даты (просьба владельца, s237):
+ * день рождения владельца и день рождения салона (`FIXED_DATES`). Карточки в
+ * `personal` у них нет — даты в коде; года владельца наружу так же нет, у салона
+ * отдаётся `years` — сколько лет исполняется.
+ *
  * Всё — чтение. Гейт — owner + manager + administrator, в контроллере.
  *
  * Верх файла — чистые функции (tests/birthdays.test.mjs), ниже — сервис.
@@ -23,6 +28,15 @@ export const HORIZON_DAYS = 30;
 /** Год рождения правдоподобен: не раньше 1940 и сотруднику не меньше 14 лет. */
 export const MIN_YEAR = 1940;
 export const MIN_AGE = 14;
+
+/**
+ * Постоянные даты (s237). docId — свой ключ, не documentId карточки.
+ * `since` — год основания: только у салона, чтобы показать «исполняется N лет».
+ */
+export const FIXED_DATES: { docId: string; name: string; position: string; day: number; month: number; since?: number }[] = [
+  { docId: 'owner', name: 'Dima', position: 'owner', day: 4, month: 10 },
+  { docId: 'salon', name: 'Barbitch', position: 'salon', day: 9, month: 11, since: 2024 },
+];
 
 const pragueToday = (now: Date): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(now);
@@ -77,12 +91,13 @@ export const nextOccurrence = (day: number, month: number, today: string) => {
 /**
  * Список для карточки. rows — опубликованные активные карточки {documentId, name,
  * position, dateBirth}. Служебные строки («❌» в имени) не показываются.
+ * fixed — постоянные даты владельца и салона (в тестах подменяются).
  * `unknown` отдаётся только руководству.
  *
  * Если в горизонт не попал никто — отдаётся самый ближайший день рождения
  * (при совпадении даты — все, у кого он в этот день), `nearestOnly: true`.
  */
-export const buildBirthdays = (rows: any[], today: string, management: boolean) => {
+export const buildBirthdays = (rows: any[], today: string, management: boolean, fixed = FIXED_DATES) => {
   const todayYear = Number(today.slice(0, 4));
   const all = [];
   const unknown: string[] = [];
@@ -103,6 +118,19 @@ export const buildBirthdays = (rows: any[], today: string, management: boolean) 
       month: birth.month,
       next,
       daysLeft,
+    });
+  }
+  for (const f of fixed) {
+    const { next, daysLeft } = nextOccurrence(f.day, f.month, today);
+    all.push({
+      docId: f.docId,
+      name: f.name,
+      position: f.position,
+      day: f.day,
+      month: f.month,
+      next,
+      daysLeft,
+      ...(f.since ? { years: Number(next.slice(0, 4)) - f.since } : {}),
     });
   }
   all.sort((a, b) => a.daysLeft - b.daysLeft || a.name.localeCompare(b.name, 'cs'));

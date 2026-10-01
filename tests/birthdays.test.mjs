@@ -53,6 +53,9 @@ test('nextOccurrence: 29 февраля', () => {
   assert.deepEqual(B.nextOccurrence(29, 2, '2027-02-28'), { next: '2027-02-28', daysLeft: 0 });
 });
 
+// Чистые проверки сотрудников — без постоянных дат владельца и салона (они ниже отдельно)
+const build = (rows, today, management) => B.buildBirthdays(rows, today, management, []);
+
 const ROWS = [
   { documentId: 'a', name: 'Zlata', position: 'master', dateBirth: '28.10.1990' }, // 30 дней — входит
   { documentId: 'b', name: 'Вика', position: 'administrator', dateBirth: '1999-09-28' }, // сегодня
@@ -66,7 +69,7 @@ const ROWS = [
 ];
 
 test('buildBirthdays: горизонт 30 дней, сортировка, служебные строки', () => {
-  const r = B.buildBirthdays(ROWS, TODAY, true);
+  const r = build(ROWS, TODAY, true);
   assert.equal(r.today, TODAY);
   assert.equal(r.horizonDays, 30);
   assert.equal(r.nearestOnly, false);
@@ -82,15 +85,15 @@ test('buildBirthdays: горизонт 30 дней, сортировка, слу
 
 test('buildBirthdays: год рождения и сама строка наружу не уходят', () => {
   for (const management of [true, false]) {
-    const out = JSON.stringify(B.buildBirthdays(ROWS, TODAY, management));
+    const out = JSON.stringify(build(ROWS, TODAY, management));
     for (const y of ['1990', '1999', '1992', '1988', '2001', 'dateBirth']) assert.equal(out.includes(y), false, y);
   }
 });
 
 test('buildBirthdays: нераспознанные видит только руководство', () => {
-  assert.deepEqual(B.buildBirthdays(ROWS, TODAY, false).unknown, []);
-  assert.equal(B.buildBirthdays(ROWS, TODAY, false).items.length, 4);
-  assert.deepEqual(B.buildBirthdays([], TODAY, true), { today: TODAY, horizonDays: 30, items: [], nearestOnly: false, unknown: [] });
+  assert.deepEqual(build(ROWS, TODAY, false).unknown, []);
+  assert.equal(build(ROWS, TODAY, false).items.length, 4);
+  assert.deepEqual(build([], TODAY, true), { today: TODAY, horizonDays: 30, items: [], nearestOnly: false, unknown: [] });
 });
 
 test('buildBirthdays: в 30 дней никого — отдаётся самый ближайший (все на эту дату)', () => {
@@ -102,24 +105,46 @@ test('buildBirthdays: в 30 дней никого — отдаётся самы�
     { documentId: 'e', name: 'Бек', position: 'master', dateBirth: '-' },
     { documentId: 'f', name: '❌ Cristina', position: 'master', dateBirth: '01.11.1990' },
   ];
-  const r = B.buildBirthdays(rows, TODAY, false);
+  const r = build(rows, TODAY, false);
   assert.equal(r.nearestOnly, true);
   assert.deepEqual(r.items.map((i) => [i.name, i.daysLeft, i.next]), [
     ['Adéla', 78, '2026-12-15'],
     ['Zlata', 78, '2026-12-15'],
   ]);
   // ровно на границе горизонта — обычный список, не «ближайший»
-  const edge = B.buildBirthdays([{ documentId: 'a', name: 'Z', dateBirth: '28.10.1990' }, { documentId: 'b', name: 'K', dateBirth: '15.12.1990' }], TODAY, false);
+  const edge = build([{ documentId: 'a', name: 'Z', dateBirth: '28.10.1990' }, { documentId: 'b', name: 'K', dateBirth: '15.12.1990' }], TODAY, false);
   assert.equal(edge.nearestOnly, false);
   assert.deepEqual(edge.items.map((i) => i.name), ['Z']);
   // 31 день — уже «ближайший»
-  const over = B.buildBirthdays([{ documentId: 'a', name: 'Z', dateBirth: '29.10.1990' }], TODAY, false);
+  const over = build([{ documentId: 'a', name: 'Z', dateBirth: '29.10.1990' }], TODAY, false);
   assert.equal(over.nearestOnly, true);
   assert.equal(over.items[0].daysLeft, 31);
   // все даты не распознаны — пусто
-  const none = B.buildBirthdays([{ documentId: 'a', name: 'Z', dateBirth: '-' }], TODAY, true);
+  const none = build([{ documentId: 'a', name: 'Z', dateBirth: '-' }], TODAY, true);
   assert.deepEqual([none.items, none.nearestOnly, none.unknown], [[], false, ['Z']]);
   assert.equal(JSON.stringify(r).includes('199'), false);
+});
+
+test('постоянные даты (s237): владелец 04.10 и салон 09.11 — всегда в списке, года владельца нет', () => {
+  assert.deepEqual(B.FIXED_DATES.map((f) => [f.docId, f.day, f.month]), [['owner', 4, 10], ['salon', 9, 11]]);
+  const r = B.buildBirthdays(ROWS, TODAY, true);
+  assert.deepEqual(r.items.map((i) => [i.name, i.daysLeft]), [
+    ['Вика', 0],
+    ['Dima', 6],
+    ['Adéla', 7],
+    ['Evelína', 7],
+    ['Zlata', 30],
+  ]);
+  assert.deepEqual(r.items[1], { docId: 'owner', name: 'Dima', position: 'owner', day: 4, month: 10, next: '2026-10-04', daysLeft: 6 });
+  assert.equal(JSON.stringify(r).includes('1996'), false);
+  // салон: 09.11 — «ближайший», когда в 30 дней никого; исполняется 2 года, после — 3
+  const far = B.buildBirthdays([], '2026-10-05', false);
+  assert.equal(far.nearestOnly, true);
+  assert.deepEqual(far.items, [{ docId: 'salon', name: 'Barbitch', position: 'salon', day: 9, month: 11, next: '2026-11-09', daysLeft: 35, years: 2 }]);
+  assert.equal(B.buildBirthdays([], '2026-11-09', false).items.find((i) => i.docId === 'salon').daysLeft, 0);
+  assert.equal(B.buildBirthdays([], '2026-11-10', false, B.FIXED_DATES.slice(1)).items[0].years, 3);
+  // у владельца годы не считаются
+  assert.equal('years' in B.buildBirthdays([], '2026-10-04', false).items[0], false);
 });
 
 test('сервис: запрос только активных опубликованных, из компонента — одно поле; день пражский', async () => {
