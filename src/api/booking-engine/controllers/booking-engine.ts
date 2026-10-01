@@ -787,6 +787,43 @@ export default {
     await handle(ctx, () => costsSvc().deleteFile({ session, id: ctx.params.id, fid: ctx.params.fid }));
   },
 
+  // Фаза 3 (s238). GET /api/engine/admin/costs/cash-check?month=YYYY-MM — сверка расходов кассы с затратами
+  async adminCostsCashCheck(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => costsSvc().cashCheck({ month: ctx.query?.month }));
+  },
+
+  // POST /api/engine/admin/costs/cash-check/skips {key} — «это не затрата»
+  async adminCostsCashSkip(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => costsSvc().skipCash({ session, body: ctx.request.body }));
+  },
+
+  // DELETE /api/engine/admin/costs/cash-check/skips/:sid — снять пометку
+  async adminCostsCashUnskip(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => costsSvc().unskipCash({ session, sid: ctx.params.sid }));
+  },
+
+  // GET /api/engine/admin/costs/receipts?month=YYYY-MM — чеки месяца одним ZIP (не кэшировать)
+  async adminCostsReceiptsZip(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const z = await costsSvc().receiptsZip({ month: ctx.query?.month });
+      ctx.set('Content-Type', 'application/zip');
+      ctx.set('Content-Length', String(z.size));
+      ctx.set('Content-Disposition', z.disposition);
+      ctx.set('Cache-Control', 'private, no-store');
+      ctx.set('X-Content-Type-Options', 'nosniff');
+      return z.stream;
+    });
+  },
+
   // Отпуска / больничные (s216): запись + серия блоков мастеру — руководство
   // GET /api/engine/admin/time-offs/conflicts?personal=&startDate=&endDate= — брони мастера на эти дни
   async adminTimeOffConflicts(ctx) {

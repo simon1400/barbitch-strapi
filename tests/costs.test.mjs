@@ -24,9 +24,21 @@ const toJs = (file) =>
   }).outputText;
 const dataUrl = (js) => 'data:text/javascript;base64,' + Buffer.from(js, 'utf8').toString('base64');
 const PF_FROM = "from '../../../utils/private-files'";
+const ZIP_FROM = "from '../../../utils/zip-store'";
 const js = toJs('src/api/booking-engine/services/costs.ts');
 assert.ok(js.includes(PF_FROM), 'импорт private-files не найден');
-const C = await import(dataUrl(js.split(PF_FROM).join(`from '${dataUrl(toJs('src/utils/private-files.ts'))}'`)));
+assert.ok(js.includes(ZIP_FROM), 'импорт zip-store не найден');
+const ZIP_JS = toJs('src/utils/zip-store.ts');
+const Z = await import(dataUrl(ZIP_JS));
+const C = await import(
+  dataUrl(
+    js
+      .split(PF_FROM)
+      .join(`from '${dataUrl(toJs('src/utils/private-files.ts'))}'`)
+      .split(ZIP_FROM)
+      .join(`from '${dataUrl(ZIP_JS)}'`)
+  )
+);
 const svc = C.default;
 
 const SCHEMA = JSON.parse(
@@ -43,7 +55,7 @@ const TODAY = '2026-10-05';
 const NOW = new Date('2026-10-05T10:00:00Z');
 
 // ── заглушка ────────────────────────────────────────────────────────────────
-function makeStrapi(seed = [], { categories = CATS } = {}) {
+function makeStrapi(seed = [], { categories = CATS, cash = [] } = {}) {
   let seq = 0;
   let tick = 0;
   const stamp = () => new Date(Date.UTC(2026, 9, 5, 10, 0, ++tick)).toISOString();
@@ -52,6 +64,7 @@ function makeStrapi(seed = [], { categories = CATS } = {}) {
   const files = [];
   const logs = [];
   const calls = [];
+  const skips = [];
   for (const c of seed) {
     const base = { createdAt: stamp(), updatedAt: stamp(), author: null, payment: null, comment: null, ...c };
     costs.push({ ...base, status: 'draft' }, { ...base, status: 'published' });
@@ -153,6 +166,34 @@ function makeStrapi(seed = [], { categories = CATS } = {}) {
         },
       };
     }
+    if (uid === C.CASH_UID) {
+      return {
+        findMany: async (q) => {
+          assert.equal(q.status, 'published', 'касса читается только опубликованная');
+          assert.deepEqual(q.populate, { flow: true });
+          return cash.filter((r) => matchCost(r, q.filters)).map((r) => JSON.parse(JSON.stringify(r)));
+        },
+      };
+    }
+    if (uid === C.SKIP_UID) {
+      const matchSkip = (r, f) => matchCost(r, f) && (!f?.key || r.key === f.key.$eq);
+      return {
+        findMany: async (q) => skips.filter((r) => matchSkip(r, q.filters)).map((r) => ({ ...r })),
+        findOne: async ({ documentId }) => {
+          const r = skips.find((x) => x.documentId === documentId);
+          return r ? { ...r } : null;
+        },
+        create: async ({ data }) => {
+          const r = { documentId: `skip${String(++seq).padStart(20, '0')}`, createdAt: stamp(), ...data };
+          skips.push(r);
+          return { ...r };
+        },
+        delete: async ({ documentId }) => {
+          const i = skips.findIndex((x) => x.documentId === documentId);
+          if (i >= 0) skips.splice(i, 1);
+        },
+      };
+    }
     throw new Error(`unexpected uid ${uid}`);
   };
   globalThis.strapi = {
@@ -173,7 +214,7 @@ function makeStrapi(seed = [], { categories = CATS } = {}) {
     service: () => ({ write: async (e) => { logs.push(e); } }),
     log: { error() {}, warn() {}, info() {} },
   };
-  return { costs, reqs, files, logs, calls, failNext, published: (id) => costs.find((x) => x.documentId === id && x.status === 'published') };
+  return { costs, reqs, files, logs, calls, failNext, skips, published: (id) => costs.find((x) => x.documentId === id && x.status === 'published') };
 }
 
 const OWNER = { id: 1, username: 'Dima', role: 'owner' };
@@ -831,4 +872,272 @@ test('attention: владельцу — число запросов, управ�
   const m = await svc.attention({ session: MANAGER, now: NOW23 });
   assert.equal(m.pending, null);
   assert.equal(await svc.pendingCount(), 1);
+});
+
+// ── Фаза 3 (s238): сверка с кассой, ZIP чеков ────────────────────────────────
+
+// касса как в Strapi: строки движения денег — компонент flow {sum (biginteger строкой), coment}
+const CASH = [
+  {
+    documentId: 'cash0000000000000000923',
+    date: '2026-09-23',
+    flow: [
+      { id: 1, sum: '5400', coment: 'Hotovost za den' },
+      { id: 2, sum: '-2090', coment: ' Клей для ресниц ' },
+      { id: 3, sum: '-15000', coment: 'Маша взяла' },
+      { id: 4, sum: '-15000', coment: 'Маша взяла' },
+    ],
+  },
+  { documentId: 'cash0000000000000000930', date: '2026-09-30', flow: [{ id: 5, sum: '-640', coment: 'Káva, mléko' }] },
+  { documentId: 'cash0000000000000000915', date: '2026-09-15', flow: [{ id: 6, sum: '-300', coment: null }] },
+  { documentId: 'cash0000000000000001001', date: '2026-10-01', flow: [{ id: 7, sum: '-999', coment: 'říjen' }] },
+];
+const CASH_COSTS = [
+  // панель, без оплаты, другое название — та же покупка
+  { documentId: 'klejs000000000000000923', date: '2026-09-23', name: 'Брови і ресниці клеї', category: 'Материалы', sum: '2090', noDph: '1727' },
+  // внесли на следующий день, «из кассы» — покупка 30.09
+  { documentId: 'kava0000000000000001001', date: '2026-10-01', name: 'Káva', category: 'Продукты', sum: '640', noDph: '571', payment: 'cash' },
+  // та же сумма, но картой — с кассой не сверяется
+  { documentId: 'karta000000000000000915', date: '2026-09-15', name: 'Fólie', category: 'Материалы', sum: '300', noDph: '248', payment: 'card' },
+  // «из кассы», а строки в кассе нет
+  { documentId: 'bezrad00000000000000910', date: '2026-09-10', name: 'Ručníky', category: 'Материалы', sum: '450', noDph: '372', payment: 'cash' },
+];
+
+test('cost-cash-skip: без draftAndPublish, без REST', () => {
+  const SKIP_SCHEMA = JSON.parse(
+    fs.readFileSync(path.resolve(import.meta.dirname, '../src/api/cost-cash-skip/content-types/cost-cash-skip/schema.json'), 'utf8')
+  );
+  assert.equal(SKIP_SCHEMA.options.draftAndPublish, false);
+  assert.deepEqual(Object.keys(SKIP_SCHEMA.attributes).sort(), ['comment', 'date', 'key', 'markedBy', 'sum']);
+  for (const d of ['routes', 'controllers']) {
+    assert.equal(fs.existsSync(path.resolve(import.meta.dirname, `../src/api/cost-cash-skip/${d}`)), false);
+  }
+});
+
+test('cashOutflows: только расходы, ключ день|сумма|комментарий|повтор, порядок по дню', () => {
+  const out = C.cashOutflows(CASH);
+  assert.deepEqual(
+    out.map((o) => o.key),
+    [
+      '2026-09-15|300||1',
+      '2026-09-23|2090|клеи для ресниц|1', // nameKey снимает и кратку — как у названий затрат
+      '2026-09-23|15000|маша взяла|1',
+      '2026-09-23|15000|маша взяла|2',
+      '2026-09-30|640|kava, mleko|1',
+      '2026-10-01|999|rijen|1',
+    ]
+  );
+  assert.deepEqual(out[1], { key: '2026-09-23|2090|клеи для ресниц|1', date: '2026-09-23', sum: 2090, comment: 'Клей для ресниц' });
+  assert.equal(out[0].comment, null);
+  // ключ не зависит от порядка записей кассы и от id компонентов
+  assert.deepEqual(C.cashOutflows([...CASH].reverse().map((d) => ({ ...d, flow: d.flow.map((f) => ({ ...f, id: f.id + 100 })) }))), out);
+  assert.deepEqual(C.cashOutflows([{ date: 'bad', flow: [{ sum: '-1' }] }, { date: '2026-09-01', flow: null }]), []);
+});
+
+test('reconcileCash: сумма ±1 день, оплата «из кассы» или пустая, одна затрата — одной строке', () => {
+  const rows = CASH_COSTS.map((c) => C.toRow({ author: null, payment: null, comment: null, ...c }));
+  const res = C.reconcileCash(C.cashOutflows(CASH), rows, [], { from: '2026-09-01', to: '2026-09-30' });
+  assert.deepEqual(
+    res.matched.map((m) => [m.date, m.sum, m.costDocId]),
+    [
+      ['2026-09-23', 2090, 'klejs000000000000000923'],
+      ['2026-09-30', 640, 'kava0000000000000001001'],
+    ]
+  );
+  assert.deepEqual(
+    res.unmatched.map((u) => u.key),
+    ['2026-09-15|300||1', '2026-09-23|15000|маша взяла|1', '2026-09-23|15000|маша взяла|2', '2026-10-01|999|rijen|1']
+  );
+  assert.deepEqual(res.cashCostsWithoutRow.map((r) => r.documentId), ['bezrad00000000000000910'], 'Káva 01.10 — вне месяца, но сверилась');
+
+  // два дня разницы — уже не та покупка; одна затрата не закрывает две строки
+  const far = C.reconcileCash(
+    [{ key: 'a', date: '2026-09-10', sum: 450 }, { key: 'b', date: '2026-09-12', sum: 450 }],
+    rows,
+    [],
+    { from: '2026-09-01', to: '2026-09-30' }
+  );
+  assert.deepEqual(far.matched.map((m) => m.key), ['a']);
+  assert.deepEqual(far.unmatched.map((m) => m.key), ['b']);
+  // два дня разницы без другой строки — всё равно не та покупка
+  const twoDays = C.reconcileCash([{ key: 'c', date: '2026-09-12', sum: 450 }], rows, [], { from: '2026-09-01', to: '2026-09-30' });
+  assert.deepEqual(twoDays.unmatched.map((m) => m.key), ['c']);
+  assert.equal(twoDays.matched.length, 0);
+  // две одинаковые покупки в один день, затрата одна — вторая строка без затраты
+  const twice = C.reconcileCash(
+    [{ key: 'd1', date: '2026-09-10', sum: 450 }, { key: 'd2', date: '2026-09-10', sum: 450 }],
+    rows,
+    [],
+    { from: '2026-09-01', to: '2026-09-30' }
+  );
+  assert.deepEqual(twice.matched.map((m) => m.key), ['d1']);
+  assert.deepEqual(twice.unmatched.map((m) => m.key), ['d2']);
+  // из двух подходящих — «из кассы» и ближний день
+  const pick = C.reconcileCash(
+    [{ key: 'x', date: '2026-09-05', sum: 100 }],
+    [
+      { documentId: 'panel', date: '2026-09-05', sum: 100, payment: null },
+      { documentId: 'cashnext', date: '2026-09-06', sum: 100, payment: 'cash' },
+      { documentId: 'cashsame', date: '2026-09-05', sum: 100, payment: 'cash' },
+    ],
+    [],
+    { from: '2026-09-01', to: '2026-09-30' }
+  );
+  assert.equal(pick.matched[0].costDocId, 'cashsame');
+  // помеченная «не затрата» — не сверяется и затрату не забирает
+  const sk = C.reconcileCash(
+    [{ key: 'w', date: '2026-09-10', sum: 450 }],
+    rows,
+    [{ documentId: 'skip1', key: 'w', markedBy: 'Dima' }],
+    { from: '2026-09-01', to: '2026-09-30' }
+  );
+  assert.deepEqual(sk.skipped.map((x) => [x.key, x.skipId, x.markedBy]), [['w', 'skip1', 'Dima']]);
+  assert.equal(sk.matched.length, 0);
+  assert.deepEqual(sk.cashCostsWithoutRow.map((r) => r.documentId), ['bezrad00000000000000910']);
+});
+
+test('cashCheck: месяц с запасом в день, только строки месяца, число дней кассы', async () => {
+  makeStrapi(CASH_COSTS, { cash: CASH });
+  const r = await svc.cashCheck({ month: '2026-09' });
+  assert.equal(r.month, '2026-09');
+  assert.equal(r.cashDays, 3);
+  assert.equal(r.matched, 2);
+  assert.deepEqual(r.unmatched.map((u) => u.key), ['2026-09-15|300||1', '2026-09-23|15000|маша взяла|1', '2026-09-23|15000|маша взяла|2']);
+  assert.deepEqual(r.cashCostsWithoutRow, [
+    { documentId: 'bezrad00000000000000910', date: '2026-09-10', name: 'Ručníky', sum: 450, category: 'Материалы' },
+  ]);
+  await expectErr(() => svc.cashCheck({ month: '2026-13' }), 400, 'bad_month');
+});
+
+test('«не затрата»: строка проверяется, повтор 409, снять — снова в сверке; журнал', async () => {
+  const st = makeStrapi(CASH_COSTS, { cash: CASH });
+  const key = '2026-09-23|15000|маша взяла|2';
+  await expectErr(() => svc.skipCash({ session: MANAGER, body: { key: 'nonsense' } }), 400, 'bad_key');
+  await expectErr(() => svc.skipCash({ session: MANAGER, body: {} }), 400, 'bad_key');
+  await expectErr(() => svc.skipCash({ session: MANAGER, body: { key: '2026-09-23|15000|маша взяла|3' } }), 404, 'cash_row_not_found');
+  const { skip } = await svc.skipCash({ session: MANAGER, body: { key } });
+  assert.equal(skip.markedBy, 'Mariia Medvedeva');
+  assert.deepEqual(
+    st.skips.map((x) => [x.key, x.date, x.sum, x.comment, x.markedBy]),
+    [[key, '2026-09-23', 15000, 'Маша взяла', 'Mariia Medvedeva']]
+  );
+  assert.equal(st.logs.at(-1).action, 'cost_cash_skip');
+  assert.equal(st.logs.at(-1).entityType, 'cost');
+  assert.match(st.logs.at(-1).summary, /^Pokladna 23\.09\.2026: −15 000 Kč · Маша взяла — není náklad$/);
+  await expectErr(() => svc.skipCash({ session: OWNER, body: { key } }), 409, 'already_skipped');
+
+  const r = await svc.cashCheck({ month: '2026-09' });
+  assert.deepEqual(r.unmatched.map((u) => u.key), ['2026-09-15|300||1', '2026-09-23|15000|маша взяла|1']);
+  assert.deepEqual(r.skipped.map((x) => [x.key, x.skipId]), [[key, skip.skipId]]);
+
+  // двойная пометка (гонка) — снимаются обе
+  st.skips.push({ ...st.skips[0], documentId: 'skip9999999999999999999' });
+  await expectErr(() => svc.unskipCash({ session: OWNER, sid: 'nenalezeno00000000001' }), 404, 'skip_not_found');
+  await expectErr(() => svc.unskipCash({ session: OWNER, sid: '../x' }), 404, 'skip_not_found');
+  await svc.unskipCash({ session: OWNER, sid: skip.skipId });
+  assert.equal(st.skips.length, 0);
+  assert.equal(st.logs.at(-1).action, 'cost_cash_unskip');
+  assert.equal((await svc.cashCheck({ month: '2026-09' })).unmatched.length, 3);
+});
+
+// архив читается независимо от zip-store: локальные заголовки подряд + центральный каталог
+const readZip = (buf) => {
+  const eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  assert.ok(eocd > 0, 'нет конца архива');
+  const count = buf.readUInt16LE(eocd + 10);
+  const cdOffset = buf.readUInt32LE(eocd + 16);
+  const out = [];
+  let p = cdOffset;
+  for (let i = 0; i < count; i++) {
+    assert.equal(buf.readUInt32LE(p), 0x02014b50);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const flags = buf.readUInt16LE(p + 8);
+    const crc = buf.readUInt32LE(p + 16);
+    const size = buf.readUInt32LE(p + 24);
+    const local = buf.readUInt32LE(p + 42);
+    const name = buf.toString('utf8', p + 46, p + 46 + nameLen);
+    assert.equal(buf.readUInt32LE(local), 0x04034b50);
+    const lNameLen = buf.readUInt16LE(local + 26);
+    assert.equal(buf.toString('utf8', local + 30, local + 30 + lNameLen), name);
+    const data = buf.subarray(local + 30 + lNameLen, local + 30 + lNameLen + size);
+    out.push({ name, flags, crc, data, date: buf.readUInt16LE(p + 14) });
+    p += 46 + nameLen;
+  }
+  assert.equal(p, eocd, 'центральный каталог кончается перед концом архива');
+  return out;
+};
+
+test('zip-store: CRC-32 как у zlib, дата DOS', async () => {
+  const zlib = await import('node:zlib');
+  for (const b of [Buffer.from('123456789'), Buffer.alloc(0), Buffer.alloc(70000, 3), PDF]) {
+    assert.equal(Z.crc32(b), zlib.crc32(b));
+    assert.equal(Z.crc32(b.subarray(10), Z.crc32(b.subarray(0, 10))), zlib.crc32(b), 'по кускам');
+  }
+  assert.equal(Z.crc32(Buffer.from('123456789')), 0xcbf43926);
+  assert.deepEqual(Z.dosDateTime('2026-09-20'), { date: ((2026 - 1980) << 9) | (9 << 5) | 20, time: 12 << 11 });
+  assert.deepEqual(Z.dosDateTime('1970-01-01'), { date: 33, time: 12 << 11 });
+});
+
+test('receiptZipNames: дата, название, сумма; без запрещённых символов; повтор — (2)', () => {
+  const najem = { date: '2026-09-20', name: 'Nájem / září: "A|B"', sum: 17000 };
+  assert.deepEqual(
+    C.receiptZipNames([
+      { cost: najem, file: { fileName: 'scan.PDF', mime: 'application/pdf' } },
+      { cost: najem, file: { fileName: 'scan.pdf', mime: 'application/pdf' } },
+      { cost: { date: '2026-09-21', name: '  ', sum: 5 }, file: { fileName: 'doklad', mime: 'image/jpeg' } },
+      { cost: { date: '2026-09-21', name: 'x', sum: 5 }, file: { fileName: 'a', mime: 'text/plain' } },
+    ]),
+    [
+      '2026-09-20 Nájem _ září_ _A_B_ 17000 Kč.pdf',
+      '2026-09-20 Nájem _ září_ _A_B_ 17000 Kč (2).pdf',
+      '2026-09-21 naklad 5 Kč.jpg',
+      '2026-09-21 x 5 Kč.bin',
+    ]
+  );
+});
+
+test('receiptsZip: чеки месяца по дате, имена UTF-8, CRC; файла нет на диске — пропуск; нет чеков — 404', async () => {
+  const st = makeStrapi(SEED);
+  const dir = useDir('zip1');
+  await expectErr(() => svc.receiptsZip({ month: '2026-09' }), 404, 'no_receipts');
+  await svc.uploadFile({ session: OWNER, id: NAJEM, files: upload(PDF, 'nájemní smlouva.pdf') });
+  await svc.uploadFile({ session: OWNER, id: NAJEM, files: upload(JPG, 'IMG_1.jpg') });
+  await svc.uploadFile({ session: OWNER, id: 'ucetni00000000000000001', files: upload(JPG, 'faktura.jpg') });
+  // октябрьский чек в сентябрьский архив не попадает
+  await svc.uploadFile({ session: OWNER, id: 'klej0000000000000000001', files: upload(PDF, 'klej.pdf') });
+
+  const z = await svc.receiptsZip({ month: '2026-09' });
+  const buf = await readAll(z.stream);
+  assert.equal(buf.length, z.size, 'Content-Length = длина архива');
+  assert.equal(z.count, 3);
+  assert.equal(z.missing, 0);
+  assert.equal(z.disposition, 'attachment; filename="doklady-2026-09.zip"');
+  const entries = readZip(buf);
+  assert.deepEqual(entries.map((e) => e.name), [
+    '2026-09-10 Ucetni 10285 Kč.jpg',
+    '2026-09-20 Najem 17000 Kč.pdf',
+    '2026-09-20 Najem 17000 Kč.jpg', // другое расширение — без «(2)»
+  ]);
+  const zlib = await import('node:zlib');
+  for (const e of entries) {
+    assert.equal(e.flags & 0x0800, 0x0800, 'имя в UTF-8');
+    assert.equal(zlib.crc32(e.data), e.crc);
+  }
+  assert.ok(entries[1].data.equals(PDF));
+  assert.ok(entries[2].data.equals(JPG));
+  assert.equal(entries[1].date, Z.dosDateTime('2026-09-20').date);
+  assert.ok(!buf.includes(Buffer.from(st.files[0].storedName)), 'имя на диске в архив не попадает');
+
+  // файл пропал с диска — архив без него
+  fs.unlinkSync(path.join(dir, st.files.find((f) => f.fileName === 'faktura.jpg').storedName));
+  const z2 = await svc.receiptsZip({ month: '2026-09' });
+  assert.equal(z2.count, 2);
+  assert.equal(z2.missing, 1);
+  assert.deepEqual(readZip(await readAll(z2.stream)).map((e) => e.name), ['2026-09-20 Najem 17000 Kč.pdf', '2026-09-20 Najem 17000 Kč.jpg']);
+
+  await expectErr(() => svc.receiptsZip({ month: '2026-08' }), 404, 'no_receipts');
+  await expectErr(() => svc.receiptsZip({ month: 'září' }), 400, 'bad_month');
+  // слишком большой месяц — до чтения диска (по размерам из базы)
+  st.files[0].size = C.MAX_ZIP_BYTES + 1;
+  await expectErr(() => svc.receiptsZip({ month: '2026-09' }), 413, 'zip_too_big');
 });

@@ -1,0 +1,31 @@
+{
+  "kind": "collectionType",
+  "collectionName": "cost_cash_skips",
+  "info": {
+    "singularName": "cost-cash-skip",
+    "pluralName": "cost-cash-skips",
+    "displayName": "Затраты — не затрата из кассы",
+    "description": "Сверка кассы с затратами (s238): строка расхода кассы (cash.flow), помеченная руководством «это не затрата» (изъятие, размен). key — день|сумма|комментарий|номер повтора. REST-роутов нет: только ручки /engine/admin/costs/cash-check"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "key": {
+      "type": "string"
+    },
+    "date": {
+      "type": "date"
+    },
+    "sum": {
+      "type": "integer"
+    },
+    "comment": {
+      "type": "text"
+    },
+    "markedBy": {
+      "type": "string"
+    }
+  }
+}

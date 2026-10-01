@@ -103,6 +103,11 @@ export default {
     admin('POST', '/engine/admin/costs/:id/files', 'booking-engine.adminCostFileUpload'),
     admin('GET', '/engine/admin/costs/:id/files/:fid', 'booking-engine.adminCostFileDownload'),
     admin('DELETE', '/engine/admin/costs/:id/files/:fid', 'booking-engine.adminCostFileDelete'),
+    // Фаза 3 (s238): сверка с кассой, чеки месяца одним ZIP
+    admin('GET', '/engine/admin/costs/cash-check', 'booking-engine.adminCostsCashCheck'),
+    admin('POST', '/engine/admin/costs/cash-check/skips', 'booking-engine.adminCostsCashSkip'),
+    admin('DELETE', '/engine/admin/costs/cash-check/skips/:sid', 'booking-engine.adminCostsCashUnskip'),
+    admin('GET', '/engine/admin/costs/receipts', 'booking-engine.adminCostsReceiptsZip'),
     // Отпуска / больничные + автоблоки мастеру (s216) — только руководство
     admin('GET', '/engine/admin/time-offs/conflicts', 'booking-engine.adminTimeOffConflicts'),
     admin('POST', '/engine/admin/time-offs', 'booking-engine.adminTimeOffCreate'),

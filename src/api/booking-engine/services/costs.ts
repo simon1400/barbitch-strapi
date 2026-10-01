@@ -25,6 +25,11 @@
  * управляющая — запросом `file_delete`. «Повторить с прошлого месяца» (`recurring` +
  * `batch`, всё или ничего) и сигналы для «Сегодня» и дайджеста (`attention`).
  *
+ * Фаза 3 (s238): сверка с кассой — расходы кассы (`cash.flow` < 0) без затраты той же
+ * суммы ±1 день (оплата «из кассы» или не указана), пометка «это не затрата»
+ * (`cost-cash-skip` без REST); «Скачать чеки месяца» — ZIP без сжатия потоком
+ * (utils/zip-store.ts). Сравнение с прошлым месяцем считает админка из двух списков.
+ *
  * Верх файла — чистые функции (tests/costs.test.mjs), ниже — сервис.
  */
 
@@ -34,11 +39,13 @@ import {
   contentDisposition,
   openPrivateFile,
   privateDir,
+  privateFileStat,
   readHead,
   removePrivateFile,
   safeFileName,
   storePrivateFile,
 } from '../../../utils/private-files';
+import { planZip, zipStream } from '../../../utils/zip-store';
 
 export class CostError extends Error {
   status: number;
@@ -55,6 +62,8 @@ export class CostError extends Error {
 export const COST_UID = 'api::cost.cost';
 export const REQUEST_UID = 'api::cost-request.cost-request';
 export const FILE_UID = 'api::cost-file.cost-file';
+export const CASH_UID = 'api::cash.cash';
+export const SKIP_UID = 'api::cost-cash-skip.cost-cash-skip';
 
 /** Чеков на одну затрату — не больше. */
 export const MAX_FILES_PER_COST = 5;
@@ -65,6 +74,11 @@ export const RECURRING_MONTHS = 3;
 export const RECURRING_MIN = 2;
 /** «Ещё не внесена» — через столько дней после обычного дня. */
 export const RECURRING_GRACE_DAYS = 3;
+
+/** Строка кассы и затрата — одна покупка: суммы равны, дни отличаются не больше чем на столько. */
+export const CASH_MATCH_DAYS = 1;
+/** Архив чеков месяца — не больше (реальный месяц — десятки МБ; ZIP без ZIP64 — до 4 ГБ). */
+export const MAX_ZIP_BYTES = 300 * 1024 * 1024;
 
 /** Способ оплаты — enum `cost.payment`; значение — подпись в журнале. */
 export const PAYMENTS = {
@@ -426,6 +440,104 @@ export const normalizeBatch = (body: any, today: string, categories: readonly st
       if (e instanceof CostError) throw new CostError(e.status, e.code, `Строка ${i + 1}: ${e.message}`, { index: i });
       throw e;
     }
+  });
+};
+
+// ── Фаза 3 (s238): сверка с кассой, ZIP чеков ───────────────────────────
+
+const dayNum = (ymd: string): number =>
+  Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(5, 7)) - 1, Number(ymd.slice(8, 10))) / 86400000;
+
+/**
+ * Расходы кассы — отрицательные строки `cash.flow` (покупки из кассы, изъятия, размен).
+ * `key` = день|сумма|комментарий без диакритики|номер повтора в этот день: стабилен,
+ * пока строку не правят (id компонентов Strapi пересоздаёт при публикации — на них
+ * опираться нельзя). Исправили комментарий — пометку «не затрата» нужно поставить снова.
+ */
+export const cashOutflows = (cashDocs: any[]) => {
+  const docs = [...cashDocs].sort(
+    (a, b) => String(a.date).localeCompare(String(b.date)) || String(a.documentId).localeCompare(String(b.documentId))
+  );
+  const seen = new Map<string, number>();
+  const out = [];
+  for (const d of docs) {
+    if (!isValidYmd(d.date)) continue;
+    for (const f of Array.isArray(d.flow) ? d.flow : []) {
+      const n = toKc(f?.sum);
+      if (!(n < 0)) continue;
+      const sum = Math.round(-n);
+      const comment = String(f?.coment ?? '').trim();
+      const base = `${d.date}|${sum}|${nameKey(comment).slice(0, 100)}`;
+      const k = (seen.get(base) ?? 0) + 1;
+      seen.set(base, k);
+      out.push({ key: `${base}|${k}`, date: d.date, sum, comment: comment || null });
+    }
+  }
+  return out;
+};
+
+/**
+ * Сверка: каждой строке расхода кассы — затрата той же суммы ±CASH_MATCH_DAYS дня с
+ * оплатой «из кассы» или без оплаты (записи панели до s236), каждая затрата — не больше
+ * одной строке. Ближний день и оплата «из кассы» — в приоритете. Помеченные «не затрата»
+ * в сверке не участвуют. `cashCostsWithoutRow` — затраты «из кассы» месяца без строки.
+ */
+export const reconcileCash = (outflows: any[], costRows: any[], skips: any[], { from, to }: { from: string; to: string }) => {
+  const skipByKey = new Map(skips.map((s) => [s.key, s]));
+  const pool = costRows
+    .filter((r) => (r.payment === 'cash' || !r.payment) && isValidYmd(r.date))
+    .map((r) => ({ r, used: false }));
+  const unmatched = [];
+  const skipped = [];
+  const matched = [];
+  for (const f of outflows) {
+    const s = skipByKey.get(f.key);
+    if (s) {
+      skipped.push({ ...f, skipId: s.documentId, markedBy: s.markedBy || null });
+      continue;
+    }
+    let best = null;
+    let bestScore = Infinity;
+    for (const c of pool) {
+      if (c.used || c.r.sum !== f.sum) continue;
+      const diff = Math.abs(dayNum(c.r.date) - dayNum(f.date));
+      if (diff > CASH_MATCH_DAYS) continue;
+      const score = diff * 2 + (c.r.payment === 'cash' ? 0 : 1);
+      if (score < bestScore) {
+        best = c;
+        bestScore = score;
+      }
+    }
+    if (best) {
+      best.used = true;
+      matched.push({ ...f, costDocId: best.r.documentId });
+    } else {
+      unmatched.push(f);
+    }
+  }
+  const cashCostsWithoutRow = pool
+    .filter((c) => !c.used && c.r.payment === 'cash' && c.r.date >= from && c.r.date <= to)
+    .map((c) => c.r);
+  return { unmatched, skipped, matched, cashCostsWithoutRow };
+};
+
+const EXT_BY_MIME = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' };
+const ZIP_BAD = /[\u0000-\u001f\u007f\\/:*?"<>|]/g;
+
+/**
+ * Имена файлов в архиве чеков: «2026-09-20 Najem 17000 Kč.pdf», второй чек той же
+ * затраты или совпавшее имя — « (2)». Без папок и запрещённых в Windows символов.
+ */
+export const receiptZipNames = (pairs: { cost: any; file: any }[]): string[] => {
+  const used = new Set<string>();
+  return pairs.map(({ cost, file }) => {
+    const ext = (/\.([a-z0-9]{2,5})$/i.exec(String(file.fileName ?? ''))?.[1] || EXT_BY_MIME[file.mime] || 'bin').toLowerCase();
+    const title = cut(String(cost.name ?? '').replace(ZIP_BAD, '_').replace(/\s+/g, ' ').trim() || 'naklad', 60);
+    const base = `${cost.date} ${title} ${Math.round(Number(cost.sum) || 0)} Kč`;
+    let name = `${base}.${ext}`;
+    for (let i = 2; used.has(name.toLowerCase()); i += 1) name = `${base} (${i}).${ext}`;
+    used.add(name.toLowerCase());
+    return name;
   });
 };
 
@@ -1008,6 +1120,141 @@ export default {
       today,
       pending: pending ? pending.length : null,
       missingRecurring: missingRecurring(rows, today),
+    };
+  },
+
+  // ── Фаза 3 (s238): сверка с кассой, ZIP чеков месяца ────────────────────
+
+  /** Опубликованные записи кассы за дни [from, to] со строками движения денег. */
+  _cashDocs({ from, to }: { from: string; to: string }) {
+    return strapi.documents(CASH_UID).findMany({
+      status: 'published',
+      filters: { date: { $gte: from, $lte: to } },
+      fields: ['date'],
+      populate: { flow: true },
+      limit: 500,
+    });
+  },
+
+  /**
+   * Сверка месяца: расходы кассы без затраты, помеченные «не затрата» и затраты
+   * «из кассы» без строки в кассе. Касса и затраты берутся с запасом в день по краям
+   * (покупку 31-го могли внести 1-го).
+   */
+  async cashCheck({ month }: { month: unknown }) {
+    const { from, to } = monthRange(month);
+    const wide = { from: addDaysYmd(from, -CASH_MATCH_DAYS), to: addDaysYmd(to, CASH_MATCH_DAYS) };
+    const [cashDocs, costDocs, skips] = await Promise.all([
+      this._cashDocs(wide),
+      strapi.documents(COST_UID).findMany({
+        status: 'published',
+        filters: { date: { $gte: wide.from, $lte: wide.to } },
+        fields: COST_FIELDS,
+        limit: 2000,
+      }),
+      strapi.documents(SKIP_UID).findMany({ filters: { date: { $gte: wide.from, $lte: wide.to } }, limit: 2000 }),
+    ]);
+    const res = reconcileCash(cashOutflows(cashDocs), costDocs.map((d) => toRow(d)), skips, { from, to });
+    const inMonth = (x: any) => x.date >= from && x.date <= to;
+    const brief = (r: any) => ({ documentId: r.documentId, date: r.date, name: r.name, sum: r.sum, category: r.category });
+    return {
+      month: from.slice(0, 7),
+      cashDays: cashDocs.filter(inMonth).length,
+      matched: res.matched.filter(inMonth).length,
+      unmatched: res.unmatched.filter(inMonth),
+      skipped: res.skipped.filter(inMonth),
+      cashCostsWithoutRow: res.cashCostsWithoutRow.map(brief),
+    };
+  },
+
+  /** «Это не затрата»: строка кассы по ключу (проверяется, что она есть). Руководство. */
+  async skipCash({ session, body }: { session: any; body: any }) {
+    const key = String(body?.key ?? '').trim();
+    const date = key.slice(0, 10);
+    if (key.length > 200 || !isValidYmd(date)) throw new CostError(400, 'bad_key', 'Неверная строка кассы');
+    const row = cashOutflows(await this._cashDocs({ from: date, to: date })).find((f) => f.key === key);
+    if (!row) throw new CostError(404, 'cash_row_not_found', 'Строка кассы не найдена — возможно, её изменили');
+    const already = await strapi.documents(SKIP_UID).findMany({ filters: { key: { $eq: key } }, limit: 1 });
+    if (already.length) throw new CostError(409, 'already_skipped', 'Эта строка кассы уже помечена');
+    const created = await strapi.documents(SKIP_UID).create({
+      data: { key, date: row.date, sum: row.sum, comment: row.comment, markedBy: session?.username || null },
+    });
+    const what = `Pokladna ${fmtDay(row.date)}: −${fmtKc(row.sum)}${row.comment ? ` · ${cut(row.comment, 60)}` : ''}`;
+    this._log('cost_cash_skip', session, created.documentId, `${what} — není náklad`, {
+      datum: fmtDay(row.date),
+      částka: `−${fmtKc(row.sum)}`,
+      komentář: row.comment || '—',
+    });
+    return { skip: { ...row, skipId: created.documentId, markedBy: session?.username || null } };
+  },
+
+  /** Снять пометку «не затрата» — строка снова попадает в сверку. Руководство. */
+  async unskipCash({ session, sid }: { session: any; sid: unknown }) {
+    const documentId = String(sid ?? '').trim();
+    const miss = new CostError(404, 'skip_not_found', 'Пометка не найдена');
+    if (!DOC_ID.test(documentId)) throw miss;
+    const skip = await strapi.documents(SKIP_UID).findOne({ documentId });
+    if (!skip) throw miss;
+    // двойное нажатие могло завести две пометки одного ключа — снимаются все
+    const same = await strapi.documents(SKIP_UID).findMany({ filters: { key: { $eq: skip.key } }, limit: 20 });
+    for (const x of same.length ? same : [skip]) await strapi.documents(SKIP_UID).delete({ documentId: x.documentId });
+    const what = `Pokladna ${fmtDay(skip.date)}: −${fmtKc(Number(skip.sum) || 0)}${skip.comment ? ` · ${cut(skip.comment, 60)}` : ''}`;
+    this._log('cost_cash_unskip', session, skip.documentId, `${what} — značka «není náklad» zrušena`, {
+      datum: fmtDay(skip.date),
+      komentář: skip.comment || '—',
+    });
+    return { removed: skip.documentId };
+  },
+
+  /**
+   * Чеки месяца одним ZIP (для účetní): затраты по дате, чеки по порядку загрузки.
+   * Файла на диске нет — пропускается (`missing`). Нет ни одного — 404 `no_receipts`.
+   */
+  async receiptsZip({ month }: { month: unknown }) {
+    const { from, to } = monthRange(month);
+    const docs = await strapi.documents(COST_UID).findMany({
+      status: 'published',
+      filters: { date: { $gte: from, $lte: to } },
+      fields: COST_FIELDS,
+      limit: 1000,
+    });
+    const costs = sortRows(docs.map((d) => toRow(d))).reverse();
+    const ids = costs.map((c) => c.documentId);
+    const fileRows = ids.length
+      ? await strapi.documents(FILE_UID).findMany({
+          filters: { costDocId: { $in: ids } },
+          fields: [...FILE_FIELDS, 'storedName'],
+          sort: [{ createdAt: 'asc' }],
+          limit: ids.length * MAX_FILES_PER_COST + 50,
+        })
+      : [];
+    if (!fileRows.length) throw new CostError(404, 'no_receipts', 'За этот месяц чеков нет');
+    const total = fileRows.reduce((s, f) => s + (Number(f.size) || 0), 0);
+    if (total > MAX_ZIP_BYTES) throw new CostError(413, 'zip_too_big', 'Чеков за месяц слишком много для одного архива');
+
+    const dir = await this._filesDir();
+    const pairs = [];
+    let missing = 0;
+    for (const cost of costs) {
+      for (const file of fileRows.filter((f) => f.costDocId === cost.documentId)) {
+        const st = await privateFileStat(dir, file.storedName);
+        if (st) pairs.push({ cost, file, full: st.full });
+        else {
+          missing += 1;
+          strapi.log.warn(`costs: чек ${file.documentId} есть в базе, но не на диске — в архив не попал`);
+        }
+      }
+    }
+    if (!pairs.length) throw new CostError(404, 'no_receipts', 'Файлов чеков за этот месяц на сервере нет');
+    const names = receiptZipNames(pairs);
+    const plan = await planZip(pairs.map((p, i) => ({ name: names[i], full: p.full, date: p.cost.date })));
+    if (plan.length > MAX_ZIP_BYTES) throw new CostError(413, 'zip_too_big', 'Чеков за месяц слишком много для одного архива');
+    return {
+      stream: zipStream(plan),
+      size: plan.length,
+      count: pairs.length,
+      missing,
+      disposition: `attachment; filename="doklady-${from.slice(0, 7)}.zip"`,
     };
   },
 };

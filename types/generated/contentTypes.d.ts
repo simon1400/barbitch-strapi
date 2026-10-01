@@ -1470,6 +1470,39 @@ export interface ApiContactContact extends Struct.SingleTypeSchema {
   };
 }
 
+export interface ApiCostCashSkipCostCashSkip extends Struct.CollectionTypeSchema {
+  collectionName: 'cost_cash_skips';
+  info: {
+    description: '\u0421\u0432\u0435\u0440\u043A\u0430 \u043A\u0430\u0441\u0441\u044B \u0441 \u0437\u0430\u0442\u0440\u0430\u0442\u0430\u043C\u0438 (s238): \u0441\u0442\u0440\u043E\u043A\u0430 \u0440\u0430\u0441\u0445\u043E\u0434\u0430 \u043A\u0430\u0441\u0441\u044B (cash.flow), \u043F\u043E\u043C\u0435\u0447\u0435\u043D\u043D\u0430\u044F \u0440\u0443\u043A\u043E\u0432\u043E\u0434\u0441\u0442\u0432\u043E\u043C \u00AB\u044D\u0442\u043E \u043D\u0435 \u0437\u0430\u0442\u0440\u0430\u0442\u0430\u00BB (\u0438\u0437\u044A\u044F\u0442\u0438\u0435, \u0440\u0430\u0437\u043C\u0435\u043D). key \u2014 \u0434\u0435\u043D\u044C|\u0441\u0443\u043C\u043C\u0430|\u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439|\u043D\u043E\u043C\u0435\u0440 \u043F\u043E\u0432\u0442\u043E\u0440\u0430. REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/costs/cash-check';
+    displayName: '\u0417\u0430\u0442\u0440\u0430\u0442\u044B \u2014 \u043D\u0435 \u0437\u0430\u0442\u0440\u0430\u0442\u0430 \u0438\u0437 \u043A\u0430\u0441\u0441\u044B';
+    pluralName: 'cost-cash-skips';
+    singularName: 'cost-cash-skip';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date;
+    key: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::cost-cash-skip.cost-cash-skip'
+    > &
+      Schema.Attribute.Private;
+    markedBy: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    sum: Schema.Attribute.Integer;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiCostFileCostFile extends Struct.CollectionTypeSchema {
   collectionName: 'cost_files';
   info: {
@@ -3793,6 +3826,7 @@ declare module '@strapi/strapi' {
       'api::client.client': ApiClientClient;
       'api::comeback-reminder-log.comeback-reminder-log': ApiComebackReminderLogComebackReminderLog;
       'api::contact.contact': ApiContactContact;
+      'api::cost-cash-skip.cost-cash-skip': ApiCostCashSkipCostCashSkip;
       'api::cost-file.cost-file': ApiCostFileCostFile;
       'api::cost-request.cost-request': ApiCostRequestCostRequest;
       'api::cost.cost': ApiCostCost;

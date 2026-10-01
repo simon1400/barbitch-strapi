@@ -112,3 +112,11 @@ export const removePrivateFile = async (dir: string | null, storedName: unknown,
     if (e?.code !== 'ENOENT') strapi.log.error(`${what} не удалён с диска: ${e.message}`);
   });
 };
+
+/** Полный путь к файлу в каталоге и его размер; `null` — имени нет или файла на диске нет. */
+export const privateFileStat = async (dir: string, storedName: unknown): Promise<{ full: string; size: number } | null> => {
+  if (!STORED_NAME.test(String(storedName ?? ''))) return null;
+  const full = path.join(dir, String(storedName));
+  const stat = await fs.promises.stat(full).catch(() => null);
+  return stat?.isFile() ? { full, size: stat.size } : null;
+};
