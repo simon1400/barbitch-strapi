@@ -1470,7 +1470,8 @@ export interface ApiContactContact extends Struct.SingleTypeSchema {
   };
 }
 
-export interface ApiCostCashSkipCostCashSkip extends Struct.CollectionTypeSchema {
+export interface ApiCostCashSkipCostCashSkip
+  extends Struct.CollectionTypeSchema {
   collectionName: 'cost_cash_skips';
   info: {
     description: '\u0421\u0432\u0435\u0440\u043A\u0430 \u043A\u0430\u0441\u0441\u044B \u0441 \u0437\u0430\u0442\u0440\u0430\u0442\u0430\u043C\u0438 (s238): \u0441\u0442\u0440\u043E\u043A\u0430 \u0440\u0430\u0441\u0445\u043E\u0434\u0430 \u043A\u0430\u0441\u0441\u044B (cash.flow), \u043F\u043E\u043C\u0435\u0447\u0435\u043D\u043D\u0430\u044F \u0440\u0443\u043A\u043E\u0432\u043E\u0434\u0441\u0442\u0432\u043E\u043C \u00AB\u044D\u0442\u043E \u043D\u0435 \u0437\u0430\u0442\u0440\u0430\u0442\u0430\u00BB (\u0438\u0437\u044A\u044F\u0442\u0438\u0435, \u0440\u0430\u0437\u043C\u0435\u043D). key \u2014 \u0434\u0435\u043D\u044C|\u0441\u0443\u043C\u043C\u0430|\u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439|\u043D\u043E\u043C\u0435\u0440 \u043F\u043E\u0432\u0442\u043E\u0440\u0430. REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/costs/cash-check';
@@ -3205,6 +3206,60 @@ export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiWorkReportWorkReport extends Struct.CollectionTypeSchema {
+  collectionName: 'work_reports';
+  info: {
+    description: '\u0415\u0436\u0435\u0434\u043D\u0435\u0432\u043D\u044B\u0439 \u043E\u0442\u0447\u0451\u0442 \u0443\u043F\u0440\u0430\u0432\u043B\u044F\u044E\u0449\u0435\u0439 \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0443 (s239). REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/work-reports';
+    displayName: 'V\u00FDkaz pr\u00E1ce';
+    pluralName: 'work-reports';
+    singularName: 'work-report';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    authorAccountId: Schema.Attribute.Integer;
+    authorName: Schema.Attribute.String;
+    carried: Schema.Attribute.Text;
+    comments: Schema.Attribute.JSON;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date;
+    dayOffReason: Schema.Attribute.Enumeration<
+      ['weekend', 'vacation', 'sick', 'other']
+    >;
+    done: Schema.Attribute.Text;
+    editedAt: Schema.Attribute.DateTime;
+    history: Schema.Attribute.JSON;
+    hours: Schema.Attribute.Decimal;
+    items: Schema.Attribute.JSON;
+    kind: Schema.Attribute.Enumeration<['day', 'week']> &
+      Schema.Attribute.DefaultTo<'day'>;
+    late: Schema.Attribute.Enumeration<['on_time', 'late']>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::work-report.work-report'
+    > &
+      Schema.Attribute.Private;
+    needsOwner: Schema.Attribute.Text;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    planTomorrow: Schema.Attribute.Text;
+    publishedAt: Schema.Attribute.DateTime;
+    rating: Schema.Attribute.Integer;
+    reviewedAt: Schema.Attribute.DateTime;
+    reviewedBy: Schema.Attribute.String;
+    status: Schema.Attribute.Enumeration<['submitted', 'day_off']>;
+    submittedAt: Schema.Attribute.DateTime;
+    systemFacts: Schema.Attribute.JSON;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    version: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+  };
+}
+
 export interface ApiWorkTimeWorkTime extends Struct.CollectionTypeSchema {
   collectionName: 'work_times';
   info: {
@@ -3865,6 +3920,7 @@ declare module '@strapi/strapi' {
       'api::upsell-attempt.upsell-attempt': ApiUpsellAttemptUpsellAttempt;
       'api::vaucher-page.vaucher-page': ApiVaucherPageVaucherPage;
       'api::voucher.voucher': ApiVoucherVoucher;
+      'api::work-report.work-report': ApiWorkReportWorkReport;
       'api::work-time.work-time': ApiWorkTimeWorkTime;
       'plugin::content-manager-organizer.content-manager-configuration': PluginContentManagerOrganizerContentManagerConfiguration;
       'plugin::content-releases.release': PluginContentReleasesRelease;

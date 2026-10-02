@@ -83,6 +83,7 @@ const birthdaysSvc = () => strapi.service('api::booking-engine.birthdays');
 const staffSvc = () => strapi.service('api::booking-engine.staff');
 const myMonthSvc = () => strapi.service('api::booking-engine.my-month');
 const costsSvc = () => strapi.service('api::booking-engine.costs');
+const reportsSvc = () => strapi.service('api::booking-engine.work-reports');
 
 // personal.documentId сотрудника сессии: по связи учётки, без связи — по имени (s229, §5а.1)
 const resolveSessionPersonalDocId = async (session) =>
@@ -822,6 +823,53 @@ export default {
       ctx.set('X-Content-Type-Options', 'nosniff');
       return z.stream;
     });
+  },
+
+  // «Výkaz práce» (s239): свой отчёт пишет управляющая (роль проверяет сервис: владельцу
+  // карточки нет — 404, остальным — 403); читает, отмечает и оценивает — только владелец
+  // GET /api/engine/admin/work-reports/mine?month=YYYY-MM
+  async adminWorkReportsMine(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => reportsSvc().mine({ session, month: ctx.query?.month }));
+  },
+
+  // PUT /api/engine/admin/work-reports/mine/:date {status, hours, items, done, …}
+  async adminWorkReportSave(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    await handle(ctx, () => reportsSvc().saveMine({ session, date: ctx.params.date, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/work-reports/mine/:date/comments {text}
+  async adminWorkReportComment(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    await handle(ctx, () => reportsSvc().commentMine({ session, date: ctx.params.date, body: ctx.request.body }));
+  },
+
+  // GET /api/engine/admin/work-reports?month=YYYY-MM&personal=<documentId> — владелец
+  async adminWorkReportsList(ctx) {
+    const session = requireOwner(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => reportsSvc().list({ month: ctx.query?.month, personal: ctx.query?.personal }));
+  },
+
+  // GET /api/engine/admin/work-reports/attention — «Сегодня» владельца
+  async adminWorkReportsAttention(ctx) {
+    const session = requireOwner(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => reportsSvc().attention());
+  },
+
+  // POST /api/engine/admin/work-reports/:id/review {seen?, rating?, comment?} — владелец
+  async adminWorkReportReview(ctx) {
+    const session = requireOwner(ctx);
+    if (!session) return;
+    await handle(ctx, () => reportsSvc().review({ session, id: ctx.params.id, body: ctx.request.body }));
   },
 
   // Отпуска / больничные (s216): запись + серия блоков мастеру — руководство

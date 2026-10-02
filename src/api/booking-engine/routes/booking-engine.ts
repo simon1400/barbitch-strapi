@@ -108,6 +108,13 @@ export default {
     admin('POST', '/engine/admin/costs/cash-check/skips', 'booking-engine.adminCostsCashSkip'),
     admin('DELETE', '/engine/admin/costs/cash-check/skips/:sid', 'booking-engine.adminCostsCashUnskip'),
     admin('GET', '/engine/admin/costs/receipts', 'booking-engine.adminCostsReceiptsZip'),
+    // «Výkaz práce» (s239): свой отчёт — управляющая, все отчёты и отметки — владелец
+    admin('GET', '/engine/admin/work-reports/mine', 'booking-engine.adminWorkReportsMine'),
+    admin('PUT', '/engine/admin/work-reports/mine/:date', 'booking-engine.adminWorkReportSave'),
+    admin('POST', '/engine/admin/work-reports/mine/:date/comments', 'booking-engine.adminWorkReportComment'),
+    admin('GET', '/engine/admin/work-reports/attention', 'booking-engine.adminWorkReportsAttention'),
+    admin('GET', '/engine/admin/work-reports', 'booking-engine.adminWorkReportsList'),
+    admin('POST', '/engine/admin/work-reports/:id/review', 'booking-engine.adminWorkReportReview'),
     // Отпуска / больничные + автоблоки мастеру (s216) — только руководство
     admin('GET', '/engine/admin/time-offs/conflicts', 'booking-engine.adminTimeOffConflicts'),
     admin('POST', '/engine/admin/time-offs', 'booking-engine.adminTimeOffCreate'),

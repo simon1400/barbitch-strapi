@@ -1,0 +1,93 @@
+{
+  "kind": "collectionType",
+  "collectionName": "work_reports",
+  "info": {
+    "singularName": "work-report",
+    "pluralName": "work-reports",
+    "displayName": "Výkaz práce",
+    "description": "Ежедневный отчёт управляющей владельцу (s239). REST-роутов нет: только ручки /engine/admin/work-reports"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "personal": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::personal.personal"
+    },
+    "authorAccountId": {
+      "type": "integer"
+    },
+    "authorName": {
+      "type": "string"
+    },
+    "date": {
+      "type": "date"
+    },
+    "kind": {
+      "type": "enumeration",
+      "enum": ["day", "week"],
+      "default": "day"
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["submitted", "day_off"]
+    },
+    "dayOffReason": {
+      "type": "enumeration",
+      "enum": ["weekend", "vacation", "sick", "other"]
+    },
+    "hours": {
+      "type": "decimal"
+    },
+    "items": {
+      "type": "json"
+    },
+    "done": {
+      "type": "text"
+    },
+    "carried": {
+      "type": "text"
+    },
+    "needsOwner": {
+      "type": "text"
+    },
+    "planTomorrow": {
+      "type": "text"
+    },
+    "submittedAt": {
+      "type": "datetime"
+    },
+    "late": {
+      "type": "enumeration",
+      "enum": ["on_time", "late"]
+    },
+    "editedAt": {
+      "type": "datetime"
+    },
+    "history": {
+      "type": "json"
+    },
+    "reviewedAt": {
+      "type": "datetime"
+    },
+    "reviewedBy": {
+      "type": "string"
+    },
+    "rating": {
+      "type": "integer"
+    },
+    "comments": {
+      "type": "json"
+    },
+    "systemFacts": {
+      "type": "json"
+    },
+    "version": {
+      "type": "integer",
+      "default": 0
+    }
+  }
+}
