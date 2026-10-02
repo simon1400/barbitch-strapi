@@ -84,6 +84,8 @@ const staffSvc = () => strapi.service('api::booking-engine.staff');
 const myMonthSvc = () => strapi.service('api::booking-engine.my-month');
 const costsSvc = () => strapi.service('api::booking-engine.costs');
 const reportsSvc = () => strapi.service('api::booking-engine.work-reports');
+const shiftLogSvc = () => strapi.service('api::booking-engine.shift-close-log');
+const tasksSvc = () => strapi.service('api::booking-engine.owner-tasks');
 
 // personal.documentId сотрудника сессии: по связи учётки, без связи — по имени (s229, §5а.1)
 const resolveSessionPersonalDocId = async (session) =>
@@ -870,6 +872,83 @@ export default {
     const session = requireOwner(ctx);
     if (!session) return;
     await handle(ctx, () => reportsSvc().review({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // «Uzavření směny» в журнал (s240): страница публикует день сырым REST и после этого
+  // сообщает итог; автор — из сессии, число услуг дня сервер считает сам
+  // POST /api/engine/admin/shift-close/journal {date, published, failures, skipped}
+  async adminShiftCloseJournal(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => shiftLogSvc().logClose({ session, body: ctx.request.body }));
+  },
+
+  // Поручения владельца (s240): создаёт, правит, принимает — владелец; исполнитель (manager)
+  // видит свои, пишет ход работы и «hotovo». Роль исполнителя проверяет сервис (403/404).
+  // GET /api/engine/admin/tasks?scope=active|closed|all&personal=
+  async adminTasksList(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => tasksSvc().list({ session, scope: ctx.query?.scope, personal: ctx.query?.personal }));
+  },
+
+  // GET /api/engine/admin/tasks/attention — «Сегодня» (владелец и исполнитель)
+  async adminTasksAttention(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => tasksSvc().attention({ session }));
+  },
+
+  // POST /api/engine/admin/tasks {personal, title, description, dueDate, priority} — владелец
+  async adminTaskCreate(ctx) {
+    const session = requireOwner(ctx);
+    if (!session) return;
+    await handle(ctx, () => tasksSvc().create({ session, body: ctx.request.body }));
+  },
+
+  // PATCH /api/engine/admin/tasks/:id {title?, description?, dueDate?, priority?} — владелец
+  async adminTaskUpdate(ctx) {
+    const session = requireOwner(ctx);
+    if (!session) return;
+    await handle(ctx, () => tasksSvc().update({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/tasks/:id/actions {action, text}
+  async adminTaskAction(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    await handle(ctx, () => tasksSvc().act({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/tasks/:id/files — multipart: files (один файл)
+  async adminTaskFileUpload(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    await handle(ctx, () => tasksSvc().uploadFile({ session, id: ctx.params.id, files: ctx.request.files }));
+  },
+
+  // GET /api/engine/admin/tasks/:id/files/:fid — файл потоком (не кэшировать)
+  async adminTaskFileDownload(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const f = await tasksSvc().downloadFile({ session, id: ctx.params.id, fid: ctx.params.fid });
+      ctx.set('Content-Type', f.mime);
+      ctx.set('Content-Length', String(f.size));
+      ctx.set('Content-Disposition', f.disposition);
+      ctx.set('Cache-Control', 'private, no-store');
+      ctx.set('X-Content-Type-Options', 'nosniff');
+      return f.stream;
+    });
+  },
+
+  // DELETE /api/engine/admin/tasks/:id/files/:fid — владелец любое, исполнитель своё
+  async adminTaskFileDelete(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    await handle(ctx, () => tasksSvc().deleteFile({ session, id: ctx.params.id, fid: ctx.params.fid }));
   },
 
   // Отпуска / больничные (s216): запись + серия блоков мастеру — руководство

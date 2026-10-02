@@ -23,11 +23,18 @@
  * правка автора и комментарий владельца не затирают друг друга: второй получает 409).
  * Журнал — calendar_logs, entityType `report`, БЕЗ текста отчёта (журнал читают шире).
  *
+ * Фаза 2 (s240): «Systém zaznamenal» — что журналы системы записали за день от имени автора
+ * (calendar_logs + отметки дозаписей + дубли клиентов, по логину учётки). Видят обе стороны
+ * (решение §8.7). Это дополнение к отчёту, а не оценка: звонки, поставщики и собеседования
+ * в систему не попадают. Снимок сводки кладётся в `systemFacts` при подаче/правке — чтобы
+ * последующее удаление записей журнала было видно. Итог месяца — ещё и по категориям пунктов.
+ *
  * Верх файла — чистые функции (tests/work-reports.test.mjs), ниже — сервис.
  */
 
-import { pragueDateOf, pragueMinOf } from './slots-core';
+import { minToHHMM, pragueDateOf, pragueMinOf, pragueMinToUtcIso } from './slots-core';
 import { findSessionPersonal } from '../../../utils/staff-identity';
+import { normalizeReportTasks } from './owner-tasks';
 
 export class ReportError extends Error {
   status: number;
@@ -42,6 +49,10 @@ export class ReportError extends Error {
 export const REPORT_UID = 'api::work-report.work-report';
 const TIME_OFF_UID = 'api::time-off.time-off';
 const PERSONAL_UID = 'api::personal.personal';
+const ADMIN_UID = 'api::admin-user.admin-user';
+const LOG_UID = 'api::calendar-log.calendar-log';
+const UPSELL_ATTEMPT_UID = 'api::upsell-attempt.upsell-attempt';
+const MERGE_LOG_UID = 'api::client-merge-log.client-merge-log';
 
 // ── настройки (решения владельца §8 — менять здесь, больше нигде) ──────────────
 
@@ -88,7 +99,101 @@ export const DAY_OFF_REASONS = {
 } as const;
 
 /** Поля, которые пишет автор (и которые сравниваются/уходят в историю). */
-export const CONTENT_FIELDS = ['status', 'dayOffReason', 'hours', 'items', 'done', 'carried', 'needsOwner', 'planTomorrow'] as const;
+export const CONTENT_FIELDS = ['status', 'dayOffReason', 'hours', 'items', 'done', 'carried', 'needsOwner', 'planTomorrow', 'taskNotes'] as const;
+
+/** «Systém zaznamenal»: группы действий (entityType журнала + два своих источника) → подпись. */
+export const FACT_GROUPS = {
+  booking: 'Rezervace',
+  block: 'Bloky v kalendáři',
+  client: 'Údaje klientů',
+  korekce: 'Korekce',
+  correction: 'Úpravy mezd',
+  cost: 'Náklady',
+  timeoff: 'Absence',
+  shift: 'Směny administrátorů',
+  schedule: 'Plán mistrů',
+  staff: 'Tým',
+  visit: 'Uzavření návštěv',
+  shift_close: 'Uzavření směny',
+  task: 'Úkoly od majitele',
+  upsell: 'Dozápisy — označení klientů',
+  dedupe: 'Duplicity klientů',
+  other: 'Jiné',
+} as const;
+
+/** Подписи действий (как в журнале админки); неизвестное — ключом. */
+export const FACT_ACTIONS: Record<string, string> = {
+  booking_create: 'nová rezervace',
+  booking_move: 'přesun',
+  booking_status: 'změna stavu',
+  booking_service: 'změna služby',
+  booking_edit: 'úprava',
+  booking_delete: 'smazání',
+  block_create: 'nový blok',
+  block_edit: 'úprava bloku',
+  block_delete: 'smazání bloku',
+  block_approve: 'blok schválen',
+  block_reject: 'blok zamítnut',
+  client_edit: 'údaje klienta',
+  korekce_link: 'korekce',
+  korekce_transfer: 'převod podílu',
+  korekce_revert: 'převod zrušen',
+  correction_create: 'nový záznam',
+  correction_delete: 'smazáno',
+  cost_create: 'nový náklad',
+  cost_update: 'změna',
+  cost_delete: 'smazáno',
+  cost_request: 'žádost',
+  cost_approve: 'schváleno',
+  cost_reject: 'zamítnuto',
+  cost_cancel: 'žádost stažena',
+  cost_file_add: 'doklad',
+  cost_file_delete: 'doklad smazán',
+  cost_cash_skip: 'pokladna: není náklad',
+  cost_cash_unskip: 'pokladna: zpět do kontroly',
+  timeoff_create: 'nový záznam',
+  timeoff_update: 'úprava',
+  timeoff_delete: 'smazáno',
+  shift_create: 'nový rozpis',
+  shift_update: 'změna',
+  shift_delete: 'smazáno',
+  schedule_template: 'šablona',
+  schedule_day: 'změna dne',
+  schedule_request: 'návrh',
+  schedule_approve: 'schváleno',
+  schedule_reject: 'zamítnuto',
+  schedule_legacy_replace: 'staré bloky',
+  staff_create: 'nový zaměstnanec',
+  staff_update: 'karta',
+  staff_rate: 'sazba',
+  staff_file_add: 'nový soubor',
+  staff_file_update: 'dokument',
+  staff_file_delete: 'dokument smazán',
+  staff_note: 'poznámka',
+  staff_account: 'přístup',
+  staff_rename: 'přejmenování',
+  staff_leave: 'ukončení',
+  staff_erase: 'údaje smazány',
+  visit_close: 'uzavřena',
+  visit_close_edit: 'úprava',
+  visit_close_delete: 'zrušeno',
+  shift_close: 'směna uzavřena',
+  shift_revert: 'uzavření zrušeno',
+  task_done: 'hotovo',
+  task_progress: 'průběh',
+  task_comment: 'komentář',
+  task_file_add: 'příloha',
+  task_file_delete: 'příloha smazána',
+  upsell_declined: 'klient odmítl',
+  upsell_not_offered: 'nenabízeno',
+  dedupe_merge: 'sloučení',
+  dedupe_ignore: 'nejsou duplicity',
+  dedupe_unignore: 'zpět do kontroly',
+  dedupe_blacklist: 'blacklist',
+};
+
+/** Предел строк одного источника за период (месяц управляющей — сотни). */
+export const FACTS_LIMIT = 5000;
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const DOC_ID = /^[a-z0-9]{10,40}$/;
@@ -184,7 +289,7 @@ export const normalizeReportInput = (body: any) => {
   if (status === 'day_off') {
     const reason = String(body?.dayOffReason ?? '');
     if (!has(DAY_OFF_REASONS, reason)) throw new ReportError(400, 'bad_reason', 'Vyberte důvod nepracovního dne');
-    return { status, dayOffReason: reason, hours: null, items: [], done: '', carried: '', needsOwner: '', planTomorrow: '' };
+    return { status, dayOffReason: reason, hours: null, items: [], done: '', carried: '', needsOwner: '', planTomorrow: '', taskNotes: [] };
   }
   if (status !== 'submitted') throw new ReportError(400, 'bad_status', 'Neplatný stav výkazu');
   const hours = normalizeHours(body?.hours);
@@ -200,6 +305,8 @@ export const normalizeReportInput = (body: any) => {
     carried: cleanText(body?.carried, MAX_TEXT, 'text_too_long'),
     needsOwner: cleanText(body?.needsOwner, MAX_TEXT, 'text_too_long'),
     planTomorrow: cleanText(body?.planTomorrow, MAX_TEXT, 'text_too_long'),
+    // заметки по поручениям — [{taskId, done, note}]; принадлежность и названия проверяет сервис
+    taskNotes: normalizeReportTasks(body?.tasks),
   };
 };
 
@@ -213,9 +320,19 @@ export const contentOf = (row: any) => ({
   carried: row?.carried || '',
   needsOwner: row?.needsOwner || '',
   planTomorrow: row?.planTomorrow || '',
+  // заметки по поручениям владельца (s240): [{taskId, title, note, done}]; title — на момент подачи
+  taskNotes: Array.isArray(row?.taskNotes)
+    ? row.taskNotes.map((n: any) => ({ taskId: n.taskId, title: n.title || '', note: n.note || '', done: n.done === true }))
+    : [],
 });
 
-export const sameContent = (a: any, b: any): boolean => JSON.stringify(contentOf(a)) === JSON.stringify(contentOf(b));
+/** Сравнение содержимого без названий поручений (владелец мог переименовать поручение). */
+const compareKey = (row: any) => {
+  const c = contentOf(row);
+  return JSON.stringify({ ...c, taskNotes: c.taskNotes.map(({ title, ...rest }) => rest) });
+};
+
+export const sameContent = (a: any, b: any): boolean => compareKey(a) === compareKey(b);
 
 /** День, за который можно писать: не будущий, не раньше начала отсчёта и окна дозаполнения. */
 export const checkReportDate = (date: unknown, today: string): string => {
@@ -361,7 +478,88 @@ export const summarize = (days: any[], reports: any[]) => {
     hours: submitted.reduce((s, r) => s + (Number(r.hours) || 0), 0),
     avgRating: rated.length ? Math.round((rated.reduce((s, r) => s + r.rating, 0) / rated.length) * 10) / 10 : null,
     unread: submitted.filter((r) => !r.reviewedAt || editedAfterReview(r)).length,
+    ...categoryTotals(submitted),
   };
+};
+
+const byCountThenLabel = (a: { count: number; label: string }, b: { count: number; label: string }) =>
+  b.count - a.count || a.label.localeCompare(b.label, 'cs');
+
+/** Пункты «Na čem jsem pracovala» по категориям (поданные отчёты периода). */
+export const categoryTotals = (submitted: any[]) => {
+  const counts = new Map<string, number>();
+  for (const r of submitted) for (const it of contentOf(r).items) counts.set(it.category, (counts.get(it.category) || 0) + 1);
+  const categories = [...counts]
+    .map(([key, count]) => ({ key, label: CATEGORIES[key] || key, count }))
+    .sort(byCountThenLabel);
+  return { items: categories.reduce((s, c) => s + c.count, 0), categories };
+};
+
+// ── «Systém zaznamenal» (Фаза 2) ─────────────────────────────────────────────
+
+export type FactEvent = { group: string; action: string; at: string };
+
+/** Строки трёх источников → события. Действия с самим výkazem в сводку не идут (это не работа). */
+export const factEventsOf = ({ logs = [], attempts = [], merges = [] }: { logs?: any[]; attempts?: any[]; merges?: any[] }): FactEvent[] => [
+  ...logs
+    .filter((l) => l?.entityType !== 'report')
+    .map((l) => ({ group: String(l.entityType || 'other'), action: String(l.action || ''), at: l.createdAt })),
+  ...attempts.map((a) => ({ group: 'upsell', action: `upsell_${a.outcome}`, at: a.updatedAt || a.createdAt })),
+  ...merges.map((m) => ({ group: 'dedupe', action: `dedupe_${m.action}`, at: m.createdAt })),
+];
+
+const atMs = (e: FactEvent) => new Date(e?.at).getTime();
+
+/** Сводка событий одного дня: сколько, первое и последнее время (Прага), по группам и действиям. */
+export const buildFacts = (events: FactEvent[]) => {
+  const list = events.filter((e) => Number.isFinite(atMs(e))).sort((a, b) => atMs(a) - atMs(b));
+  const groups = new Map<string, { key: string; label: string; count: number; actions: Map<string, number> }>();
+  for (const e of list) {
+    const key = has(FACT_GROUPS, e.group) ? e.group : 'other';
+    const g = groups.get(key) || { key, label: FACT_GROUPS[key], count: 0, actions: new Map() };
+    g.count += 1;
+    g.actions.set(e.action, (g.actions.get(e.action) || 0) + 1);
+    groups.set(key, g);
+  }
+  const time = (e: FactEvent | undefined) => (e ? minToHHMM(pragueMinOf(e.at)) : null);
+  return {
+    total: list.length,
+    first: time(list[0]),
+    last: time(list[list.length - 1]),
+    groups: [...groups.values()]
+      .map((g) => ({
+        key: g.key,
+        label: g.label,
+        count: g.count,
+        actions: [...g.actions].map(([key, count]) => ({ key, label: FACT_ACTIONS[key] || key, count })).sort(byCountThenLabel),
+      }))
+      .sort(byCountThenLabel),
+  };
+};
+
+/** События периода → сводка по пражским дням (только дни, где что-то было). */
+export const factsByDay = (events: FactEvent[]) => {
+  const byDay = new Map<string, FactEvent[]>();
+  for (const e of events) {
+    if (!Number.isFinite(atMs(e))) continue;
+    const d = pragueDateOf(e.at);
+    byDay.set(d, [...(byDay.get(d) || []), e]);
+  }
+  return Object.fromEntries([...byDay].sort(([a], [b]) => (a < b ? -1 : 1)).map(([d, ev]) => [d, buildFacts(ev)]));
+};
+
+/**
+ * Логины, под которыми журналы записали действия человека: учётка, связанная с карточкой
+ * (s229; без связи — учётка с логином = имени карточки, как accountForCard), плюс логины,
+ * под которыми он подавал отчёты (логин могли переименовать — старые записи остались под старым).
+ */
+export const actorNamesFor = (person: { documentId: string; name?: string }, accounts: any[], extra: unknown[] = []): string[] => {
+  const clean = (v: unknown) => String(v ?? '').trim();
+  const linked = accounts.filter((a) => clean(a?.personalDocId) === person.documentId);
+  const own = linked.length
+    ? linked
+    : accounts.filter((a) => !clean(a?.personalDocId) && clean(a?.username).toLowerCase() === clean(person.name).toLowerCase() && clean(person.name));
+  return [...new Set([...own.map((a) => a.username), ...extra].map(clean).filter(Boolean))];
 };
 
 /** Строка отчёта наружу. */
@@ -378,6 +576,8 @@ export const toRow = (doc: any) => ({
   reviewedBy: doc.reviewedBy || null,
   rating: Number.isInteger(doc.rating) ? doc.rating : null,
   comments: Array.isArray(doc.comments) ? doc.comments : [],
+  // снимок «Systém zaznamenal» на момент подачи/последней правки (Фаза 2)
+  systemFacts: doc.systemFacts && typeof doc.systemFacts === 'object' && !Array.isArray(doc.systemFacts) ? doc.systemFacts : null,
   createdAt: doc.createdAt || null,
   updatedAt: doc.updatedAt || null,
 });
@@ -413,6 +613,8 @@ const REPORT_FIELDS = [
   'reviewedBy',
   'rating',
   'comments',
+  'systemFacts',
+  'taskNotes',
   'version',
   'createdAt',
   'updatedAt',
@@ -489,19 +691,85 @@ export default {
     return strapi.documents(REPORT_UID).findOne({ documentId: existing.documentId, fields: REPORT_FIELDS });
   },
 
+  /** Логины человека для журналов (см. actorNamesFor): учётка + логины всех его отчётов. */
+  async _actorNames(person: { documentId: string; name?: string }, extra: unknown[] = []) {
+    const [accounts, authored] = await Promise.all([
+      strapi.db.query(ADMIN_UID).findMany({ select: ['username', 'personalDocId'], limit: 1000 }),
+      strapi.documents(REPORT_UID).findMany({
+        filters: { personal: { documentId: { $eq: person.documentId } } },
+        fields: ['authorName'],
+        limit: 5000,
+      }),
+    ]);
+    return actorNamesFor(person, accounts || [], [...(authored || []).map((r) => r.authorName), ...extra]);
+  },
+
+  /** События журналов от имени `names` за пражские дни from…to включительно. */
+  async _factEvents(names: string[], from: string, to: string): Promise<FactEvent[]> {
+    if (!names.length) return [];
+    const range = { $gte: new Date(pragueMinToUtcIso(from, 0)), $lt: new Date(pragueMinToUtcIso(addDaysYmd(to, 1), 0)) };
+    const [logs, attempts, merges] = await Promise.all([
+      strapi.db.query(LOG_UID).findMany({
+        where: { actorName: { $in: names }, createdAt: range },
+        select: ['action', 'entityType', 'createdAt'],
+        limit: FACTS_LIMIT,
+      }),
+      strapi.db.query(UPSELL_ATTEMPT_UID).findMany({
+        where: { adminUsername: { $in: names }, updatedAt: range },
+        select: ['outcome', 'createdAt', 'updatedAt'],
+        limit: FACTS_LIMIT,
+      }),
+      strapi.db.query(MERGE_LOG_UID).findMany({
+        where: { actorName: { $in: names }, createdAt: range },
+        select: ['action', 'createdAt'],
+        limit: FACTS_LIMIT,
+      }),
+    ]);
+    return factEventsOf({ logs: logs || [], attempts: attempts || [], merges: merges || [] });
+  },
+
+  /** «Systém zaznamenal» по дням месяца; сбой журналов не гасит отчёты — null. */
+  async _monthFacts(person: { documentId: string; name?: string }, from: string, to: string) {
+    try {
+      const names = await this._actorNames(person);
+      return factsByDay(await this._factEvents(names, from, to));
+    } catch (e) {
+      strapi.log.error(`work-reports facts failed: ${e?.message || e}`);
+      return null;
+    }
+  },
+
+  /** Снимок сводки дня в отчёт (при подаче/правке). Сбой — без снимка, отчёт всё равно сохраняется. */
+  async _snapshot(person: { documentId: string; name?: string }, extra: unknown[], day: string, now: Date) {
+    try {
+      const names = await this._actorNames(person, extra);
+      return { ...buildFacts(await this._factEvents(names, day, day)), at: now.toISOString() };
+    } catch (e) {
+      strapi.log.error(`work-reports snapshot failed: ${e?.message || e}`);
+      return null;
+    }
+  },
+
   /** Месяц одного человека: дни, отчёты, итог. Отчёты — и за BACKFILL_DAYS до начала месяца (вчерашний план). */
-  async _month(personalDocId: string, month: unknown, today: string, nowMin: number) {
+  async _month(person: { documentId: string; name?: string }, month: unknown, today: string, nowMin: number) {
     const { from, to } = monthRange(month);
     const [reports, timeOffs] = await Promise.all([
-      this._reports(personalDocId, addDaysYmd(from, -BACKFILL_DAYS), to),
-      this._timeOffs(personalDocId, from, to),
+      this._reports(person.documentId, addDaysYmd(from, -BACKFILL_DAYS), to),
+      this._timeOffs(person.documentId, from, to),
     ]);
     const days = dayStates({ from, to, today, reports, timeOffs, nowMin });
+    // будущих дней в журнале нет — до сегодня
+    const facts = from <= today ? await this._monthFacts(person, from, to < today ? to : today) : {};
+    const summary = summarize(days, reports);
+    const system = facts
+      ? { days: Object.keys(facts).length, actions: Object.values(facts).reduce((s: number, f: any) => s + f.total, 0) }
+      : null;
     return {
       month: from.slice(0, 7),
       days,
       reports: reports.map(toRow),
-      summary: summarize(days, reports),
+      summary: { ...summary, system },
+      facts,
       timeOffs: timeOffs.map((t) => ({ type: t.type, startDate: t.startDate, endDate: t.endDate })),
     };
   },
@@ -525,7 +793,20 @@ export default {
   async mine({ session, month, now = new Date() }: { session: any; month?: unknown; now?: Date }) {
     const p = await this._author(session);
     const today = this._today(now);
-    return { ...this._meta(today), name: p.name, ...(await this._month(p.documentId, month || today.slice(0, 7), today, pragueMinOf(now))) };
+    // поручения в работе — для блока «Úkoly» в форме (сбой не гасит отчёты)
+    const openTasks = await strapi
+      .service('api::booking-engine.owner-tasks')
+      .openFor(p.documentId, now)
+      .catch((e) => {
+        strapi.log.error(`work-reports: open tasks failed: ${e?.message || e}`);
+        return null;
+      });
+    return {
+      ...this._meta(today),
+      name: p.name,
+      openTasks,
+      ...(await this._month(p, month || today.slice(0, 7), today, pragueMinOf(now))),
+    };
   },
 
   /** PUT /work-reports/mine/:date — подать или исправить свой отчёт за день (upsert). */
@@ -534,9 +815,15 @@ export default {
     const today = this._today(now);
     const day = checkReportDate(date, today);
     const input = normalizeReportInput(body);
+    // поручения — только свои; названия — с сервера
+    if (input.taskNotes.length) input.taskNotes = await strapi.service('api::booking-engine.owner-tasks').checkReportTasks(session, input.taskNotes);
     const existing = await this._findDay(p.documentId, day);
     const plan = applyEdit(existing, input, now, day);
     let saved = existing;
+    if (plan.changed) {
+      const snap = await this._snapshot(p, [session?.username], day, now);
+      if (snap) plan.data.systemFacts = snap;
+    }
 
     if (!existing) {
       const created = await strapi.documents(REPORT_UID).create({
@@ -570,6 +857,14 @@ export default {
       });
     }
 
+    // заметки по поручениям → лента поручений (только новые/изменившиеся; отчёт уже сохранён)
+    if (plan.changed && (input.taskNotes.length || existing?.taskNotes?.length)) {
+      await strapi
+        .service('api::booking-engine.owner-tasks')
+        .applyReportTasks(session, contentOf(existing).taskNotes, input.taskNotes, day, now)
+        .catch((e) => strapi.log.error(`work-reports: task notes ${day} failed: ${e?.message || e}`));
+    }
+
     return { saved: toRow(saved), ...(await this.mine({ session, month: day.slice(0, 7), now })) };
   },
 
@@ -599,9 +894,19 @@ export default {
     const meta = this._meta(today);
     if (!person) {
       const { from } = monthRange(month || today.slice(0, 7));
-      return { ...meta, people, personal: null, month: from.slice(0, 7), days: [], reports: [], summary: summarize([], []), timeOffs: [] };
+      return {
+        ...meta,
+        people,
+        personal: null,
+        month: from.slice(0, 7),
+        days: [],
+        reports: [],
+        summary: { ...summarize([], []), system: null },
+        facts: {},
+        timeOffs: [],
+      };
     }
-    return { ...meta, people, personal: person.documentId, ...(await this._month(person.documentId, month || today.slice(0, 7), today, pragueMinOf(now))) };
+    return { ...meta, people, personal: person.documentId, ...(await this._month(person, month || today.slice(0, 7), today, pragueMinOf(now))) };
   },
 
   /** POST /work-reports/:id/review {seen?, rating?, comment?} — прочитано, оценка, комментарий. */

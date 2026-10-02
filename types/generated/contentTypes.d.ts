@@ -2008,6 +2008,87 @@ export interface ApiOfferOffer extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiOwnerTaskFileOwnerTaskFile
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'owner_task_files';
+  info: {
+    description: '\u0412\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u043F\u043E\u0440\u0443\u0447\u0435\u043D\u0438\u044F \u2014 \u0444\u043E\u0442\u043E \u0438\u043B\u0438 PDF (s240). \u0421\u0430\u043C \u0444\u0430\u0439\u043B \u2014 \u0432 \u0437\u0430\u043A\u0440\u044B\u0442\u043E\u043C \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0435 TASK_FILES_DIR \u043D\u0430 \u0441\u0435\u0440\u0432\u0435\u0440\u0435 (storedName), \u043D\u0435 \u0432 \u043C\u0435\u0434\u0438\u0430\u0442\u0435\u043A\u0435 \u0438 \u043D\u0435 \u043D\u0430 CDN. REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/tasks';
+    displayName: '\u00DAkol \u2014 p\u0159\u00EDloha';
+    pluralName: 'owner-task-files';
+    singularName: 'owner-task-file';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    fileName: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::owner-task-file.owner-task-file'
+    > &
+      Schema.Attribute.Private;
+    mime: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    size: Schema.Attribute.Integer;
+    storedName: Schema.Attribute.String & Schema.Attribute.Private;
+    taskDocId: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    uploadedBy: Schema.Attribute.String;
+    uploadedRole: Schema.Attribute.String;
+  };
+}
+
+export interface ApiOwnerTaskOwnerTask extends Struct.CollectionTypeSchema {
+  collectionName: 'owner_tasks';
+  info: {
+    description: '\u041F\u043E\u0440\u0443\u0447\u0435\u043D\u0438\u0435 \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u0443\u043F\u0440\u0430\u0432\u043B\u044F\u044E\u0449\u0435\u0439 (s240, \u00ABV\u00FDkaz pr\u00E1ce\u00BB \u0424\u0430\u0437\u0430 3). REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/tasks';
+    displayName: '\u00DAkol od majitele';
+    pluralName: 'owner-tasks';
+    singularName: 'owner-task';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    closedAt: Schema.Attribute.DateTime;
+    closedBy: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    createdByAccountId: Schema.Attribute.Integer;
+    createdByName: Schema.Attribute.String;
+    description: Schema.Attribute.Text;
+    doneAt: Schema.Attribute.DateTime;
+    dueDate: Schema.Attribute.Date;
+    events: Schema.Attribute.JSON;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::owner-task.owner-task'
+    > &
+      Schema.Attribute.Private;
+    personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
+    priority: Schema.Attribute.Enumeration<['normal', 'urgent']> &
+      Schema.Attribute.DefaultTo<'normal'>;
+    publishedAt: Schema.Attribute.DateTime;
+    status: Schema.Attribute.Enumeration<
+      ['open', 'done', 'accepted', 'cancelled']
+    > &
+      Schema.Attribute.DefaultTo<'open'>;
+    title: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    version: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+  };
+}
+
 export interface ApiPayrollPayroll extends Struct.CollectionTypeSchema {
   collectionName: 'payrolls';
   info: {
@@ -3253,6 +3334,7 @@ export interface ApiWorkReportWorkReport extends Struct.CollectionTypeSchema {
     status: Schema.Attribute.Enumeration<['submitted', 'day_off']>;
     submittedAt: Schema.Attribute.DateTime;
     systemFacts: Schema.Attribute.JSON;
+    taskNotes: Schema.Attribute.JSON;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -3894,6 +3976,8 @@ declare module '@strapi/strapi' {
       'api::navigation.navigation': ApiNavigationNavigation;
       'api::note.note': ApiNoteNote;
       'api::offer.offer': ApiOfferOffer;
+      'api::owner-task-file.owner-task-file': ApiOwnerTaskFileOwnerTaskFile;
+      'api::owner-task.owner-task': ApiOwnerTaskOwnerTask;
       'api::payroll.payroll': ApiPayrollPayroll;
       'api::penalty.penalty': ApiPenaltyPenalty;
       'api::personal.personal': ApiPersonalPersonal;

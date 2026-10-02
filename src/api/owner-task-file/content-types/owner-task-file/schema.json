@@ -1,0 +1,38 @@
+{
+  "kind": "collectionType",
+  "collectionName": "owner_task_files",
+  "info": {
+    "singularName": "owner-task-file",
+    "pluralName": "owner-task-files",
+    "displayName": "Úkol — příloha",
+    "description": "Вложение поручения — фото или PDF (s240). Сам файл — в закрытом каталоге TASK_FILES_DIR на сервере (storedName), не в медиатеке и не на CDN. REST-роутов нет: только ручки /engine/admin/tasks"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "taskDocId": {
+      "type": "string"
+    },
+    "fileName": {
+      "type": "string"
+    },
+    "mime": {
+      "type": "string"
+    },
+    "size": {
+      "type": "integer"
+    },
+    "storedName": {
+      "type": "string",
+      "private": true
+    },
+    "uploadedBy": {
+      "type": "string"
+    },
+    "uploadedRole": {
+      "type": "string"
+    }
+  }
+}

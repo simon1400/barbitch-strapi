@@ -191,6 +191,22 @@ export const deniedCostWrite = (path: string, method: string): boolean =>
 
 export const deniedForAdministrator = (path: string): boolean => ADMINISTRATOR_DENIED.has(collectionOf(path));
 
+// 🟥 Журнал действий (s240, «Výkaz práce» Фаза 2). По `calendar-logs` строится сводка
+// «Systém zaznamenal» под отчётом управляющей — `POST /api/calendar-logs` с чужим или своим
+// `actorName` подделал бы её (сессия получает full-access токен). Пишет журнал только сервер
+// (calendar-log.write из ручек движка); админка его лишь читает и чистит из модалки —
+// поэтому создание и правка закрыты ЛЮБОЙ сессии. Удалять записи может только ВЛАДЕЛЕЦ
+// (решение владельца 02.10.2026, §10.4.1 плана): иначе управляющая убирала бы свои же
+// действия из сводки под своим отчётом. Чтение — как было.
+const JOURNAL = 'calendar-logs';
+const JOURNAL_WRITE = new Set(['POST', 'PUT', 'PATCH']);
+
+export const deniedJournalWrite = (path: string, method: string, role: string): boolean => {
+  if (collectionOf(path) !== JOURNAL) return false;
+  const m = String(method || 'GET').toUpperCase();
+  return JOURNAL_WRITE.has(m) || (m === 'DELETE' && role !== 'owner');
+};
+
 // 🟥 Паспортные данные сотрудников закрыты ЛЮБОЙ сессии сотрудника (s221).
 //
 // Компонент `personal.oficial` — номер документа, адреса, дата рождения, телефон,
@@ -410,6 +426,13 @@ export default (_config: unknown, { strapi }: { strapi: any }) => {
           ctx.status = 403;
           ctx.body = {
             error: { status: 403, code: 'forbidden_for_administrator', message: 'Tato data jsou dostupná jen vedení salonu' },
+          };
+          return;
+        }
+        if (deniedJournalWrite(path, ctx.request?.method || ctx.method, session.role)) {
+          ctx.status = 403;
+          ctx.body = {
+            error: { status: 403, code: 'engine_only', message: 'Deník zapisuje jen systém, mazat záznamy může jen majitel' },
           };
           return;
         }

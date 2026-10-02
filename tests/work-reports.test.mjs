@@ -7,7 +7,10 @@
 //   - правка после прочтения — снимок в history + бейдж, повторное прочтение бейдж снимает;
 //   - запись условная по version (устаревшая — 409), двойная подача дня оставляет одну запись;
 //   - журнал — entityType report, без текста отчёта;
-//   - ручки владельца — под requireOwner, не requireManagement.
+//   - ручки владельца — под requireOwner, не requireManagement;
+//   - Фаза 2 (s240): «Systém zaznamenal» — журналы по логину учётки за пражский день, действия
+//     с výkazem не считаются, чужие логины не попадают; снимок в systemFacts при подаче;
+//     сбой журналов не гасит отчёты; итог месяца по категориям пунктов.
 // Сервис — НАСТОЯЩИЙ work-reports.ts (+ slots-core, staff-identity) на заглушке базы в памяти.
 //
 // Запуск: cd strapi && node --test tests/work-reports.test.mjs
@@ -26,20 +29,46 @@ const toJs = (file) =>
   ts.transpileModule(read(file), { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
 const dataUrl = (js) => 'data:text/javascript;base64,' + Buffer.from(js, 'utf8').toString('base64');
 
-let svcJs = toJs('src/api/booking-engine/services/work-reports.ts');
-for (const [from, to] of [
-  ["from './slots-core'", `from '${dataUrl(toJs('src/api/booking-engine/services/slots-core.ts'))}'`],
-  ["from '../../../utils/staff-identity'", `from '${dataUrl(toJs('src/utils/staff-identity.ts'))}'`],
-]) {
-  assert.ok(svcJs.includes(from), `импорт ${from} не найден`);
-  svcJs = svcJs.split(from).join(to);
-}
-const W = await import(dataUrl(svcJs));
+const slotsUrl = dataUrl(toJs('src/api/booking-engine/services/slots-core.ts'));
+const identityUrl = dataUrl(toJs('src/utils/staff-identity.ts'));
+const link = (file, pairs) => {
+  let js = toJs(file);
+  for (const [from, to] of pairs) {
+    assert.ok(js.includes(from), `импорт ${from} не найден в ${file}`);
+    js = js.split(from).join(to);
+  }
+  return js;
+};
+// поручения (s240) — настоящий owner-tasks.ts (+ private-files, диск в этих тестах не трогается)
+const tasksUrl = dataUrl(
+  link('src/api/booking-engine/services/owner-tasks.ts', [
+    ["from './slots-core'", `from '${slotsUrl}'`],
+    ["from '../../../utils/staff-identity'", `from '${identityUrl}'`],
+    ["from '../../../utils/private-files'", `from '${dataUrl(toJs('src/utils/private-files.ts'))}'`],
+  ])
+);
+const T = await import(tasksUrl);
+const W = await import(
+  dataUrl(
+    link('src/api/booking-engine/services/work-reports.ts', [
+      ["from './slots-core'", `from '${slotsUrl}'`],
+      ["from '../../../utils/staff-identity'", `from '${identityUrl}'`],
+      ["from './owner-tasks'", `from '${tasksUrl}'`],
+    ])
+  )
+);
 const svc = W.default;
+
 
 const REPORT = 'api::work-report.work-report';
 const PERSONAL = 'api::personal.personal';
 const TIME_OFF = 'api::time-off.time-off';
+const ADMIN = 'api::admin-user.admin-user';
+const LOG = 'api::calendar-log.calendar-log';
+const UPSELL = 'api::upsell-attempt.upsell-attempt';
+const MERGE = 'api::client-merge-log.client-merge-log';
+const TASK = 'api::owner-task.owner-task';
+const TASK_FILE = 'api::owner-task-file.owner-task-file';
 
 const MARIIA = 'mariia000000000000000001';
 const KARINA = 'karina000000000000000002';
@@ -77,6 +106,18 @@ function makeStrapi() {
     ],
     [REPORT]: [],
     [TIME_OFF]: [],
+    [ADMIN]: [
+      { id: 1, username: 'Dima', personalDocId: null },
+      { id: 11, username: 'Mariia Medvedeva', personalDocId: MARIIA },
+      { id: 12, username: 'Vika', personalDocId: null },
+      // несвязанная учётка с тем же именем — не её (связь важнее имени)
+      { id: 14, username: 'mariia medvedeva', personalDocId: null },
+    ],
+    [LOG]: [],
+    [UPSELL]: [],
+    [MERGE]: [],
+    [TASK]: [],
+    [TASK_FILE]: [],
   };
   const logs = [];
   const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -93,7 +134,7 @@ function makeStrapi() {
       const r = db[uid].find((x) => x.documentId === documentId);
       if (!r) return null;
       const out = clone(r);
-      if (populate?.personal) out.personal = { name: db[PERSONAL].find((p) => p.documentId === r.personalDocId)?.name };
+      if (populate?.personal) out.personal = r.personalDocId ? { documentId: r.personalDocId, name: db[PERSONAL].find((p) => p.documentId === r.personalDocId)?.name } : null;
       return out;
     },
     async create({ data }) {
@@ -121,6 +162,17 @@ function makeStrapi() {
     documents,
     db: {
       query: (uid) => ({
+        async findMany({ where = {}, limit }) {
+          await tick();
+          if (strapi.failFacts && uid !== ADMIN) throw new Error('journal down');
+          // Date в условиях → ISO (в базе datetime, в заглушке строки)
+          const iso = (v) => (v instanceof Date ? v.toISOString() : v);
+          const ok = (val, cond) =>
+            Object.entries(cond).every(([op, arg]) =>
+              op === '$in' ? arg.includes(val) : op === '$gte' ? val >= iso(arg) : op === '$lt' ? val < iso(arg) : val === arg,
+            );
+          return clone(db[uid].filter((r) => Object.entries(where).every(([k, c]) => ok(r[k], c))).slice(0, limit ?? 1000));
+        },
         async updateMany({ where, data }) {
           await tick();
           const rows = db[uid].filter((r) => matches(r, where));
@@ -130,6 +182,7 @@ function makeStrapi() {
       }),
     },
     service: (uid) => {
+      if (uid === 'api::booking-engine.owner-tasks') return T.default;
       assert.equal(uid, 'api::calendar-log.calendar-log');
       return { write: async (e) => void logs.push(e) };
     },
@@ -198,7 +251,7 @@ test('тело: пустые пункты выкидываются; без пу�
   assert.throws(() => W.normalizeReportInput({ ...BODY, items: Array.from({ length: 21 }, () => ({ category: 'other', text: 'a' })) }), (e) => e.code === 'too_many_items');
   assert.throws(() => W.normalizeReportInput({ ...BODY, status: 'approved' }), (e) => e.code === 'bad_status');
   const off = W.normalizeReportInput({ status: 'day_off', dayOffReason: 'sick', hours: 8, done: 'ignored' });
-  assert.deepEqual(off, { status: 'day_off', dayOffReason: 'sick', hours: null, items: [], done: '', carried: '', needsOwner: '', planTomorrow: '' });
+  assert.deepEqual(off, { status: 'day_off', dayOffReason: 'sick', hours: null, items: [], done: '', carried: '', needsOwner: '', planTomorrow: '', taskNotes: [] });
   assert.throws(() => W.normalizeReportInput({ status: 'day_off', dayOffReason: 'party' }), (e) => e.code === 'bad_reason');
 });
 
@@ -297,6 +350,71 @@ test('оценка 1–5 или null; комментарий обрезаетс�
   assert.deepEqual(W.normalizeReview({ rating: null }), { rating: null });
   for (const bad of [0, 6, 2.5, '5x']) assert.throws(() => W.normalizeReview({ rating: bad }), (e) => e.code === 'bad_rating');
   assert.throws(() => W.normalizeReview({ comment: 'x'.repeat(W.MAX_COMMENT + 1) }), (e) => e.code === 'comment_too_long');
+});
+
+test('сводка дня: пражские сутки, первое/последнее время, группы и действия; výkaz не считается', () => {
+  const ev = W.factEventsOf({
+    logs: [
+      { entityType: 'booking', action: 'booking_create', createdAt: '2026-10-01T22:30:00Z' }, // 02.10 00:30
+      { entityType: 'booking', action: 'booking_move', createdAt: '2026-10-02T15:10:00Z' },
+      { entityType: 'booking', action: 'booking_create', createdAt: '2026-10-02T07:05:00Z' },
+      { entityType: 'cost', action: 'cost_create', createdAt: '2026-10-02T09:00:00Z' },
+      { entityType: 'report', action: 'report_submit', createdAt: '2026-10-02T16:00:00Z' },
+      { entityType: 'mystery', action: 'x_y', createdAt: '2026-10-02T10:00:00Z' },
+      { entityType: 'booking', action: 'booking_edit', createdAt: '2026-10-01T21:59:00Z' }, // 01.10 23:59
+      { entityType: 'booking', action: 'booking_edit', createdAt: 'nonsense' },
+    ],
+    attempts: [{ outcome: 'declined', createdAt: '2026-10-01T08:00:00Z', updatedAt: '2026-10-02T11:00:00Z' }],
+    merges: [{ action: 'merge', createdAt: '2026-10-02T12:00:00Z' }],
+  });
+  const by = W.factsByDay(ev);
+  assert.deepEqual(Object.keys(by), ['2026-10-01', '2026-10-02']);
+  assert.equal(by['2026-10-01'].total, 1);
+  assert.equal(by['2026-10-01'].first, '23:59');
+  const d = by['2026-10-02'];
+  assert.equal(d.total, 7, 'отчёт и битая дата не считаются');
+  assert.equal(d.first, '00:30');
+  assert.equal(d.last, '17:10');
+  assert.equal(d.groups[0].key, 'booking');
+  assert.equal(d.groups[0].count, 3);
+  assert.deepEqual(d.groups[0].actions, [
+    { key: 'booking_create', label: 'nová rezervace', count: 2 },
+    { key: 'booking_move', label: 'přesun', count: 1 },
+  ]);
+  const keys = d.groups.map((g) => g.key);
+  for (const k of ['cost', 'upsell', 'dedupe', 'other']) assert.ok(keys.includes(k), k);
+  assert.ok(!keys.includes('report') && !keys.includes('mystery'));
+  assert.equal(d.groups.find((g) => g.key === 'upsell').actions[0].label, 'klient odmítl');
+  assert.equal(d.groups.find((g) => g.key === 'other').actions[0].label, 'x_y', 'неизвестное — ключом');
+  assert.deepEqual(W.buildFacts([]), { total: 0, first: null, last: null, groups: [] });
+  // зимой (UTC+1) граница суток сдвигается
+  assert.deepEqual(Object.keys(W.factsByDay([{ group: 'booking', action: 'a', at: '2026-11-01T23:30:00Z' }])), ['2026-11-02']);
+});
+
+test('логины человека: связанная учётка важнее имени; без связи — по имени; логины отчётов добавляются', () => {
+  const accounts = [
+    { username: 'Mariia Medvedeva', personalDocId: MARIIA },
+    { username: 'mariia medvedeva', personalDocId: null },
+    { username: 'Karina', personalDocId: null },
+  ];
+  assert.deepEqual(W.actorNamesFor({ documentId: MARIIA, name: 'Mariia Medvedeva' }, accounts), ['Mariia Medvedeva']);
+  assert.deepEqual(W.actorNamesFor({ documentId: KARINA, name: 'karina' }, accounts), ['Karina']);
+  assert.deepEqual(W.actorNamesFor({ documentId: MARIIA, name: 'X' }, accounts, ['Masha', '', null, 'Mariia Medvedeva']), [
+    'Mariia Medvedeva',
+    'Masha',
+  ]);
+  assert.deepEqual(W.actorNamesFor({ documentId: OLD_MANAGER, name: '' }, accounts), [], 'пустое имя не совпадает с пустым логином');
+});
+
+test('итог по категориям: пункты поданных отчётов, по убыванию', () => {
+  const sub = (items) => ({ status: 'submitted', items });
+  const t = W.categoryTotals([
+    sub([{ category: 'staff', text: 'a' }, { category: 'clients', text: 'b' }, { category: 'staff', text: 'c' }]),
+    sub([{ category: 'finance', text: 'd' }, { category: 'clients', text: 'e' }, { category: 'staff', text: 'f' }]),
+  ]);
+  assert.equal(t.items, 6);
+  assert.deepEqual(t.categories.map((c) => [c.key, c.count]), [['staff', 3], ['clients', 2], ['finance', 1]]);
+  assert.equal(t.categories[0].label, 'Personál');
 });
 
 // ── сервис ────────────────────────────────────────────────────────────────────
@@ -475,6 +593,124 @@ test('владелец: список управляющих, месяц выбр
   const earlyList = await svc.list({ month: '2026-10', now: at('2026-10-08T07:59:00Z') });
   assert.equal(earlyList.days.find((d) => d.date === '2026-10-07').state, 'open');
   assert.equal(earlyList.summary.expected, 2);
+});
+
+test('Systém zaznamenal: месяц по её логинам (и старому из отчёта), чужое не попадает; снимок при подаче', async () => {
+  const s = fresh();
+  const log = (actorName, action, entityType, createdAt) => s.rows[LOG].push({ actorName, action, entityType, createdAt });
+  log('Mariia Medvedeva', 'booking_create', 'booking', '2026-10-01T08:00:00Z');
+  log('Mariia Medvedeva', 'cost_create', 'cost', '2026-10-01T14:30:00Z');
+  log('Mariia Medvedeva', 'block_create', 'block', '2026-10-02T09:00:00Z');
+  log('Masha', 'staff_update', 'staff', '2026-10-01T10:00:00Z'); // прежний логин — виден по отчёту ниже
+  log('mariia medvedeva', 'booking_delete', 'booking', '2026-10-01T09:00:00Z'); // чужая несвязанная учётка
+  log('Vika', 'booking_create', 'booking', '2026-10-01T09:00:00Z');
+  log('Mariia Medvedeva', 'booking_create', 'booking', '2026-09-30T12:00:00Z'); // прошлый месяц
+  s.rows[UPSELL].push({ adminUsername: 'Mariia Medvedeva', outcome: 'not_offered', createdAt: '2026-10-01T15:00:00Z', updatedAt: '2026-10-01T15:00:00Z' });
+  s.rows[MERGE].push({ actorName: 'Mariia Medvedeva', action: 'merge', createdAt: '2026-10-01T16:00:00Z' });
+  s.rows[MERGE].push({ actorName: 'Dima', action: 'merge', createdAt: '2026-10-01T16:00:00Z' });
+  // отчёт 30.09 (вне месяца) подан под старым логином
+  s.rows[REPORT].push({ id: 99, documentId: 'oldrep00000000000000001', personalDocId: MARIIA, date: '2026-09-30', kind: 'day', status: 'day_off', dayOffReason: 'other', authorName: 'Masha', version: 1 });
+
+  const now = at('2026-10-01T18:00:00Z');
+  const res = await svc.saveMine({ session: manager, date: '2026-10-01', body: BODY, now });
+  const snap = reports().find((r) => r.date === '2026-10-01').systemFacts;
+  assert.equal(snap.total, 5, 'бронь, затрата, карточка (старый логин), отметка дозаписи, дубли');
+  assert.equal(snap.first, '10:00');
+  assert.equal(snap.last, '18:00');
+  assert.equal(snap.at, now.toISOString());
+  assert.deepEqual(res.saved.systemFacts, snap);
+  assert.equal(res.facts['2026-10-01'].total, 5);
+  assert.equal(res.facts['2026-10-02'], undefined, 'будущее (относительно now) не читается');
+  assert.equal(res.summary.system.days, 1);
+  assert.equal(res.summary.items, 2);
+  assert.deepEqual(res.summary.categories.map((c) => c.key), ['clients', 'staff']);
+
+  // владелец видит ту же сводку
+  const later = at('2026-10-03T12:00:00Z');
+  const own = await svc.list({ month: '2026-10', now: later });
+  assert.equal(own.facts['2026-10-01'].total, 5);
+  assert.equal(own.facts['2026-10-02'].total, 1, 'день без отчёта — тоже');
+  assert.equal(own.summary.system.actions, 6);
+  const mine = await svc.mine({ session: manager, now: later });
+  assert.deepEqual(mine.facts, own.facts);
+
+  // повтор того же — без записи, снимок прежний; правка — снимок обновляется
+  log('Mariia Medvedeva', 'booking_move', 'booking', '2026-10-01T19:00:00Z');
+  await svc.saveMine({ session: manager, date: '2026-10-01', body: BODY, now: at('2026-10-01T20:00:00Z') });
+  assert.equal(reports().find((r) => r.date === '2026-10-01').systemFacts.total, 5);
+  await svc.saveMine({ session: manager, date: '2026-10-01', body: { ...BODY, hours: 8 }, now: at('2026-10-01T20:00:00Z') });
+  assert.equal(reports().find((r) => r.date === '2026-10-01').systemFacts.total, 6);
+});
+
+test('Systém zaznamenal: сбой журналов не гасит отчёты — facts null, подача без снимка', async () => {
+  const s = fresh();
+  s.failFacts = true;
+  const now = at('2026-10-01T18:00:00Z');
+  const res = await svc.saveMine({ session: manager, date: '2026-10-01', body: BODY, now });
+  assert.equal(reports().length, 1);
+  assert.equal(res.saved.systemFacts, null);
+  assert.equal(res.facts, null);
+  assert.equal(res.summary.system, null);
+  assert.equal(res.summary.submitted, 1);
+  const own = await svc.list({ month: '2026-10', now });
+  assert.equal(own.facts, null);
+  assert.equal(own.reports.length, 1);
+});
+
+test('поручения в отчёте: открытые в /mine, заметки и «hotovo» уходят в ленту поручения один раз; чужое — 400', async () => {
+  const s = fresh();
+  const at0 = '2026-09-30T10:00:00.000Z';
+  const mk = (documentId, personalDocId, title, extra = {}) =>
+    s.rows[TASK].push({ id: s.rows[TASK].length + 1, documentId, personalDocId, title, status: 'open', priority: 'normal', events: [], version: 1, createdAt: at0, ...extra });
+  mk('task0000000000000000001', MARIIA, 'Objednat křeslo', { dueDate: '2026-10-05', priority: 'urgent' });
+  mk('task0000000000000000002', MARIIA, 'Inventura');
+  mk('task0000000000000000003', KARINA, 'Cizí úkol');
+  mk('task0000000000000000004', MARIIA, 'Hotové dřív', { status: 'accepted' });
+  const now = at('2026-10-01T18:00:00Z');
+  const mine = await svc.mine({ session: manager, now });
+  assert.deepEqual(mine.openTasks.map((t) => t.documentId), ['task0000000000000000001', 'task0000000000000000002'], 'срочное первым, принятые и чужие не видны');
+
+  await expectErr(svc.saveMine({ session: manager, date: '2026-10-01', body: { ...BODY, tasks: [{ id: 'task0000000000000000003', done: true }] }, now }), 400, 'bad_tasks');
+  assert.equal(reports().length, 0, 'чужое поручение — отчёт не записан');
+
+  const body = { ...BODY, tasks: [{ id: 'task0000000000000000001', done: true, note: 'Objednáno u dodavatele' }, { id: 'task0000000000000000002', note: 'Začala jsem' }, { id: 'task0000000000000000002', note: 'dup' }] };
+  const res = await svc.saveMine({ session: manager, date: '2026-10-01', body, now });
+  assert.deepEqual(res.saved.taskNotes, [
+    { taskId: 'task0000000000000000001', title: 'Objednat křeslo', note: 'Objednáno u dodavatele', done: true },
+    { taskId: 'task0000000000000000002', title: 'Inventura', note: 'Začala jsem', done: false },
+  ]);
+  const t1 = s.rows[TASK][0];
+  const t2 = s.rows[TASK][1];
+  assert.equal(t1.status, 'done');
+  assert.deepEqual(t1.events.map((e) => [e.kind, e.reportDate, e.text]), [['done', '2026-10-01', 'Objednáno u dodavatele']]);
+  assert.deepEqual(t2.events.map((e) => e.kind), ['progress']);
+  assert.ok(s.logs.some((l) => l.action === 'task_done' && l.entityType === 'task'));
+  assert.equal(res.openTasks.find((t) => t.documentId === 'task0000000000000000001').status, 'done');
+
+  // правка отчёта без изменения заметок — лента не дублируется; новая заметка — ещё одно событие
+  await svc.saveMine({ session: manager, date: '2026-10-01', body: { ...body, hours: 8 }, now: at('2026-10-01T19:00:00Z') });
+  assert.equal(t1.events.length, 1);
+  assert.equal(t2.events.length, 1);
+  await svc.saveMine({
+    session: manager,
+    date: '2026-10-01',
+    body: { ...body, hours: 8, tasks: [body.tasks[0], { id: 'task0000000000000000002', note: 'Polovina hotová' }] },
+    now: at('2026-10-01T19:30:00Z'),
+  });
+  assert.deepEqual(t2.events.map((e) => e.text), ['Začala jsem', 'Polovina hotová']);
+  assert.equal(t1.events.length, 1);
+  // поручение уже «hotovo» (ждёт владельца) — новая заметка из отчёта уходит комментарием, не теряется
+  await svc.saveMine({
+    session: manager,
+    date: '2026-10-01',
+    body: { ...body, hours: 8, tasks: [{ ...body.tasks[0], note: 'Doplnění: faktura' }, { id: 'task0000000000000000002', note: 'Polovina hotová' }] },
+    now: at('2026-10-01T20:00:00Z'),
+  });
+  assert.deepEqual(t1.events.map((e) => [e.kind, e.text]), [['done', 'Objednáno u dodavatele'], ['comment', 'Doplnění: faktura']]);
+  assert.equal(t1.status, 'done');
+  // volno — без заметок
+  const off = await svc.saveMine({ session: manager, date: '2026-10-02', body: { status: 'day_off', dayOffReason: 'sick', tasks: body.tasks }, now: at('2026-10-02T18:00:00Z') });
+  assert.deepEqual(off.saved.taskNotes, []);
 });
 
 test('ручки: шесть роутов; чтение всех, прочтение и «Сегодня» — только владелец', () => {

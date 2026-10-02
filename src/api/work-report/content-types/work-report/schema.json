@@ -85,6 +85,9 @@
     "systemFacts": {
       "type": "json"
     },
+    "taskNotes": {
+      "type": "json"
+    },
     "version": {
       "type": "integer",
       "default": 0

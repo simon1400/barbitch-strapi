@@ -11,6 +11,11 @@ export default {
       const date = ctx.request.body?.date || ctx.query?.date;
       const result = await strapi.service('api::shift-revert.shift-revert').revertShift(date);
       strapi.log.info(`shift-revert ${date} by ${session.username}`);
+      // s240: отмена закрытия — в журнал (сводка «Systém zaznamenal» výkazu); сбой журнала откат не роняет
+      await strapi
+        .service('api::booking-engine.shift-close-log')
+        .logRevert({ session, date, result })
+        .catch((e) => strapi.log.error(`shift-revert journal failed: ${e.message}`));
       // Admin Axios interceptor unwraps response.data.data → wrap in { data }.
       ctx.body = { data: result };
     } catch (err: any) {

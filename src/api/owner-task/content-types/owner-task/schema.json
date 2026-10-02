@@ -1,0 +1,62 @@
+{
+  "kind": "collectionType",
+  "collectionName": "owner_tasks",
+  "info": {
+    "singularName": "owner-task",
+    "pluralName": "owner-tasks",
+    "displayName": "Úkol od majitele",
+    "description": "Поручение владельца управляющей (s240, «Výkaz práce» Фаза 3). REST-роутов нет: только ручки /engine/admin/tasks"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "personal": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::personal.personal"
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "text"
+    },
+    "dueDate": {
+      "type": "date"
+    },
+    "priority": {
+      "type": "enumeration",
+      "enum": ["normal", "urgent"],
+      "default": "normal"
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["open", "done", "accepted", "cancelled"],
+      "default": "open"
+    },
+    "createdByName": {
+      "type": "string"
+    },
+    "createdByAccountId": {
+      "type": "integer"
+    },
+    "doneAt": {
+      "type": "datetime"
+    },
+    "closedAt": {
+      "type": "datetime"
+    },
+    "closedBy": {
+      "type": "string"
+    },
+    "events": {
+      "type": "json"
+    },
+    "version": {
+      "type": "integer",
+      "default": 0
+    }
+  }
+}

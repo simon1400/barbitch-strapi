@@ -302,8 +302,20 @@ test('admin-session: costs — только чтение для всех рол�
     assert.equal((await runMw(role, 'GET', '/api/costs')).passed, true, `${role} GET costs`);
     assert.equal((await runMw(role, 'POST', '/api/costs')).code, 'engine_only');
     assert.equal((await runMw(role, 'GET', '/api/calendar-logs')).passed, true, `${role} GET calendar-logs`);
-    // журнал руководство по-прежнему чистит из модалки
-    assert.equal((await runMw(role, 'DELETE', '/api/calendar-logs/abc')).passed, true, `${role} DELETE calendar-logs`);
+  }
+  // журнал чистит из модалки только владелец (s240, §10.4.1 «Výkaz práce»)
+  assert.equal((await runMw('owner', 'DELETE', '/api/calendar-logs/abc')).passed, true, 'owner DELETE calendar-logs');
+  const del = await runMw('manager', 'DELETE', '/api/Calendar-Logs/abc');
+  assert.equal(del.passed, false, 'manager DELETE calendar-logs прошёл');
+  assert.equal(del.code, 'engine_only');
+  // s240: журнал пишет только сервер — REST-создание/правка подделали бы «Systém zaznamenal» výkazu
+  for (const role of ['owner', 'manager']) {
+    for (const [method, p] of [['POST', '/api/calendar-logs'], ['PUT', '/api/calendar-logs/abc'], ['PATCH', '/API/Calendar-Logs/abc']]) {
+      const r = await runMw(role, method, p);
+      assert.equal(r.passed, false, `${role} ${method} ${p} прошёл`);
+      assert.equal(r.status, 403);
+      assert.equal(r.code, 'engine_only');
+    }
   }
   // ручки движка не задеты — у них свой гейт
   for (const role of ['owner', 'manager', 'administrator', 'master']) {

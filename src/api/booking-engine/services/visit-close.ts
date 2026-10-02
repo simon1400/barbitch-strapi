@@ -338,6 +338,30 @@ export default {
    * POST /engine/admin/bookings/:id/checkout — закрыть визит.
    * Создаёт ЧЕРНОВИК service-provided с линком на бронь и переводит бронь в checkedOut.
    */
+  /**
+   * Журнал (s240, «Výkaz práce» §10.4.2): закрытие визита, правка и отмена расчёта.
+   * Без сумм — только кто, у какой клиентки, какого мастера, на какой день. entityType `visit`.
+   */
+  _log(action, session, spDocId, { clientName = '', employeeName = '', date = '', time = '' } = {}) {
+    if (!session) return;
+    const head = { visit_close: 'Návštěva uzavřena', visit_close_edit: 'Úprava uzavřené návštěvy', visit_close_delete: 'Uzavření návštěvy zrušeno' }[action];
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(String(date)) ? `${date.slice(8, 10)}.${date.slice(5, 7)}.${date.slice(0, 4)}` : '';
+    const when = [day, time ? String(time).slice(0, 5) : ''].filter(Boolean).join(' ');
+    strapi
+      .service('api::calendar-log.calendar-log')
+      .write({
+        action,
+        entityType: 'visit',
+        actorName: session.username || '',
+        entityDocId: spDocId,
+        clientName: clientName || '',
+        employeeName: employeeName || '',
+        summary: [head, clientName, employeeName, when].filter(Boolean).join(' · '),
+        details: {},
+      })
+      .catch((e) => strapi.log.error(`calendar-log ${action} failed: ${e.message}`));
+  },
+
   async createForBooking(bookingDocId, body, session) {
     const booking = await this._loadBooking(bookingDocId);
 
@@ -451,6 +475,8 @@ export default {
         .catch((e) => strapi.log.error(`internal-payroll sync on checkout failed: ${e.message}`));
     }
 
+    this._log('visit_close', session, created.documentId, { clientName, employeeName: booking.employee?.name, date, time });
+
     strapi.log.info(
       `visit-close: admin ${session?.username || '?'} closed visit for booking ${bookingDocId} → sp ${created.documentId} [${flags.join(',')}]`
     );
@@ -557,6 +583,13 @@ export default {
         .catch((e) => strapi.log.error(`internal-payroll sync on checkout patch failed: ${e.message}`));
     }
 
+    this._log('visit_close_edit', session, spDocId, {
+      clientName: rec.clientName,
+      employeeName: booking.employee?.name,
+      date: rec.date,
+      time: rec.time,
+    });
+
     strapi.log.info(
       `visit-close: admin ${session?.username || '?'} updated checkout ${spDocId} [${flags.join(',')}]`
     );
@@ -617,6 +650,8 @@ export default {
         .service('api::booking-engine.booking-engine')
         .adminPatchBooking(bookingDocId, { status: 'active', arrived: true }, session);
     }
+
+    this._log('visit_close_delete', session, spDocId, { clientName: rec.clientName, date: rec.date, time: rec.time });
 
     strapi.log.info(
       `visit-close: admin ${session?.username || '?'} removed checkout ${spDocId} (booking ${bookingDocId || '?'} → active)`

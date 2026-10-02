@@ -115,6 +115,16 @@ export default {
     admin('GET', '/engine/admin/work-reports/attention', 'booking-engine.adminWorkReportsAttention'),
     admin('GET', '/engine/admin/work-reports', 'booking-engine.adminWorkReportsList'),
     admin('POST', '/engine/admin/work-reports/:id/review', 'booking-engine.adminWorkReportReview'),
+    admin('POST', '/engine/admin/shift-close/journal', 'booking-engine.adminShiftCloseJournal'),
+    // поручения владельца управляющей (s240): `attention` — раньше `/:id`
+    admin('GET', '/engine/admin/tasks/attention', 'booking-engine.adminTasksAttention'),
+    admin('GET', '/engine/admin/tasks', 'booking-engine.adminTasksList'),
+    admin('POST', '/engine/admin/tasks', 'booking-engine.adminTaskCreate'),
+    admin('PATCH', '/engine/admin/tasks/:id', 'booking-engine.adminTaskUpdate'),
+    admin('POST', '/engine/admin/tasks/:id/actions', 'booking-engine.adminTaskAction'),
+    admin('POST', '/engine/admin/tasks/:id/files', 'booking-engine.adminTaskFileUpload'),
+    admin('GET', '/engine/admin/tasks/:id/files/:fid', 'booking-engine.adminTaskFileDownload'),
+    admin('DELETE', '/engine/admin/tasks/:id/files/:fid', 'booking-engine.adminTaskFileDelete'),
     // Отпуска / больничные + автоблоки мастеру (s216) — только руководство
     admin('GET', '/engine/admin/time-offs/conflicts', 'booking-engine.adminTimeOffConflicts'),
     admin('POST', '/engine/admin/time-offs', 'booking-engine.adminTimeOffCreate'),
