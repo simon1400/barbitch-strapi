@@ -75,9 +75,12 @@ const pricingOf = (item: any, redemptionKc = 0): { fullPrice: number; paidExpect
     const systemKc = rebookKc + Math.max(0, redemptionKc);
     // s203 (вариант «а»): полная цена = Σ снапшота ВСЕГДА; ручная цена = дельта
     // (total + systemKc) − Σ снапшота → 💰 cena_rucne. Зеркало verify-flags.ts.
-    const fullPrice = sum > 0 ? sum : total + systemKc;
-    if (!(fullPrice > 0)) return null;
+    // s241: причина ручного занижения 'paid' (меньшая работа) → база процента =
+    // цена брони до системных скидок. Зеркало verify-flags.ts.
     const manualDeltaKc = sum > 0 ? Math.round(total + systemKc - sum) : 0;
+    const basisPaid = manualDeltaKc < 0 && item?.priceBasis === 'paid';
+    const fullPrice = sum > 0 && !basisPaid ? sum : total + systemKc;
+    if (!(fullPrice > 0)) return null;
     const discountRate = parseSaleRate(item?.sale, fullPrice);
     return {
       fullPrice,
@@ -417,6 +420,8 @@ export default {
           'sale',
           'internal',
           'verifyFlags',
+          // причина ручного занижения цены (s241)
+          'priceBasis',
           // перенос доли при бесплатной коррекции (s210)
           'korekce',
           'korekceStaffOutKc',

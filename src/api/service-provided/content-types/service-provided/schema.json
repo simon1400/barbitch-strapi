@@ -85,6 +85,13 @@
     "manualDeltaKc": {
       "type": "integer"
     },
+    "priceBasis": {
+      "type": "enumeration",
+      "enum": [
+        "catalog",
+        "paid"
+      ]
+    },
     "korekce": {
       "type": "json"
     },

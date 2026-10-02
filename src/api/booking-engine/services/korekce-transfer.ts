@@ -346,8 +346,9 @@ export default {
     const sameMaster = !!original.masterDocId && original.masterDocId === head.masterDocId;
     const mode = korekceMode(original.date, head.date, sameMaster);
     const redemptionKc = await this._vc()._redemptionKc(o.documentId);
-    const fullPrice = r2(bookingPricing(o, null, { redemptionKc }).fullPrice);
     const rec = await this._vc()._findByBooking(o.documentId);
+    // закрытый визит с ручной ценой «за меньшую работу» (s241): делить можно только её
+    const fullPrice = r2(bookingPricing(o, null, { redemptionKc, priceBasis: rec?.priceBasis }).fullPrice);
     const others = await this._transfersTo(o.documentId, excludeSpDocId);
     const usedBaseKc = r2(others.reduce((s, x) => s + parseMoney(x.json.baseKc), 0));
     return {
@@ -399,6 +400,7 @@ export default {
         'korekce_staff_out_kc',
         'korekce_salon_adj_kc',
         'korekce_base_used_kc',
+        'price_basis',
       );
     if (!rows.length) return [];
     const booking = await vc._loadBooking(t.originalBookingDocId);
@@ -421,6 +423,7 @@ export default {
         salonSalaries: next.salon,
         sale: row.sale,
         internal: row.internal === true,
+        priceBasis: row.price_basis,
         korekce: korekceFlagInput({
           korekce: row.korekce,
           korekceStaffOutKc: next.staffOutKc,

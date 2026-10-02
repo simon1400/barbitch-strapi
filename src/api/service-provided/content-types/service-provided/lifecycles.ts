@@ -111,14 +111,19 @@ async function validateOfferMoney(event: any) {
       korekceSalonAdjKc: pick('korekceSalonAdjKc'),
     })
     const isCorrection = korekce?.staffInKc != null
+    // причина ручного занижения цены (s241): 'paid' — база процента = оплаченная цена
+    const priceBasis = pick('priceBasis')
 
     // Бронь выигрывает у оффера: у booking-linked записи оффер — легаси-поле
     const flags: VerifyFlag[] = booking
-      ? computeBookingFlags({ booking, ratePercent, staffSalaries, salonSalaries, sale: saleRaw, internal, redemptionKc, korekce })
+      ? computeBookingFlags({ booking, ratePercent, staffSalaries, salonSalaries, sale: saleRaw, internal, redemptionKc, korekce, priceBasis })
       : computeOfferFlags(Number(offer.price), ratePercent, staffSalaries, salonSalaries, saleRaw, internal, korekce)
     // 💰 разница ручной цены (s203) — хранится в записи; у legacy-пути (оффер) её нет.
     // У записи бесплатной коррекции 0 Kč — правило, не ручная цена (как в visit-close).
-    const manualDeltaKc = booking ? (isCorrection ? 0 : bookingPricing(booking, saleRaw, { redemptionKc }).manualDeltaKc) : null
+    const pricing = booking && !isCorrection ? bookingPricing(booking, saleRaw, { redemptionKc, priceBasis }) : null
+    const manualDeltaKc = booking ? (pricing ? pricing.manualDeltaKc : 0) : null
+    // занижение из-за меньшей работы — не скидка «мимо программы»
+    const manualDiscount = manualDeltaKc != null && manualDeltaKc < 0 && pricing?.priceBasis !== 'paid'
 
     // K4 informational flag: sale present, but no used bitchcard redemption on the
     // client's bookings of that day → the discount was given outside the program.
@@ -127,7 +132,7 @@ async function validateOfferMoney(event: any) {
     // redemptions used с usedInBookingDocId среди них.
     // Гейт по РУЧНОЙ скидке, не по флагу 🟦: sleva теперь ставится и системными
     // скидками booking-пути (bitchcard/rebook), а они «по программе» — 🎟 не про них.
-    if (!isCorrection && (hasManualSale(saleRaw) || (manualDeltaKc != null && manualDeltaKc < 0)) && process.env.LOYALTY_ENABLED === 'true') {
+    if (!isCorrection && (hasManualSale(saleRaw) || manualDiscount) && process.env.LOYALTY_ENABLED === 'true') {
       try {
         let hasRedemption = false
         if (booking?.documentId) {

@@ -289,11 +289,23 @@ export const rebookDiscountKc = (booking: BookingLike | null | undefined): numbe
  * передаёт вызывающий (async-lookup). priceOverride на расчёт больше не влияет.
  * До s203 при override база была total + systemKc (договорная цена — мастер делил её).
  * Снапшот без цен (легаси) → полная цена = total + systemKc, дельта 0.
+ *
+ * s241 (решение владельца, жалоба 02.10: Sundání + regenerace 490 → 190 руками,
+ * подсказка «мастеру 196, салону −6»): причину ручного ЗАНИЖЕНИЯ выбирает админ при
+ * закрытии визита — `service-provided.priceBasis`:
+ *   • 'catalog' (и пусто, все старые записи) — скидка: правило s203 без изменений;
+ *   • 'paid' — сделана меньшая работа: база процента мастера = цена брони до
+ *     системных скидок (total + systemKc), от неё же считается и ручная `sale`.
+ * Дельта и флаг 💰 остаются в обоих случаях. При завышении цены выбор не действует.
  */
+export type PriceBasis = 'catalog' | 'paid';
+
+export const asPriceBasis = (v: unknown): PriceBasis | null => (v === 'catalog' || v === 'paid' ? v : null);
+
 export const bookingPricing = (
   booking: BookingLike | null | undefined,
   sale?: unknown,
-  opts?: { redemptionKc?: number },
+  opts?: { redemptionKc?: number; priceBasis?: unknown },
 ) => {
   let list: any[] = [];
   const raw = booking?.services;
@@ -309,20 +321,26 @@ export const bookingPricing = (
   const total = parseMoney(booking?.totalPrice);
   const sum = list.reduce((acc, s) => acc + parseMoney(s?.price), 0);
   const systemKc = rebookDiscountKc(booking) + Math.max(0, opts?.redemptionKc || 0);
-  const fullPrice = sum > 0 ? sum : total + systemKc;
   const manualDeltaKc = sum > 0 ? Math.round(total + systemKc - sum) : 0;
+  // цена брони до системных скидок — база процента при «меньшей работе» (s241)
+  const paidBasePrice = total + systemKc;
+  const basisPaid = manualDeltaKc < 0 && opts?.priceBasis === 'paid';
+  const fullPrice = sum > 0 && !basisPaid ? sum : paidBasePrice;
 
   const discountRate = parseSaleRate(sale, fullPrice);
   const saleKc = fullPrice * discountRate;
   return {
     fullPrice,
     catalogPrice: sum,
+    paidBasePrice,
     paidExpected: Math.max(0, total - saleKc),
     saleKc,
     hasSale: discountRate > 0,
     // только ИЗВЕСТНЫЕ системные скидки (rebook + bitchcard); ручная разница — отдельно
     systemDiscountKc: systemKc,
     manualDeltaKc,
+    // причина ручного занижения, по которой посчитана база: null — цену не занижали
+    priceBasis: (manualDeltaKc < 0 ? (basisPaid ? 'paid' : 'catalog') : null) as PriceBasis | null,
   };
 };
 
@@ -336,6 +354,7 @@ export const computeBookingFlags = ({
   internal,
   redemptionKc,
   korekce = null,
+  priceBasis = null,
 }: {
   booking: BookingLike | null | undefined;
   ratePercent: number;
@@ -347,9 +366,12 @@ export const computeBookingFlags = ({
   redemptionKc?: number;
   /** перенос доли при бесплатной коррекции (s210) */
   korekce?: KorekceFlagInput | null;
+  /** причина ручного занижения цены (s241): 'paid' — база процента = оплаченная цена */
+  priceBasis?: unknown;
 }): VerifyFlag[] => {
   const { fullPrice, paidExpected, hasSale, systemDiscountKc, manualDeltaKc } = bookingPricing(booking, sale, {
     redemptionKc,
+    priceBasis,
   });
   return computeFlagsCore({
     fullPrice,

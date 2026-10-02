@@ -122,6 +122,76 @@ test('computeBookingFlags: 💰 ставится и у интерной услу
   assert.deepEqual(internal, ['internal', 'cena_rucne']);
 });
 
+// ── s241: причина ручного занижения цены (service-provided.priceBasis) ──
+// Прод-случай 02.10.2026: «Sundání řas + Intenzivní regenerace» 300 + 190 = 490 по
+// каталогу, цена брони руками 190, мастер 40 %. Подсказка была 196 / −6.
+const BMAN = { services: snap(490), totalPrice: '190.00', priceOverride: true, discount: null };
+
+test('priceBasis: пусто и catalog → правило s203 без изменений (196 / −6)', () => {
+  for (const priceBasis of [undefined, null, 'catalog', 'cokoliv']) {
+    const p = vf.bookingPricing(BMAN, null, { priceBasis });
+    assert.equal(p.fullPrice, 490);
+    assert.equal(p.manualDeltaKc, -300);
+    assert.equal(p.priceBasis, 'catalog');
+    assert.deepEqual(
+      vf.computeBookingFlags({ booking: BMAN, ratePercent: 40, staffSalaries: 196, salonSalaries: -6, sale: null, internal: false, priceBasis }),
+      ['cena_rucne'],
+    );
+    assert.deepEqual(
+      vf.computeBookingFlags({ booking: BMAN, ratePercent: 40, staffSalaries: 76, salonSalaries: 114, sale: null, internal: false, priceBasis }),
+      ['mistr_down', 'salon_up', 'cena_rucne'],
+    );
+  }
+});
+
+test('priceBasis paid (меньшая работа): база процента = цена брони, 76 / 114 → только 💰', () => {
+  const p = vf.bookingPricing(BMAN, null, { priceBasis: 'paid' });
+  assert.equal(p.fullPrice, 190);
+  assert.equal(p.paidBasePrice, 190);
+  assert.equal(p.catalogPrice, 490);
+  assert.equal(p.paidExpected, 190);
+  assert.equal(p.manualDeltaKc, -300);
+  assert.equal(p.priceBasis, 'paid');
+  assert.deepEqual(
+    vf.computeBookingFlags({ booking: BMAN, ratePercent: 40, staffSalaries: 76, salonSalaries: 114, sale: null, internal: false, priceBasis: 'paid' }),
+    ['cena_rucne'],
+  );
+  // каталожные суммы при этой причине — уже отклонение
+  assert.deepEqual(
+    vf.computeBookingFlags({ booking: BMAN, ratePercent: 40, staffSalaries: 196, salonSalaries: -6, sale: null, internal: false, priceBasis: 'paid' }),
+    ['mistr_up', 'ztrata', 'cena_rucne'],
+  );
+});
+
+test('priceBasis paid: ручная sale считается от оплаченной базы; системные скидки в базу возвращаются', () => {
+  // sale 10 % от 190 = 19 → к оплате 171, мастеру 76, салону 95
+  const s = vf.bookingPricing(BMAN, '10%', { priceBasis: 'paid' });
+  assert.equal(s.saleKc, 19);
+  assert.equal(s.paidExpected, 171);
+  // bitchcard 50 Kč поверх ручной цены 240: оплачено 190, база мастера 240
+  const bc = vf.bookingPricing(BMAN, null, { priceBasis: 'paid', redemptionKc: 50 });
+  assert.equal(bc.fullPrice, 240);
+  assert.equal(bc.manualDeltaKc, -250);
+  assert.equal(bc.paidExpected, 190);
+});
+
+test('priceBasis paid не действует без занижения: каталожная цена, завышение, системная скидка', () => {
+  assert.equal(vf.bookingPricing(SITE, null, { priceBasis: 'paid' }).priceBasis, null);
+  assert.equal(vf.bookingPricing(SITE, null, { priceBasis: 'paid' }).fullPrice, 990);
+  const up = vf.bookingPricing({ ...SITE, totalPrice: '1190' }, null, { priceBasis: 'paid' });
+  assert.equal(up.fullPrice, 990);
+  assert.equal(up.priceBasis, null);
+  const rebook = vf.bookingPricing(B4877, null, { priceBasis: 'paid' });
+  assert.equal(rebook.fullPrice, 880);
+  assert.equal(rebook.priceBasis, null);
+});
+
+test('asPriceBasis: только catalog / paid', () => {
+  assert.equal(vf.asPriceBasis('paid'), 'paid');
+  assert.equal(vf.asPriceBasis('catalog'), 'catalog');
+  for (const v of [null, undefined, '', 'PAID', 1, true]) assert.equal(vf.asPriceBasis(v), null);
+});
+
 test('computeOfferFlags (легаси-путь) не тронут: те же флаги, 💰 не ставится', () => {
   assert.deepEqual(vf.computeOfferFlags(1000, 30, 300, 700, null, false), ['ok']);
   assert.deepEqual(vf.computeOfferFlags(1000, 30, 300, 500, '20%', false), ['sleva']);

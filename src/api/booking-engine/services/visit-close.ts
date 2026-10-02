@@ -19,6 +19,7 @@
 import { minToHHMM, utcToPragueMinClamped } from './slots-core';
 import { EngineError } from './booking-engine';
 import {
+  asPriceBasis,
   bookingPricing,
   computeBookingFlags,
   dominantEmoji,
@@ -137,6 +138,8 @@ export default {
       verifyFlags: Array.isArray(rec.verifyFlags) ? rec.verifyFlags : [],
       // 💰 разница ручной цены (s203); null у записей до внедрения
       manualDeltaKc: rec.manualDeltaKc == null ? null : Number(rec.manualDeltaKc),
+      // причина ручного занижения цены (s241): 'catalog' — скидка, 'paid' — меньшая работа
+      priceBasis: asPriceBasis(rec.priceBasis),
       // перенос доли (s210): json у записи коррекции, аккумуляторы у исходной
       korekce: rec.korekce || null,
       korekceStaffOutKc: rec.korekceStaffOutKc == null ? null : Number(rec.korekceStaffOutKc),
@@ -179,7 +182,7 @@ export default {
     const published = rec ? await this._isPublished(rec.documentId) : false;
     const ratePercent = Number(booking.employee?.ratePercent) || 0;
     const redemptionKc = await this._redemptionKc(bookingDocId);
-    const { fullPrice, paidExpected, systemDiscountKc, manualDeltaKc, catalogPrice } = bookingPricing(booking, null, { redemptionKc });
+    const { fullPrice, paidExpected, systemDiscountKc, manualDeltaKc, catalogPrice, paidBasePrice } = bookingPricing(booking, null, { redemptionKc });
     const mustStaff0 = Math.round(fullPrice * (ratePercent / 100) * 100) / 100;
     // Интерная услуга: салон себе не берёт ничего — подсказка mustSalon = 0.
     // (В CM-хинте ServiceMoneyHint.tsx:161 так было всегда, а ручка drawer'а
@@ -198,6 +201,14 @@ export default {
       mustStaff = korekce.status === 'ok' ? r2((base * (korekce.rateB || 0)) / 100) : 0;
       mustSalon = 0;
     }
+    // Ручное занижение цены (s241): форма спрашивает причину. Для «меньшей работы»
+    // база процента мастера — цена брони; салон форма досчитывает сама (как и для
+    // каталожной базы — с учётом ручной скидки и галки «Interní»).
+    const isCorrection = !!korekce && ['ok', 'same_master'].includes(korekce.status);
+    const manualBasis =
+      manualDeltaKc < 0 && !isCorrection
+        ? { fullPrice: paidBasePrice, mustStaff: r2(r2(paidBasePrice * (ratePercent / 100)) - (korekceOut?.staffOutKc || 0)) }
+        : null;
     return {
       checkout: this._shape(rec, published),
       hint: {
@@ -206,6 +217,7 @@ export default {
         systemDiscountKc,
         manualDeltaKc,
         catalogPrice,
+        manualBasis,
         ratePercent,
         mustStaff,
         mustSalon,
@@ -255,6 +267,30 @@ export default {
     };
   },
 
+  /**
+   * Брони из списка, чей визит закрыт с причиной ручной цены «меньшая работа»
+   * (priceBasis = paid, s241). Нужен ленте календаря: долю мастера на плитке и в
+   * шторке считаем по тому же правилу, что и форма закрытия. Сбой → пусто
+   * (календарь покажет долю от каталожной цены, как у незакрытого визита).
+   */
+  async paidBasisBookingIds(bookingDocIds) {
+    const ids = (bookingDocIds || []).filter(Boolean);
+    if (!ids.length) return [];
+    try {
+      const rows = await strapi.documents(SP_UID).findMany({
+        filters: { priceBasis: { $eq: 'paid' }, booking: { documentId: { $in: ids } } },
+        status: 'draft',
+        fields: ['priceBasis'],
+        populate: { booking: { fields: ['date'] } },
+        limit: 500,
+      });
+      return [...new Set(rows.map((r) => r.booking?.documentId).filter(Boolean))];
+    } catch (e) {
+      strapi.log.warn(`visit-close: paidBasis lookup failed: ${e?.message || e}`);
+      return [];
+    }
+  },
+
   // ── расчёт флагов ──
 
   /**
@@ -264,7 +300,7 @@ export default {
    * по имени клиента, как в legacy-lifecycle. Гейт LOYALTY_ENABLED, сбой lookup не
    * блокирует сохранение.
    */
-  async _flagsFor(booking, { staffSalaries, salonSalaries, sale, internal, korekce = null }) {
+  async _flagsFor(booking, { staffSalaries, salonSalaries, sale, internal, korekce = null, priceBasis = null }) {
     // Погашенные bitchcard-награды нужны ДО расчёта (разворот полной цены, s152),
     // а не только для 🎟 — поэтому lookup всегда, не под флагом sleva.
     const redemptionKc = await this._redemptionKc(booking.documentId);
@@ -278,24 +314,29 @@ export default {
       internal,
       redemptionKc,
       korekce,
+      priceBasis,
     });
 
     // Запись бесплатной коррекции (s210): 0 Kč за услугу — это правило, а не ручная
     // цена и не скидка «мимо программы». Дельту храним 0, чтобы сумма 💰 за день
     // в закрытии смены её не считала.
-    if (korekce?.staffInKc != null) return { flags, manualDeltaKc: 0 };
+    if (korekce?.staffInKc != null) return { flags, manualDeltaKc: 0, priceBasis: null };
 
     // 💰 ручная цена (s203): дельта хранится в записи, чтобы админка показывала сумму
     // без пересчёта (redemptionKc в браузере недоступен).
-    const { manualDeltaKc } = bookingPricing(booking, sale, { redemptionKc });
+    const pricing = bookingPricing(booking, sale, { redemptionKc, priceBasis });
+    const { manualDeltaKc } = pricing;
 
     // 🎟 при РУЧНОЙ скидке (поле sale) ИЛИ ручном занижении цены (не flags.includes('sleva') —
     // 🟦 ставится и системными скидками, а те по определению «по программе»).
-    if ((hasManualSale(sale) || manualDeltaKc < 0) && process.env.LOYALTY_ENABLED === 'true') {
+    // Занижение из-за меньшей работы (s241) — не скидка.
+    if ((hasManualSale(sale) || (manualDeltaKc < 0 && pricing.priceBasis !== 'paid')) && process.env.LOYALTY_ENABLED === 'true') {
       const hasRebook = booking.discount?.type === 'rebook' && booking.discount?.applied;
       if (!hasRebook && redemptionKc <= 0) flags.push('sleva_bez_karty');
     }
-    return { flags, manualDeltaKc };
+    // В запись идёт только ЯВНЫЙ выбор админа: пусто = старое поведение (каталог),
+    // у цены без занижения причины нет.
+    return { flags, manualDeltaKc, priceBasis: manualDeltaKc < 0 ? asPriceBasis(priceBasis) : null };
   },
 
   /** Ваучер должен быть оплачен и ещё не реализован (тот же фильтр, что в relation-picker). */
@@ -396,12 +437,13 @@ export default {
       korekceSalonAdjKc: acc.salonAdjKc,
     });
 
-    const { flags, manualDeltaKc } = await this._flagsFor(booking, {
+    const { flags, manualDeltaKc, priceBasis } = await this._flagsFor(booking, {
       staffSalaries: body.staffSalaries,
       salonSalaries: body.salonSalaries,
       sale,
       internal,
       korekce,
+      priceBasis: body.priceBasis,
     });
 
     const date = String(booking.date);
@@ -433,6 +475,7 @@ export default {
         verifyFlags: flags,
         verify: dominantEmoji(flags),
         manualDeltaKc,
+        priceBasis,
         korekce: transfer,
         korekceStaffOutKc: acc.staffOutKc || null,
         korekceSalonAdjKc: acc.salonAdjKc || null,
@@ -507,6 +550,7 @@ export default {
       salonSalaries: body.salonSalaries ?? rec.salonSalaries,
       sale: 'sale' in body ? orNull(body.sale) : rec.sale,
       internal: 'internal' in body ? body.internal === true : Boolean(rec.internal),
+      priceBasis: 'priceBasis' in body ? body.priceBasis : rec.priceBasis,
     };
     this._validateMoney(merged);
 
@@ -530,7 +574,7 @@ export default {
       korekceStaffOutKc: rec.korekceStaffOutKc,
       korekceSalonAdjKc: rec.korekceSalonAdjKc,
     });
-    const { flags, manualDeltaKc } = await this._flagsFor(booking, { ...merged, korekce });
+    const { flags, manualDeltaKc, priceBasis } = await this._flagsFor(booking, { ...merged, korekce });
 
     const data: Record<string, unknown> = {
       staffSalaries: moneyStr(merged.staffSalaries),
@@ -540,6 +584,7 @@ export default {
       verifyFlags: flags,
       verify: dominantEmoji(flags),
       manualDeltaKc,
+      priceBasis,
     };
     if ('tip' in body) data.tip = orNull(body.tip) ? moneyStr(body.tip) : null;
     if ('cash' in body) data.cash = body.cash !== false;

@@ -2744,6 +2744,7 @@ export interface ApiServiceProvidedServiceProvided
       Schema.Attribute.Private;
     manualDeltaKc: Schema.Attribute.Integer;
     offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'>;
+    priceBasis: Schema.Attribute.Enumeration<['catalog', 'paid']>;
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'> &
       Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;

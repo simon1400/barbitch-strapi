@@ -2655,6 +2655,22 @@ export default {
     }
   },
 
+  // Добавки к броням календаря, от которых зависит показ денег: сумма награды
+  // bitchcard и причина ручной цены «меньшая работа» у закрытого визита (s241) —
+  // доля мастера на плитке считается по тому же правилу, что при закрытии визита.
+  async _withPricingExtras(list) {
+    const ids = list.map((b) => b.documentId).filter(Boolean);
+    const kc = await this._redemptionKcByBooking(ids);
+    const paid = new Set(await strapi.service('api::booking-engine.visit-close').paidBasisBookingIds(ids));
+    return list.map((b) => {
+      const extra = {
+        ...(kc[b.documentId] ? { redemptionKc: kc[b.documentId] } : {}),
+        ...(paid.has(b.documentId) ? { priceBasis: 'paid' } : {}),
+      };
+      return Object.keys(extra).length ? { ...b, ...extra } : b;
+    });
+  },
+
   // Урезание брони под роль. Мастер видит расписание всего салона, но:
   //   контакты клиента — не приходят вообще (интерфейс их мастеру и не рисует);
   //   деньги и снапшот цен — только по СВОИМ броням.
@@ -2670,7 +2686,7 @@ export default {
           return rest;
         })
       : b.services;
-    return { ...out, totalPrice: null, priceOverride: null, discount: null, redemptionKc: null, services };
+    return { ...out, totalPrice: null, priceOverride: null, discount: null, redemptionKc: null, priceBasis: null, services };
   },
 
   async calendarDayForSession({ date, session }) {
@@ -2687,8 +2703,7 @@ export default {
       pagination: { pageSize: 200 },
     });
     const list = Array.isArray(rows) ? rows : [];
-    const kc = await this._redemptionKcByBooking(list.map((b) => b.documentId).filter(Boolean));
-    const withKc = list.map((b) => (kc[b.documentId] ? { ...b, redemptionKc: kc[b.documentId] } : b));
+    const withKc = await this._withPricingExtras(list);
     if (!session || session.role !== 'master') return withKc;
     const ownNoonaId = await this._ownNoonaIdForSession(session);
     return withKc.map((b) => this._scopeBookingForMaster(b, ownNoonaId));
@@ -2715,8 +2730,7 @@ export default {
       pagination: { pageSize: 300 },
     });
     const list = Array.isArray(rows) ? rows : [];
-    const kc = await this._redemptionKcByBooking(list.map((b) => b.documentId).filter(Boolean));
-    const withKc = list.map((b) => (kc[b.documentId] ? { ...b, redemptionKc: kc[b.documentId] } : b));
+    const withKc = await this._withPricingExtras(list);
     if (session?.role !== 'master') return withKc;
     return withKc.map((b) => ({
       ...b,
