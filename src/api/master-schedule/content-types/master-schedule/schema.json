@@ -25,6 +25,9 @@
     },
     "requests": {
       "type": "json"
+    },
+    "requestPushes": {
+      "type": "json"
     }
   }
 }

@@ -1,12 +1,18 @@
 // Поручения владельца управляющей (services/owner-tasks.ts, s240 — §11 плана «Výkaz práce»):
 //   - поля: название обязательно, срок не в прошлом (старый при правке можно оставить), приоритет из списка;
 //   - статусы: open → done (исполнитель) → accepted (владелец); вернуть/отменить — владелец;
+//     s245: исполнитель снимает «hotovo» (undone: done → open), пока владелец не принял;
 //     чужая роль или неверный статус — 403/409; ход работы и комментарий — с текстом;
 //   - исполнитель видит только свои (чужое — 404), владелец — все; администратору/мастеру — 403;
 //   - порядок: просроченные, срочные, по сроку; ждут владельца; закрытые свежие сверху;
 //   - запись условная по version; журнал — entityType task, только название;
 //   - заметки из отчёта: применяются только новые/изменившиеся, «hotovo» один раз;
-//   - ручки: создать/править — requireOwner; остальное — requireStaff + роль в сервисе; REST нет.
+//   - ручки: все — requireStaff + роль в сервисе (s246: создать/править может и управляющая); REST нет;
+//   - s246: задачи управляющей себе и владельцу — стороны «исполнитель/постановщик», «кто поставил —
+//     тот принимает», себе и владельцу — закрываются сразу по «hotovo»; старые строки без полей —
+//     поручения владельца управляющей.
+//   - s247: создание и каждое действие отдают событие в manager-notify (кому слать — решает он);
+//     сбой push не ломает поручение.
 // Запуск: cd strapi && node --test tests/owner-tasks.test.mjs
 
 import { test } from 'node:test';
@@ -56,6 +62,7 @@ const matchCond = (val, cond) => {
     if (op === '$eq') return val === arg;
     if (op === '$eqi') return String(val ?? '').toLowerCase() === String(arg).toLowerCase();
     if (op === '$in') return arg.includes(val);
+    if (op === '$gte') return val != null && val >= arg;
     if (op === '$null') return arg ? val == null : val != null;
     return val != null && matchCond(val[op], arg);
   });
@@ -111,7 +118,22 @@ function fresh() {
         },
       }),
     },
-    service: (uid) => (assert.equal(uid, 'api::calendar-log.calendar-log'), { write: async (e) => void logs.push(e) }),
+    // s247: push — шпион manager-notify (failPush — сбой отправки)
+    pushes: [],
+    failPush: false,
+    service: (uid) => {
+      if (uid === 'api::booking-engine.manager-notify') {
+        return {
+          async taskEvent(task, ev) {
+            await tick();
+            globalThis.strapi.pushes.push({ id: task.documentId, personal: task.personal?.documentId || null, ...ev });
+            if (globalThis.strapi.failPush) throw new Error('push down');
+          },
+        };
+      }
+      assert.equal(uid, 'api::calendar-log.calendar-log');
+      return { write: async (e) => void logs.push(e) };
+    },
     log: { error() {}, warn() {} },
   };
   return globalThis.strapi;
@@ -156,6 +178,12 @@ test('статусы: кто и откуда', () => {
   assert.equal(acc.data.closedBy, 'x');
   const re = act({ status: 'accepted' }, 'reopen', 'owner', 'Ještě ne');
   assert.deepEqual([re.data.status, re.data.closedAt, re.data.doneAt], ['open', null, null]);
+  // s245: исполнитель снимает «hotovo» только из done; текст необязателен
+  const un = act({ status: 'done', doneAt: at, events: [] }, 'undone', 'manager');
+  assert.deepEqual([un.data.status, un.data.doneAt, un.event.kind, un.event.text], ['open', null, 'undone', '']);
+  assert.throws(() => act({ status: 'accepted' }, 'undone', 'manager'), (e) => e.code === 'bad_transition', 'после převzato — только владелец');
+  assert.throws(() => act({ status: 'open' }, 'undone', 'manager'), (e) => e.code === 'bad_transition');
+  assert.throws(() => act({ status: 'done' }, 'undone', 'owner'), (e) => e.code === 'action_not_allowed');
   assert.throws(() => act({ status: 'accepted' }, 'cancel', 'owner'), (e) => e.code === 'bad_transition');
   assert.equal(act({ status: 'cancelled' }, 'comment', 'manager', 'ok').data.status, undefined);
   const fromReport = T.applyTaskAction({ status: 'open' }, { action: 'progress', role: 'manager', text: 'a', by: 'x', at, reportDate: '2026-10-01' });
@@ -196,6 +224,16 @@ test('заметки отчёта: новые и изменившиеся, «hot
   assert.deepEqual(T.reportTaskActions([{ taskId: A, done: true, note: 'x' }], [{ taskId: A, done: true, note: 'x' }]), []);
   assert.deepEqual(T.reportTaskActions([{ taskId: A, done: true, note: 'x' }], [{ taskId: A, done: true, note: 'x2' }]), [{ taskId: A, action: 'progress', text: 'x2' }]);
   assert.deepEqual(T.reportTaskActions([{ taskId: A, done: false, note: 'x' }], [{ taskId: A, done: true, note: 'x' }]), [{ taskId: A, action: 'done', text: 'x' }]);
+  // s245: снятое «hotovo» — явная отметка undone (ключ только когда true; при done отбрасывается)
+  assert.deepEqual(T.normalizeReportTasks([{ id: A, undone: true }, { id: B, done: true, undone: true }, { id: 'task0000000000000000003', undone: false }]), [
+    { taskId: A, done: false, note: '', undone: true },
+    { taskId: B, done: true, note: '' },
+  ]);
+  assert.deepEqual(T.reportTaskActions([], [{ taskId: A, done: false, note: '', undone: true }]), [{ taskId: A, action: 'undone', text: '' }]);
+  assert.deepEqual(T.reportTaskActions([{ taskId: A, done: true, note: 'x' }], [{ taskId: A, done: false, note: 'chybí sklad', undone: true }]), [{ taskId: A, action: 'undone', text: 'chybí sklad' }]);
+  assert.deepEqual(T.reportTaskActions([{ taskId: A, done: true, note: 'x' }], [{ taskId: A, done: false, note: 'x', undone: true }]), [{ taskId: A, action: 'undone', text: '' }], 'старый текст второй раз не идёт');
+  assert.deepEqual(T.reportTaskActions([{ taskId: A, done: false, note: 'x', undone: true }], [{ taskId: A, done: false, note: 'x', undone: true }]), [], 'правка отчёта не повторяет undone');
+  assert.deepEqual(T.reportTaskActions([{ taskId: A, done: true, note: 'x' }], []), [], 'отсутствие записи «hotovo» не снимает');
 });
 
 test('доступ: владелец создаёт и видит всё; исполнитель — только свои; остальным 403', async () => {
@@ -234,13 +272,20 @@ test('путь поручения: ход работы → hotovo → верну
   r = (await svc.act({ session: owner, id, body: { action: 'reopen', text: 'Chybí sklad' }, now })).task;
   assert.equal(r.status, 'open');
   await svc.act({ session: manager, id, body: { action: 'done' }, now });
+  // s245: управляющая передумала — снимает «hotovo» сама, потом снова hotovo
+  r = (await svc.act({ session: manager, id, body: { action: 'undone', text: 'Ještě faktura' }, now })).task;
+  assert.equal(r.status, 'open');
+  assert.equal(r.doneAt, null);
+  await svc.act({ session: manager, id, body: { action: 'done' }, now });
   r = (await svc.act({ session: owner, id, body: { action: 'accept' }, now })).task;
   assert.equal(r.status, 'accepted');
-  assert.deepEqual(r.events.map((e) => e.kind), ['created', 'progress', 'done', 'reopen', 'done', 'accept']);
+  await expectErr(svc.act({ session: manager, id, body: { action: 'undone' }, now }), 409, 'bad_transition');
+  assert.deepEqual(r.events.map((e) => e.kind), ['created', 'progress', 'done', 'reopen', 'done', 'undone', 'done', 'accept']);
   await expectErr(svc.update({ session: owner, id, body: { title: 'Y' }, now }), 409, 'task_closed');
   assert.equal((await svc.list({ session: owner, now })).tasks.length, 0, 'принятое — не в активных');
   assert.equal((await svc.list({ session: owner, scope: 'closed', now })).tasks.length, 1);
-  assert.deepEqual(s.logs.map((l) => l.action), ['task_create', 'task_progress', 'task_done', 'task_reopen', 'task_done', 'task_accept']);
+  assert.deepEqual(s.logs.map((l) => l.action), ['task_create', 'task_progress', 'task_done', 'task_reopen', 'task_done', 'task_undone', 'task_done', 'task_accept']);
+  assert.match(s.logs[5].summary, /^Úkol vrácen — ještě není hotovo: Inventura$/);
 });
 
 test('правка владельцем: лента «edited»; без изменений — без записи; устаревшая версия — 409', async () => {
@@ -304,8 +349,8 @@ test('ручки и коллекции: гейты, REST-роутов нет', (
   const want = {
     adminTasksAttention: ['GET', '/engine/admin/tasks/attention', 'requireStaff'],
     adminTasksList: ['GET', '/engine/admin/tasks', 'requireStaff'],
-    adminTaskCreate: ['POST', '/engine/admin/tasks', 'requireOwner'],
-    adminTaskUpdate: ['PATCH', '/engine/admin/tasks/:id', 'requireOwner'],
+    adminTaskCreate: ['POST', '/engine/admin/tasks', 'requireStaff'],
+    adminTaskUpdate: ['PATCH', '/engine/admin/tasks/:id', 'requireStaff'],
     adminTaskAction: ['POST', '/engine/admin/tasks/:id/actions', 'requireStaff'],
     adminTaskFileUpload: ['POST', '/engine/admin/tasks/:id/files', 'requireStaff'],
     adminTaskFileDownload: ['GET', '/engine/admin/tasks/:id/files/:fid', 'requireStaff'],
@@ -324,3 +369,174 @@ test('ручки и коллекции: гейты, REST-роутов нет', (
   const f = JSON.parse(read('src/api/owner-task-file/content-types/owner-task-file/schema.json'));
   assert.equal(f.attributes.storedName.private, true);
 });
+
+// ── s246: задачи управляющей себе и владельцу ───────────────────────────────
+test('s246 стороны: матрица действий на трёх видах задач × две роли', () => {
+  const keys = (task, role) => Object.keys(T.transitionsFor(task, role)).sort().join()
+  const legacy = {} // старая строка без полей = поручение владельца управляющей
+  const self = { assignee: 'manager', createdByRole: 'manager' }
+  const toOwner = { assignee: 'owner', createdByRole: 'manager' }
+  assert.equal(keys(legacy, 'manager'), 'comment,done,progress,undone')
+  assert.equal(keys(legacy, 'owner'), 'accept,cancel,comment,reopen')
+  assert.equal(keys(self, 'manager'), 'cancel,comment,done,progress,reopen')
+  assert.equal(keys(self, 'owner'), 'comment', 'задача управляющей самой себе — владельцу только комментарий')
+  assert.equal(keys(toOwner, 'owner'), 'comment,done', 'владелец-исполнитель: hotovo и комментарий')
+  assert.equal(keys(toOwner, 'manager'), 'cancel,comment,reopen', 'постановщик: вернуть, отменить')
+  assert.equal(keys(legacy, 'administrator'), 'comment')
+  assert.deepEqual([T.assigneeOf(legacy), T.creatorOf(legacy), T.closesOnDone(legacy)], ['manager', 'owner', false])
+  assert.equal(T.closesOnDone(self), true)
+  assert.equal(T.closesOnDone(toOwner), true)
+  const at = '2026-10-07T10:00:00.000Z'
+  const act = (task, action, role) => T.applyTaskAction({ status: 'open', events: [], ...task }, { action, role, by: 'x', at })
+  const d = act(self, 'done', 'manager')
+  assert.deepEqual([d.data.status, d.data.doneAt, d.data.closedAt, d.data.closedBy, d.event.kind], ['accepted', at, at, 'x', 'done'], 'себе — сразу закрыта')
+  const o = act(toOwner, 'done', 'owner')
+  assert.deepEqual([o.data.status, o.data.closedBy], ['accepted', 'x'])
+  assert.throws(() => act(toOwner, 'progress', 'owner'), (e) => e.code === 'action_not_allowed')
+  assert.throws(() => act(toOwner, 'done', 'manager'), (e) => e.code === 'action_not_allowed', 'задачу владельцу управляющая не закрывает')
+  assert.throws(() => act(self, 'done', 'owner'), (e) => e.code === 'action_not_allowed')
+  assert.throws(() => T.applyTaskAction({ status: 'accepted', ...self }, { action: 'undone', role: 'manager', by: 'x', at }), (e) => e.code === 'action_not_allowed')
+  assert.throws(() => T.applyTaskAction({ status: 'accepted', ...self }, { action: 'cancel', role: 'manager', by: 'x', at }), (e) => e.code === 'bad_transition')
+  assert.equal(T.applyTaskAction({ status: 'accepted', ...toOwner }, { action: 'reopen', role: 'manager', by: 'x', at }).data.status, 'open')
+  assert.equal(T.applyTaskAction({ status: 'open', ...toOwner }, { action: 'cancel', role: 'manager', by: 'x', at }).data.status, 'cancelled')
+  assert.throws(() => act(legacy, 'done', 'administrator'), (e) => e.code === 'action_not_allowed')
+  // наружу — стороны всегда, со значениями по умолчанию у старых строк
+  const row = T.taskRow({ documentId: 'a', title: 'x' })
+  assert.deepEqual([row.assignee, row.createdByRole], ['manager', 'owner'])
+})
+
+test('s246 создание управляющей: себе и владельцу; карточка — своя по сессии; владелец себе — нет', async () => {
+  const s = fresh()
+  await expectErr(svc.create({ session: manager, body: { title: 'X' }, now }), 400, 'bad_assignee')
+  await expectErr(svc.create({ session: manager, body: { title: 'X', assignee: 'admin' }, now }), 400, 'bad_assignee')
+  await expectErr(svc.create({ session: owner, body: { title: 'X', personal: MARIIA, assignee: 'owner' }, now }), 400, 'bad_assignee')
+  await expectErr(svc.create({ session: admin, body: { title: 'X', assignee: 'manager' }, now }), 403, 'not_allowed')
+  const mine = (await svc.create({ session: manager, body: { title: 'Zavolat účetní', assignee: 'manager', personal: ANNA }, now })).task
+  assert.deepEqual([mine.assignee, mine.createdByRole, mine.personal, mine.createdByName], ['manager', 'manager', MARIIA, 'Mariia Medvedeva'], '«personal» из тела не читается')
+  assert.deepEqual(mine.events.map((e) => [e.kind, e.role]), [['created', 'manager']])
+  const forOwner = (await svc.create({ session: manager, body: { title: 'Podepsat smlouvu', assignee: 'owner', dueDate: '2026-10-05', description: 'TAJNÉ' }, now })).task
+  assert.deepEqual([forOwner.assignee, forOwner.createdByRole, forOwner.personal], ['owner', 'manager', MARIIA])
+  const legacy = (await svc.create({ session: owner, body: { title: 'Od majitele', personal: MARIIA }, now })).task
+  assert.deepEqual([legacy.assignee, legacy.createdByRole], ['manager', 'owner'])
+  assert.deepEqual(s.logs.map((l) => l.summary), ['Nový vlastní úkol: Zavolat účetní', 'Nový úkol pro majitele: Podepsat smlouvu · do 05.10.2026', 'Nový úkol: Od majitele'])
+  assert.ok(s.logs.every((l) => l.action === 'task_create' && l.entityType === 'task' && l.employeeName === 'Mariia Medvedeva'))
+  assert.doesNotMatch(JSON.stringify(s.logs), /TAJNÉ/)
+  // видимость: Марии — все три (её карточка), Анне — ничего, владельцу — все
+  assert.equal((await svc.list({ session: manager, now })).tasks.length, 3)
+  assert.equal((await svc.list({ session: anna, now })).tasks.length, 0)
+  assert.equal((await svc.list({ session: owner, now })).tasks.length, 3)
+  await expectErr(svc.act({ session: anna, id: forOwner.documentId, body: { action: 'comment', text: 'x' }, now }), 404, 'task_not_found')
+})
+
+test('s246 путь задачи себе и задачи владельцу; правит только постановщик', async () => {
+  const s = fresh()
+  const mine = (await svc.create({ session: manager, body: { title: 'Vlastní', assignee: 'manager' }, now })).task
+  const forOwner = (await svc.create({ session: manager, body: { title: 'Pro majitele', assignee: 'owner' }, now })).task
+  const legacy = (await svc.create({ session: owner, body: { title: 'Od majitele', personal: MARIIA }, now })).task
+  // правка: своё — да; чужое — 403 (и владельцу задачу управляющей не править)
+  const ed = (await svc.update({ session: manager, id: forOwner.documentId, body: { priority: 'urgent' }, now })).task
+  assert.deepEqual([ed.priority, ed.events.at(-1).kind, ed.events.at(-1).role], ['urgent', 'edited', 'manager'])
+  await svc.update({ session: manager, id: mine.documentId, body: { title: 'Vlastní 2' }, now })
+  await expectErr(svc.update({ session: manager, id: legacy.documentId, body: { title: 'Y' }, now }), 403, 'not_creator')
+  await expectErr(svc.update({ session: owner, id: mine.documentId, body: { title: 'Y' }, now }), 403, 'not_creator')
+  await expectErr(svc.update({ session: owner, id: forOwner.documentId, body: { title: 'Y' }, now }), 403, 'not_creator')
+  assert.equal((await svc.update({ session: owner, id: legacy.documentId, body: { title: 'Od majitele 2' }, now })).task.title, 'Od majitele 2')
+  // себе: hotovo — сразу закрыта; владелец только комментирует; вернуть — сама
+  await expectErr(svc.act({ session: owner, id: mine.documentId, body: { action: 'done' }, now }), 403, 'action_not_allowed')
+  await svc.act({ session: owner, id: mine.documentId, body: { action: 'comment', text: 'Ok' }, now })
+  let r = (await svc.act({ session: manager, id: mine.documentId, body: { action: 'done' }, now })).task
+  assert.deepEqual([r.status, r.closedBy], ['accepted', 'Mariia Medvedeva'])
+  r = (await svc.act({ session: manager, id: mine.documentId, body: { action: 'reopen', text: 'Ještě ne' }, now })).task
+  assert.equal(r.status, 'open')
+  // владельцу: управляющая не закрывает; владелец — hotovo сразу закрывает; управляющая возвращает
+  await expectErr(svc.act({ session: manager, id: forOwner.documentId, body: { action: 'done' }, now }), 403, 'action_not_allowed')
+  r = (await svc.act({ session: owner, id: forOwner.documentId, body: { action: 'done', text: 'Podepsáno' }, now })).task
+  assert.deepEqual([r.status, r.closedBy, r.events.at(-1).role], ['accepted', 'Dima', 'owner'])
+  await expectErr(svc.update({ session: manager, id: forOwner.documentId, body: { title: 'Z' }, now }), 409, 'task_closed')
+  r = (await svc.act({ session: manager, id: forOwner.documentId, body: { action: 'reopen', text: 'Chybí podpis' }, now })).task
+  assert.equal(r.status, 'open')
+  r = (await svc.act({ session: manager, id: forOwner.documentId, body: { action: 'cancel' }, now })).task
+  assert.equal(r.status, 'cancelled')
+  assert.equal(s.logs.filter((l) => l.action === 'task_done').length, 2)
+})
+
+test('s246 výkaz: в форме — задачи, где она исполнитель (и свои); задачи владельцу — нет', async () => {
+  fresh()
+  const mine = (await svc.create({ session: manager, body: { title: 'Vlastní', assignee: 'manager' }, now })).task
+  const forOwner = (await svc.create({ session: manager, body: { title: 'Pro majitele', assignee: 'owner' }, now })).task
+  const legacy = (await svc.create({ session: owner, body: { title: 'Od majitele', personal: MARIIA }, now })).task
+  // старая строка без полей вовсе (до s246) — как поручение владельца
+  globalThis.strapi.rows[TASK].push({ id: 99, documentId: 'old00000000000000000099', personalDocId: MARIIA, title: 'Stará', status: 'open', events: [], version: 1, createdAt: '2026-09-01T00:00:00Z' })
+  const open = await svc.openFor(MARIIA, now)
+  assert.deepEqual(open.map((t) => t.title).sort(), ['Od majitele', 'Stará', 'Vlastní'])
+  assert.deepEqual(open.filter((t) => t.own).map((t) => t.title), ['Vlastní'])
+  const ok = await svc.checkReportTasks(manager, [{ taskId: mine.documentId, done: true, note: '' }, { taskId: legacy.documentId, done: false, note: 'x' }])
+  assert.equal(ok.length, 2)
+  await expectErr(svc.checkReportTasks(manager, [{ taskId: forOwner.documentId, done: false, note: 'x' }]), 400, 'bad_tasks')
+  // своя задача, отмеченная из отчёта, закрывается сразу
+  await svc.applyReportTasks(manager, [], [{ taskId: mine.documentId, done: true, note: 'Hotovo' }], '2026-10-02', now)
+  const after = globalThis.strapi.rows[TASK].find((t) => t.documentId === mine.documentId)
+  assert.deepEqual([after.status, after.events.at(-1).reportDate], ['accepted', '2026-10-02'])
+})
+
+test('s246 «Сегодня»: владельцу — поручения управляющей и задачи от неё; управляющей — свои + ждут владельца', async () => {
+  const s = fresh()
+  const later = new Date('2026-10-05T10:00:00Z')
+  await svc.create({ session: owner, body: { title: 'Od majitele', personal: MARIIA, dueDate: '2026-10-03' }, now })
+  await svc.create({ session: manager, body: { title: 'Vlastní pozdě', assignee: 'manager', dueDate: '2026-10-03' }, now })
+  await svc.create({ session: manager, body: { title: 'Majiteli pozdě', assignee: 'owner', dueDate: '2026-10-03' }, now })
+  await svc.create({ session: manager, body: { title: 'Majiteli urgentní', assignee: 'owner', priority: 'urgent' }, now })
+  const doneOne = (await svc.create({ session: manager, body: { title: 'Majiteli hotovo', assignee: 'owner' }, now })).task
+  await svc.act({ session: owner, id: doneOne.documentId, body: { action: 'done' }, now })
+  const o = await svc.attention({ session: owner, now: later })
+  assert.deepEqual(o.overdue.map((x) => x.title), ['Od majitele'], 'своя задача управляющей и задачи владельцу — не в «Поручениях»')
+  assert.equal(o.open, 1)
+  assert.deepEqual([o.forMe.open, o.forMe.overdue], [2, 1])
+  assert.deepEqual(o.forMe.list.map((x) => [x.title, x.personalName]), [['Majiteli pozdě', 'Mariia Medvedeva'], ['Majiteli urgentní', 'Mariia Medvedeva']])
+  assert.equal(o.toOwner, undefined)
+  const m = await svc.attention({ session: manager, now: later })
+  assert.equal(m.open, 2, 'её в работе: от владельца и своя')
+  assert.deepEqual(m.overdue.map((x) => x.title).sort(), ['Od majitele', 'Vlastní pozdě'])
+  assert.deepEqual(m.toOwner, { open: 2, done: 1 })
+  assert.equal(m.forMe, undefined)
+  // выполненное владельцем больше 7 дней назад — не считается
+  s.rows[TASK].find((t) => t.documentId === doneOne.documentId).closedAt = '2026-09-20T10:00:00.000Z'
+  assert.equal((await svc.attention({ session: manager, now: later })).toOwner.done, 0)
+  assert.equal((await svc.attention({ session: anna, now: later })).toOwner.open, 0)
+})
+
+test('s247 push: создание и действия отдают событие в manager-notify; сбой push не ломает поручение', async () => {
+  const s = fresh()
+  const legacy = (await svc.create({ session: owner, body: { title: 'Od majitele', personal: MARIIA }, now })).task
+  const forOwner = (await svc.create({ session: manager, body: { title: 'Pro majitele', assignee: 'owner' }, now })).task
+  await svc.act({ session: manager, id: legacy.documentId, body: { action: 'done', text: 'Hotovo  ' }, now })
+  await svc.act({ session: owner, id: legacy.documentId, body: { action: 'reopen', text: 'Chybí foto' }, now })
+  await svc.act({ session: owner, id: forOwner.documentId, body: { action: 'done' }, now })
+  await tick()
+  await tick()
+  assert.deepEqual(
+    s.pushes.map((p) => [p.id, p.kind, p.role, p.text ?? null, p.personal]),
+    [
+      [legacy.documentId, 'created', 'owner', null, MARIIA],
+      [forOwner.documentId, 'created', 'manager', null, MARIIA],
+      [legacy.documentId, 'done', 'manager', 'Hotovo', MARIIA],
+      [legacy.documentId, 'reopen', 'owner', 'Chybí foto', MARIIA],
+      [forOwner.documentId, 'done', 'owner', '', MARIIA],
+    ],
+    'событие несёт задачу ПОСЛЕ записи (с карточкой) и очищенный текст'
+  )
+  // сбой push — поручение создаётся и меняется как обычно
+  s.failPush = true
+  const t = (await svc.create({ session: owner, body: { title: 'Při výpadku', personal: MARIIA }, now })).task
+  assert.equal(t.status, 'open')
+  assert.equal((await svc.act({ session: manager, id: t.documentId, body: { action: 'done' }, now })).task.status, 'done')
+  await tick()
+  await tick()
+  // сервис push недоступен вовсе (бросает синхронно) — тоже не ломает
+  const orig = s.service
+  s.service = (uid) => {
+    if (uid === 'api::booking-engine.manager-notify') throw new Error('no service')
+    return orig(uid)
+  }
+  assert.equal((await svc.create({ session: owner, body: { title: 'Bez služby', personal: MARIIA }, now })).task.status, 'open')
+})

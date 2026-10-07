@@ -163,6 +163,66 @@ export default {
       tz: 'Europe/Prague',
     },
   },
+  // Push управляющей (s247, MANAGER_UX_NEXT_SESSION_PROMPT.md §5): напоминания о výkazu и блоки,
+  // ждущие подтверждения. Выключено по умолчанию: ТОЛЬКО env MANAGER_PUSH_ENABLED=true (+ VAPID
+  // ключи — без них прогон no-op). Пуши-события (поручения, отправленный výkaz) — без этого флага.
+  managerReportReminderEvening: {
+    task: async ({ strapi }) => {
+      if (process.env.MANAGER_PUSH_ENABLED !== 'true') return;
+      try {
+        await strapi.service('api::booking-engine.manager-notify').remindReports({ kind: 'evening' });
+      } catch (e) {
+        strapi.log.error(`manager report reminder (evening) cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '0 21 * * 1-5', // будни 21:00 — výkaz за сегодня ещё не отправлен
+      tz: 'Europe/Prague',
+    },
+  },
+  managerReportReminderMorning: {
+    task: async ({ strapi }) => {
+      if (process.env.MANAGER_PUSH_ENABLED !== 'true') return;
+      try {
+        await strapi.service('api::booking-engine.manager-notify').remindReports({ kind: 'morning' });
+      } catch (e) {
+        strapi.log.error(`manager report reminder (morning) cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '0 9 * * 2-6', // вт–сб 09:00 — за вчера (до 10:00 ещё вовремя)
+      tz: 'Europe/Prague',
+    },
+  },
+  managerAgingBlocks: {
+    task: async ({ strapi }) => {
+      if (process.env.MANAGER_PUSH_ENABLED !== 'true') return;
+      try {
+        const res = await strapi.service('api::booking-engine.manager-notify').pushAgingBlocks();
+        if (res.due) strapi.log.info(`manager aging blocks: ${JSON.stringify(res)}`);
+      } catch (e) {
+        strapi.log.error(`manager aging blocks cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '5 8-22 * * *', // каждый час в :05 с 08 до 22 — ждёт подтверждения > 6 ч (один раз)
+      tz: 'Europe/Prague',
+    },
+  },
+  managerPendingBlocksReminder: {
+    task: async ({ strapi }) => {
+      if (process.env.MANAGER_PUSH_ENABLED !== 'true') return;
+      try {
+        await strapi.service('api::booking-engine.manager-notify').remindPendingBlocks();
+      } catch (e) {
+        strapi.log.error(`manager pending blocks cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '0 10 * * *', // каждый день 10:00 — всё, что ждёт дольше суток
+      tz: 'Europe/Prague',
+    },
+  },
   dailyDigest: {
     task: async ({ strapi }) => {
       try {

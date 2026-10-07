@@ -179,7 +179,13 @@ export const FACT_ACTIONS: Record<string, string> = {
   visit_close_delete: 'zrušeno',
   shift_close: 'směna uzavřena',
   shift_revert: 'uzavření zrušeno',
+  // s246: управляющая сама ставит, правит, возвращает и отменяет свои задачи
+  task_create: 'nový úkol',
+  task_edit: 'úprava úkolu',
+  task_reopen: 'vráceno do práce',
+  task_cancel: 'zrušeno',
   task_done: 'hotovo',
+  task_undone: 'ještě není hotovo',
   task_progress: 'průběh',
   task_comment: 'komentář',
   task_file_add: 'příloha',
@@ -320,9 +326,16 @@ export const contentOf = (row: any) => ({
   carried: row?.carried || '',
   needsOwner: row?.needsOwner || '',
   planTomorrow: row?.planTomorrow || '',
-  // заметки по поручениям владельца (s240): [{taskId, title, note, done}]; title — на момент подачи
+  // заметки по поручениям владельца (s240): [{taskId, title, note, done, undone?}]; title — на момент подачи;
+  // `undone` (s245) — в этом отчёте «hotovo» снято, ключ есть только когда true
   taskNotes: Array.isArray(row?.taskNotes)
-    ? row.taskNotes.map((n: any) => ({ taskId: n.taskId, title: n.title || '', note: n.note || '', done: n.done === true }))
+    ? row.taskNotes.map((n: any) => ({
+        taskId: n.taskId,
+        title: n.title || '',
+        note: n.note || '',
+        done: n.done === true,
+        ...(n.done !== true && n.undone === true ? { undone: true } : {}),
+      }))
     : [],
 });
 
@@ -865,7 +878,35 @@ export default {
         .catch((e) => strapi.log.error(`work-reports: task notes ${day} failed: ${e?.message || e}`));
     }
 
+    // s247: первая подача отчёта за день — push владельцу (правка, «volno» — без push)
+    if (plan.changed && plan.data.submittedAt) this._notifySubmitted(p, day, saved);
+
     return { saved: toRow(saved), ...(await this.mine({ session, month: day.slice(0, 7), now })) };
+  },
+
+  _notifySubmitted(person: any, date: string, saved: any) {
+    try {
+      Promise.resolve(
+        strapi.service('api::booking-engine.manager-notify').reportSubmitted({ person: { documentId: person.documentId, name: person.name }, date, content: contentOf(saved) })
+      ).catch((e) => strapi.log.error(`work-reports: push report ${date} failed: ${e?.message || e}`));
+    } catch (e) {
+      strapi.log.error(`work-reports: push report ${date} failed: ${e?.message || e}`);
+    }
+  },
+
+  /**
+   * s247: кому из работающих управляющих напомнить о výkazu за `date` — день «ещё можно вовремя»
+   * (`open`: будни, не отпуск, не volno, не подан; вчера — только до 10:00).
+   */
+  async reminderTargets({ date, now = new Date() }: { date: string; now?: Date }) {
+    const today = this._today(now);
+    const out = [];
+    for (const p of (await this._people()).filter((x) => x.isActive)) {
+      const [reports, timeOffs] = await Promise.all([this._reports(p.documentId, date, date), this._timeOffs(p.documentId, date, date)]);
+      const [d] = dayStates({ from: date, to: date, today, reports, timeOffs, nowMin: pragueMinOf(now) });
+      if (d?.state === 'open') out.push({ documentId: p.documentId, name: p.name });
+    }
+    return out;
   },
 
   /** POST /work-reports/mine/:date/comments {text} — ответ в нити своего отчёта. */

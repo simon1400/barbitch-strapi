@@ -39,16 +39,8 @@ const fmtDateCz = (d: string): string => {
 
 const fmtH = (min: number): string => `${Math.round((min / 60) * 10) / 10} год`;
 
-const hhmmToMin = (s: string): number => {
-  const [h, m] = (s || '0:0').split(':').map(Number);
-  return (h || 0) * 60 + (m || 0);
-};
-
 // ISO → минуты от полуночи В ПРАГЕ. Сервер в UTC, поэтому через Intl (НЕ getHours).
 const isoToMinPrague = (iso: string): number => hhmmToMin(pragueTime(iso));
-
-const minToHHMM = (min: number): string =>
-  `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(Math.round(min % 60)).padStart(2, '0')}`;
 
 // Категория услуги по названию (копия classifyTitle из booking-engine/services/upsell-core.ts):
 // «řas»→ресницы (проверяем ПЕРВЫМ), «obočí»/laminace…→брови, ногтевые ключи→ногти.
@@ -67,27 +59,9 @@ const classifyCategory = (raw: string): string | null => {
   return null;
 };
 
-// Вычитание занятых интервалов из окна → свободные куски (минуты от полуночи)
-const subtractBusy = (
-  winStart: number,
-  winEnd: number,
-  busy: Array<{ start: number; end: number }>
-): Array<{ start: number; end: number }> => {
-  const sorted = busy
-    .filter((b) => b.end > winStart && b.start < winEnd)
-    .sort((a, b) => a.start - b.start);
-  const free = [];
-  let cursor = winStart;
-  for (const b of sorted) {
-    if (b.start > cursor) free.push({ start: cursor, end: Math.min(b.start, winEnd) });
-    cursor = Math.max(cursor, b.end);
-    if (cursor >= winEnd) break;
-  }
-  if (cursor < winEnd) free.push({ start: cursor, end: winEnd });
-  return free;
-};
-
 import { withoutInternal } from '../../booking-engine/services/booking-kind';
+// часы дня и вычитание занятого — digest-hours.ts (s245: «відкрито для запису» и «фактично»)
+import { dayExtents, formatWorkdayLine, hhmmToMin, minToHHMM, subtractBusy } from './digest-hours';
 import { buildAttention, adminOnDate, mondayOf } from './digest-attention';
 import { DOC_KINDS } from '../../booking-engine/services/staff';
 import { todayRanges } from '../../booking-engine/services/today';
@@ -419,17 +393,7 @@ export default {
         }
       }
 
-      // рабочий день сегодня (мин старт — макс конец часов салона)
-      const todayWindows = opening[today] || [];
-      if (todayWindows.length) {
-        const starts = todayWindows.map((w) => hhmmToMin(w.starts_at || '0:0'));
-        const ends = todayWindows.map((w) => hhmmToMin(w.ends_at || '0:0'));
-        workdayLine = `🕐 Робочий день: ${minToHHMM(Math.min(...starts))}–${minToHHMM(Math.max(...ends))}`;
-      } else {
-        workdayLine = '🕐 Сьогодні немає робочих годин салону';
-      }
-
-      // свободные окна сегодня по активным мастерам (блоки + брони → дыры ≥ MIN_GAP)
+      // действующие блоки сегодня по мастеру — для часов дня и для свободных окон
       const blockIntervalsByEmp = new Map();
       for (const b of blocked) {
         if (b.date !== today || !b.employee || !b.starts_at || !b.ends_at) continue;
@@ -438,6 +402,14 @@ export default {
           .get(b.employee)
           .push({ start: isoToMinPrague(b.starts_at), end: isoToMinPrague(b.ends_at) });
       }
+
+      // рабочий день сегодня: салон · відкрито для запису (по мастерам) · фактично (по броням) — s245
+      const todayWindows = opening[today] || [];
+      workdayLine = formatWorkdayLine(
+        dayExtents({ windows: todayWindows, blocksByEmp: blockIntervalsByEmp, bookingsByEmp: busyTodayByEmp, activeIds })
+      );
+
+      // свободные окна сегодня по активным мастерам (блоки + брони → дыры ≥ MIN_GAP)
       for (const empId of activeIds) {
         if (!todayWindows.length) break;
         const busy = [

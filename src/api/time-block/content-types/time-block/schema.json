@@ -76,6 +76,9 @@
     },
     "proposedAt": {
       "type": "datetime"
+    },
+    "pendingPushAt": {
+      "type": "datetime"
     }
   }
 }

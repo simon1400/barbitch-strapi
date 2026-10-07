@@ -2286,6 +2286,8 @@ export default {
         employeeName: b.employeeNameRaw || b.employee?.name || '',
         createdByName: b.createdByName || '',
         createdAt: b.createdAt || null,
+        // s247: когда управляющей ушёл push «ждёт > 6 ч» (manager-notify)
+        pushedAt: b.pendingPushAt || null,
         own,
         // предложение правки — всегда один блок, серии у него нет
         seriesKey: kind === 'change' ? `change|${b.documentId}` : own ? b.noonaKey : b.noonaBlockedId || b.documentId,
@@ -2295,6 +2297,7 @@ export default {
               proposedEndMin: b.proposedEndsAt ? utcToPragueMinClamped(b.proposedEndsAt, d) : null,
               proposedTitle: b.proposedTitle || '',
               proposedByName: b.proposedByName || '',
+              proposedAt: b.proposedAt || null,
             }
           : {}),
       };

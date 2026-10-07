@@ -894,13 +894,15 @@ export default {
   async pendingRequests({ now = new Date() } = {}) {
     const today = PRAGUE_DAY.format(now);
     const docs = await strapi.documents(SCHEDULE_UID).findMany({
-      fields: ['requests', 'updatedAt'],
+      fields: ['requests', 'requestPushes', 'updatedAt'],
       populate: { personal: { fields: ['name'] } },
       limit: 500,
     });
     const items = [];
     for (const doc of docs) {
       const req = doc.requests && typeof doc.requests === 'object' ? doc.requests : {};
+      // s247: отметки push «ждёт > 6 ч» — дата → `at` предложения (manager-notify)
+      const pushes = doc.requestPushes && typeof doc.requestPushes === 'object' ? doc.requestPushes : {};
       for (const [date, r] of Object.entries(req)) {
         if (!isValidYmd(date) || date < today) continue;
         items.push({
@@ -914,6 +916,7 @@ export default {
           note: r.note || null,
           by: r.by || null,
           at: r.at || null,
+          pushedAt: pushes[date] || null,
         });
       }
     }

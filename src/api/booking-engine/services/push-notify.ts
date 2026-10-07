@@ -111,6 +111,30 @@ export default {
     return sent;
   },
 
+  // s247: произвольный push устройствам карточки (управляющая) — manager-notify
+  async notifyPersonal({ personalDocId, employeeName }, payload) {
+    if (!ensureVapid()) return { skipped: 'no_vapid' };
+    const subs = await this._subsFor(personalDocId, employeeName);
+    if (!subs.length) return { sent: 0 };
+    return { sent: await this._send(subs, payload) };
+  },
+
+  // s247: push по логинам учёток без карточки (владелец: его подписка хранится с
+  // employeeName = логин, personal = null). withoutCard — не задеть мастера с тем же именем.
+  async notifyByNames(names, payload, { withoutCard = false } = {}) {
+    if (!ensureVapid()) return { skipped: 'no_vapid' };
+    const list = [...new Set((names || []).filter(Boolean))];
+    if (!list.length) return { sent: 0 };
+    const rows = await strapi.documents(SUB_UID).findMany({
+      filters: { employeeName: { $in: list } },
+      ...(withoutCard ? { populate: { personal: { fields: ['documentId'] } } } : {}),
+      limit: 100,
+    });
+    const subs = withoutCard ? rows.filter((s) => !s.personal) : rows;
+    if (!subs.length) return { sent: 0 };
+    return { sent: await this._send(subs, payload) };
+  },
+
   // Главная точка входа из движка: уведомить мастера брони о событии (kind).
   // extra.from = снимок СТАРОГО термина при переносе ({startsAt, date, time}) —
   // бронь на момент пуша уже перезаписана, старое время можно получить только снаружи.

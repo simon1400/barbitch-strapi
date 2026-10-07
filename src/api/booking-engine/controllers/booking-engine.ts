@@ -885,6 +885,8 @@ export default {
 
   // Поручения владельца (s240): создаёт, правит, принимает — владелец; исполнитель (manager)
   // видит свои, пишет ход работы и «hotovo». Роль исполнителя проверяет сервис (403/404).
+  // s246: задачи ставит и управляющая (себе/владельцу) — create/update тоже requireStaff,
+  // кто что может (роль, постановщик) — в сервисе.
   // GET /api/engine/admin/tasks?scope=active|closed|all&personal=
   async adminTasksList(ctx) {
     const session = requireStaff(ctx);
@@ -901,16 +903,16 @@ export default {
     await handle(ctx, () => tasksSvc().attention({ session }));
   },
 
-  // POST /api/engine/admin/tasks {personal, title, description, dueDate, priority} — владелец
+  // POST /api/engine/admin/tasks {personal | assignee, title, description, dueDate, priority} — владелец и управляющая
   async adminTaskCreate(ctx) {
-    const session = requireOwner(ctx);
+    const session = requireStaff(ctx);
     if (!session) return;
     await handle(ctx, () => tasksSvc().create({ session, body: ctx.request.body }));
   },
 
-  // PATCH /api/engine/admin/tasks/:id {title?, description?, dueDate?, priority?} — владелец
+  // PATCH /api/engine/admin/tasks/:id {title?, description?, dueDate?, priority?} — постановщик задачи
   async adminTaskUpdate(ctx) {
-    const session = requireOwner(ctx);
+    const session = requireStaff(ctx);
     if (!session) return;
     await handle(ctx, () => tasksSvc().update({ session, id: ctx.params.id, body: ctx.request.body }));
   },

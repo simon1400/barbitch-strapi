@@ -7,7 +7,8 @@
  *   • владелец создаёт и правит поручение (название, описание, срок, приоритет), принимает
  *     сделанное, возвращает в работу, отменяет, комментирует;
  *   • исполнитель (роль из REPORT_ROLES — сейчас manager, карточка по сессии) видит СВОИ
- *     поручения, пишет о ходе работы, отмечает «hotovo», комментирует;
+ *     поручения, пишет о ходе работы, отмечает «hotovo» (и снимает его, пока владелец не
+ *     принял — s245 `undone`), комментирует;
  *   • вложения (фото/PDF, закрытый каталог TASK_FILES_DIR) добавляют обе стороны;
  *     удалить — владелец любое, исполнитель только своё.
  *
@@ -18,6 +19,13 @@
  *
  * Коллекции без REST-роутов (администраторам REST незакрытых коллекций открыт). Запись —
  * условным UPDATE по `version`. Журнал — calendar_logs, entityType `task`, только название.
+ *
+ * s246 (§6а плана MANAGER_UX_NEXT_SESSION_PROMPT.md): управляющая ставит задачи СЕБЕ и ВЛАДЕЛЬЦУ.
+ * У задачи две стороны — исполнитель (`assignee`) и постановщик (`createdByRole`); правило
+ * «кто поставил — тот принимает». Задача себе и задача владельцу закрываются сразу по «hotovo»
+ * (принимать некому / владельца не проверяют). `personal` — карточка управляющей: исполнителя
+ * или автора задачи владельцу. Старые строки без полей — поручения владельца управляющей
+ * (дефолты в `assigneeOf`/`creatorOf`, не только в схеме).
  */
 
 import { pragueDateOf } from './slots-core';
@@ -66,20 +74,59 @@ export const STATUSES = {
   cancelled: 'Zrušeno',
 } as const;
 
-/** Что можно сделать: роль → действие → из каких статусов и в какой. */
+/** Стороны задачи (s246): исполнитель и постановщик — роль `owner` или `manager`. */
+export const SIDES = ['manager', 'owner'] as const;
+export const assigneeOf = (task: any): string => (task?.assignee === 'owner' ? 'owner' : 'manager');
+export const creatorOf = (task: any): string => (task?.createdByRole === 'manager' ? 'manager' : 'owner');
+/** Закрывается сразу по «hotovo»: задача самому себе или задача владельцу (его не проверяют). */
+export const closesOnDone = (task: any): boolean => assigneeOf(task) === 'owner' || assigneeOf(task) === creatorOf(task);
+
+const ALL_STATUSES = ['open', 'done', 'accepted', 'cancelled'];
+
+/**
+ * Что можно сделать: сторона задачи → действие → из каких статусов и в какой.
+ * s245: `undone` — исполнитель снимает «hotovo», пока постановщик не принял (done → open).
+ * s246: таблица по сторонам; что доступно роли в конкретной задаче — `transitionsFor`.
+ */
 export const TRANSITIONS = {
-  manager: {
+  assignee: {
     done: { from: ['open'], to: 'done' },
+    undone: { from: ['done'], to: 'open' },
     progress: { from: ['open'], to: null },
-    comment: { from: ['open', 'done', 'accepted', 'cancelled'], to: null },
+    comment: { from: ALL_STATUSES, to: null },
   },
-  owner: {
+  creator: {
     accept: { from: ['done'], to: 'accepted' },
     reopen: { from: ['done', 'accepted', 'cancelled'], to: 'open' },
     cancel: { from: ['open', 'done'], to: 'cancelled' },
-    comment: { from: ['open', 'done', 'accepted', 'cancelled'], to: null },
+    comment: { from: ALL_STATUSES, to: null },
+  },
+  // чужая задача (владелец смотрит задачу управляющей самой себе) — только комментарий
+  observer: {
+    comment: { from: ALL_STATUSES, to: null },
   },
 } as const;
+
+/**
+ * Действия роли над этой задачей. Исполнитель + постановщик в одном лице (задача себе) — обе
+ * стороны; «hotovo» у задач, закрывающихся сразу, ведёт в `accepted` (снимать и принимать
+ * нечего, вернуть/отменить — постановщику). Владелец-исполнитель «průběh» не пишет — комментарий.
+ */
+export const transitionsFor = (task: any, role: string): Record<string, { from: readonly string[]; to: string | null }> => {
+  const isAssignee = role === assigneeOf(task);
+  const isCreator = role === creatorOf(task);
+  if (!isAssignee && !isCreator) return { ...TRANSITIONS.observer };
+  const out: any = { ...(isAssignee ? TRANSITIONS.assignee : {}), ...(isCreator ? TRANSITIONS.creator : {}) };
+  if (closesOnDone(task)) {
+    delete out.undone;
+    delete out.accept;
+    if (out.done) out.done = { from: ['open'], to: 'accepted' };
+    if (out.reopen) out.reopen = { from: ['accepted', 'cancelled'], to: 'open' };
+    if (out.cancel) out.cancel = { from: ['open'], to: 'cancelled' };
+  }
+  if (assigneeOf(task) === 'owner') delete out.progress;
+  return out;
+};
 
 /** Действия, где текст обязателен. */
 const TEXT_REQUIRED = new Set(['progress', 'comment']);
@@ -154,8 +201,7 @@ export const applyTaskAction = (
   task: any,
   { action, role, text, by, at, reportDate = null }: { action: string; role: string; text?: unknown; by: string; at: string; reportDate?: string | null }
 ) => {
-  const rules = TRANSITIONS[role];
-  const rule = rules?.[action];
+  const rule = SIDES.includes(role as any) ? transitionsFor(task, role)[action] : null;
   if (!rule) throw new TaskError(403, 'action_not_allowed', 'Tuto akci nemůžete provést');
   const status = task?.status || 'open';
   if (!rule.from.includes(status)) throw new TaskError(409, 'bad_transition', `Úkol je ve stavu «${STATUSES[status] || status}» — akci nelze provést`);
@@ -168,7 +214,7 @@ export const applyTaskAction = (
   const data: any = { events: [...events, event] };
   if (rule.to) {
     data.status = rule.to;
-    if (rule.to === 'done') data.doneAt = at;
+    if (action === 'done') data.doneAt = at;
     if (rule.to === 'accepted' || rule.to === 'cancelled') {
       data.closedAt = at;
       data.closedBy = by;
@@ -230,6 +276,8 @@ export const taskRow = (doc: any, files: any[] = [], today = '') => ({
   status: doc.status || 'open',
   overdue: today ? isOverdue(doc, today) : false,
   createdByName: doc.createdByName || null,
+  assignee: assigneeOf(doc),
+  createdByRole: creatorOf(doc),
   doneAt: doc.doneAt || null,
   closedAt: doc.closedAt || null,
   closedBy: doc.closedBy || null,
@@ -241,8 +289,9 @@ export const taskRow = (doc: any, files: any[] = [], today = '') => ({
 });
 
 /**
- * Заметки по поручениям из формы отчёта: [{id, done, note}] → только непустые
- * (отмечено «hotovo» или есть текст), без повторов.
+ * Заметки по поручениям из формы отчёта: [{id, done, undone, note}] → только непустые
+ * (отмечено «hotovo», снято «hotovo» (s245: `undone`) или есть текст), без повторов.
+ * `undone` при `done` не имеет смысла — отбрасывается.
  */
 export const normalizeReportTasks = (raw: unknown) => {
   if (raw == null) return [];
@@ -256,8 +305,9 @@ export const normalizeReportTasks = (raw: unknown) => {
     seen.add(id);
     const note = cleanText(it?.note, MAX_EVENT_TEXT, 'text_too_long');
     const done = it?.done === true;
-    if (!note && !done) continue;
-    out.push({ taskId: id, done, note });
+    const undone = !done && it?.undone === true;
+    if (!note && !done && !undone) continue;
+    out.push({ taskId: id, done, note, ...(undone ? { undone: true } : {}) });
   }
   if (out.length > MAX_REPORT_TASKS) throw new TaskError(400, 'too_many_tasks', `Nejvýš ${MAX_REPORT_TASKS} úkolů ve výkazu`);
   return out;
@@ -267,6 +317,9 @@ export const normalizeReportTasks = (raw: unknown) => {
  * Какие заметки отчёта надо применить к поручениям: новые и изменившиеся по сравнению
  * с прошлой версией отчёта (правка отчёта не дублирует ленту). «hotovo» срабатывает
  * один раз — для поручения в работе; заметка без «hotovo» — ход работы.
+ * s245: снятое «hotovo» (`undone`, явная отметка из формы) — один раз возвращает поручение
+ * в работу; текст уходит с ним, если он новый. Отсутствие записи ничего не значит
+ * (старый черновик или пропущенное поручение не должны снимать «hotovo»).
  */
 export const reportTaskActions = (prev: any[], next: any[]) => {
   const before = new Map((Array.isArray(prev) ? prev : []).map((n) => [n.taskId, n]));
@@ -274,14 +327,16 @@ export const reportTaskActions = (prev: any[], next: any[]) => {
   for (const n of next) {
     const p = before.get(n.taskId);
     const becameDone = n.done && !p?.done;
+    const becameUndone = n.undone && !p?.undone;
     const noteChanged = n.note && n.note !== p?.note;
     if (becameDone) out.push({ taskId: n.taskId, action: 'done', text: n.note });
+    else if (becameUndone) out.push({ taskId: n.taskId, action: 'undone', text: noteChanged ? n.note : '' });
     else if (noteChanged) out.push({ taskId: n.taskId, action: 'progress', text: n.note });
   }
   return out;
 };
 
-const FIELDS = ['title', 'description', 'dueDate', 'priority', 'status', 'createdByName', 'doneAt', 'closedAt', 'closedBy', 'events', 'version', 'createdAt', 'updatedAt'];
+const FIELDS = ['title', 'description', 'dueDate', 'priority', 'status', 'assignee', 'createdByRole', 'createdByName', 'doneAt', 'closedAt', 'closedBy', 'events', 'version', 'createdAt', 'updatedAt'];
 const FILE_FIELDS = ['taskDocId', 'fileName', 'mime', 'size', 'uploadedBy', 'uploadedRole', 'createdAt'];
 const notFound = () => new TaskError(404, 'task_not_found', 'Úkol nenalezen');
 const fileNotFound = () => new TaskError(404, 'file_not_found', 'Příloha nenalezena');
@@ -306,6 +361,20 @@ export default {
         details: {},
       })
       .catch((e) => strapi.log.error(`calendar-log ${action} failed: ${e.message}`));
+  },
+
+  /**
+   * s247: push по событию поручения (manager-notify решает, кому и что). Fire-and-forget:
+   * сбой пуша не роняет поручение.
+   */
+  _notify(task: any, event: { kind: string; role: string; text?: unknown }) {
+    try {
+      Promise.resolve(strapi.service('api::booking-engine.manager-notify').taskEvent(task, event)).catch((e) =>
+        strapi.log.error(`owner-tasks: push ${event.kind} failed: ${e?.message || e}`)
+      );
+    } catch (e) {
+      strapi.log.error(`owner-tasks: push ${event.kind} failed: ${e?.message || e}`);
+    }
   },
 
   /** Кто спрашивает: владелец — всё; исполнитель — свою карточку; остальным — 403. */
@@ -411,35 +480,58 @@ export default {
     };
   },
 
-  /** POST /tasks — новое поручение (владелец). */
+  /**
+   * POST /tasks — новая задача.
+   *   • владелец — поручение управляющей (выбор карточки `personal`; себе — нет, §8 плана);
+   *   • управляющая (s246) — `assignee: 'manager'` (себе) или `'owner'` (владельцу); карточка —
+   *     всегда её собственная по сессии, `personal` из тела не читается.
+   */
   async create({ session, body, now = new Date() }: { session: any; body: any; now?: Date }) {
+    const who = await this._who(session);
     const today = this._today(now);
     const input = normalizeTaskInput(body, { today });
-    const people = (await this._people()).filter((p) => p.isActive);
-    const want = String(body?.personal ?? '').trim();
-    const person = people.find((p) => p.documentId === want) || (people.length === 1 && !want ? people[0] : null);
-    if (!person) throw new TaskError(400, 'bad_personal', 'Vyberte, komu úkol patří');
+    let personalDocId: string;
+    let assignee: string;
+    if (who.role === 'owner') {
+      if (body?.assignee != null && body.assignee !== 'manager') throw new TaskError(400, 'bad_assignee', 'Úkol může majitel zadat jen manažerce');
+      const people = (await this._people()).filter((p) => p.isActive);
+      const want = String(body?.personal ?? '').trim();
+      const person = people.find((p) => p.documentId === want) || (people.length === 1 && !want ? people[0] : null);
+      if (!person) throw new TaskError(400, 'bad_personal', 'Vyberte, komu úkol patří');
+      personalDocId = person.documentId;
+      assignee = 'manager';
+    } else {
+      if (!SIDES.includes(body?.assignee)) throw new TaskError(400, 'bad_assignee', 'Vyberte, pro koho úkol je');
+      personalDocId = who.personal.documentId;
+      assignee = body.assignee;
+    }
     const at = now.toISOString();
     const created = await strapi.documents(TASK_UID).create({
       data: {
         ...input,
-        personal: person.documentId,
+        personal: personalDocId,
+        assignee,
+        createdByRole: who.role,
         status: 'open',
         createdByName: session?.username || '',
         createdByAccountId: Number(session?.id) || null,
-        events: [{ at, kind: 'created', by: session?.username || '', role: 'owner', text: '' }],
+        events: [{ at, kind: 'created', by: session?.username || '', role: who.role, text: '' }],
         version: 1,
       },
     });
     const doc = await strapi.documents(TASK_UID).findOne({ documentId: created.documentId, fields: FIELDS, populate: { personal: { fields: ['name'] } } });
-    this._log('task_create', session, doc, `Nový úkol: ${cut(doc.title, 120)}${doc.dueDate ? ` · do ${fmtDay(doc.dueDate)}` : ''}`);
+    const head = who.role === 'owner' ? 'Nový úkol' : assignee === 'owner' ? 'Nový úkol pro majitele' : 'Nový vlastní úkol';
+    this._log('task_create', session, doc, `${head}: ${cut(doc.title, 120)}${doc.dueDate ? ` · do ${fmtDay(doc.dueDate)}` : ''}`);
+    this._notify(doc, { kind: 'created', role: who.role });
     return { task: await this._row(doc, today) };
   },
 
-  /** PATCH /tasks/:id — правка названия, описания, срока, приоритета (владелец). */
+  /** PATCH /tasks/:id — правка названия, описания, срока, приоритета (постановщик задачи). */
   async update({ session, id, body, now = new Date() }: { session: any; id: unknown; body: any; now?: Date }) {
+    const who = await this._who(session);
     const today = this._today(now);
-    const existing = await this._find(id, { role: 'owner' });
+    const existing = await this._find(id, who);
+    if (creatorOf(existing) !== who.role) throw new TaskError(403, 'not_creator', 'Upravit zadání může jen ten, kdo úkol zadal');
     if (['accepted', 'cancelled'].includes(existing.status)) throw new TaskError(409, 'task_closed', 'Uzavřený úkol nelze upravit — nejdřív ho vraťte do práce');
     const input = normalizeTaskInput(body, { today, partial: true, current: existing });
     const changed = changedFields(existing, input);
@@ -448,21 +540,22 @@ export default {
     const labels = { title: 'název', description: 'popis', dueDate: 'termín', priority: 'priorita' };
     const events = Array.isArray(existing.events) ? existing.events : [];
     const text = changed.map((k) => labels[k]).join(', ');
-    const saved = await this._write(existing, { ...input, events: [...events, { at, kind: 'edited', by: session?.username || '', role: 'owner', text }] }, now);
+    const saved = await this._write(existing, { ...input, events: [...events, { at, kind: 'edited', by: session?.username || '', role: who.role, text }] }, now);
     this._log('task_edit', session, saved, `Úkol upraven (${text}): ${cut(saved.title, 120)}`);
     return { task: await this._row(saved, today) };
   },
 
-  /** POST /tasks/:id/actions {action, text} — hotovo / ход работы / принять / вернуть / отменить / комментарий. */
+  /** POST /tasks/:id/actions {action, text} — hotovo / ещё не hotovo (s245) / ход работы / принять / вернуть / отменить / комментарий. */
   async act({ session, id, body, now = new Date(), reportDate = null }: { session: any; id: unknown; body: any; now?: Date; reportDate?: string | null }) {
     const who = await this._who(session);
     const today = this._today(now);
     const existing = await this._find(id, who);
     const action = String(body?.action ?? '');
-    const { data } = applyTaskAction(existing, { action, role: who.role, text: body?.text, by: session?.username || '', at: now.toISOString(), reportDate });
+    const { data, event } = applyTaskAction(existing, { action, role: who.role, text: body?.text, by: session?.username || '', at: now.toISOString(), reportDate });
     const saved = await this._write(existing, data, now);
     const head = {
       done: 'Úkol hotov',
+      undone: 'Úkol vrácen — ještě není hotovo',
       progress: 'Úkol: průběh',
       comment: 'Úkol: komentář',
       accept: 'Úkol převzat',
@@ -470,6 +563,7 @@ export default {
       cancel: 'Úkol zrušen',
     }[action];
     this._log(`task_${action}`, session, saved, `${head}: ${cut(saved.title, 120)}${reportDate ? ` (výkaz ${fmtDay(reportDate)})` : ''}`);
+    this._notify(saved, { kind: action, role: who.role, text: event.text });
     return { task: await this._row(saved, today) };
   },
 
@@ -485,6 +579,8 @@ export default {
     for (const n of notes) {
       const doc = await this._find(n.taskId, who).catch(() => null);
       if (!doc) throw new TaskError(400, 'bad_tasks', 'Úkol ve výkazu nenalezen');
+      // s246: в отчёт — только задачи, где она исполнитель (задача владельцу — не её работа)
+      if (assigneeOf(doc) !== who.role) throw new TaskError(400, 'bad_tasks', 'Úkol pro majitele do výkazu nepatří');
       out.push({ ...n, title: doc.title || '' });
     }
     return out;
@@ -503,36 +599,50 @@ export default {
     }
   },
 
-  /** Поручения исполнителя для формы отчёта: в работе и ждут владельца. */
+  /**
+   * Задачи исполнителя для формы отчёта: в работе и ждут владельца. s246: и свои (себе), но не
+   * задачи владельцу. Фильтр по стороне — в JS: у старых строк `assignee` пуст (NULL), а
+   * `$ne` в SQL NULL не пропускает.
+   */
   async openFor(personalDocId: string, now = new Date()) {
     const today = this._today(now);
     const rows = await strapi.documents(TASK_UID).findMany({
       filters: { personal: { documentId: { $eq: personalDocId } }, status: { $in: ['open', 'done'] } },
-      fields: ['title', 'dueDate', 'priority', 'status', 'createdAt'],
+      fields: ['title', 'dueDate', 'priority', 'status', 'assignee', 'createdByRole', 'createdAt'],
       limit: 200,
     });
-    return sortTasks(rows, today).map((r) => ({
+    return sortTasks(rows.filter((r) => assigneeOf(r) === 'manager'), today).map((r) => ({
       documentId: r.documentId,
       title: r.title || '',
       dueDate: r.dueDate || null,
       priority: r.priority || 'normal',
       status: r.status || 'open',
       overdue: isOverdue(r, today),
+      own: creatorOf(r) === 'manager',
     }));
   },
 
-  /** GET /tasks/attention — «Сегодня»: владельцу — просроченные и ждущие принятия; исполнителю — свои в работе. */
+  /**
+   * GET /tasks/attention — «Сегодня».
+   *   • владелец: поручения управляющей — просроченные и ждущие принятия (её задачи самой себе —
+   *     не его дело); s246 `forMe` — задачи от управляющей ему, в работе;
+   *   • управляющая: её задачи в работе (от владельца и свои); s246 `toOwner` — сколько её задач
+   *     владельцу в работе и сколько он выполнил за 7 дней.
+   */
   async attention({ session, now = new Date() }: { session: any; now?: Date }) {
     const who = await this._who(session);
     const today = this._today(now);
     const filters: any = { status: { $in: who.role === 'owner' ? ['open', 'done'] : ['open'] } };
     if (who.role !== 'owner') filters.personal = { documentId: { $eq: who.personal.documentId } };
-    const rows = await strapi.documents(TASK_UID).findMany({
+    const all = await strapi.documents(TASK_UID).findMany({
       filters,
-      fields: ['title', 'dueDate', 'priority', 'status', 'doneAt', 'createdAt'],
+      fields: ['title', 'dueDate', 'priority', 'status', 'assignee', 'createdByRole', 'doneAt', 'createdAt'],
       populate: { personal: { fields: ['name'] } },
       limit: 500,
     });
+    // свои задачи стороны: владельцу — его поручения управляющей; управляющей — где она исполнитель
+    const rows = all.filter((r) => (who.role === 'owner' ? creatorOf(r) === 'owner' && assigneeOf(r) === 'manager' : assigneeOf(r) === 'manager'));
+    const toSide = all.filter((r) => assigneeOf(r) === 'owner' && r.status === 'open');
     const view = (r) => ({
       documentId: r.documentId,
       title: r.title || '',
@@ -553,7 +663,27 @@ export default {
       waiting: who.role === 'owner' ? sorted.filter((r) => r.status === 'done').map(view) : [],
       // исполнителю — ближайшие в работе (для карточки)
       next: who.role === 'owner' ? [] : sorted.filter((r) => r.status === 'open').slice(0, 5).map(view),
+      ...(who.role === 'owner'
+        ? {
+            forMe: {
+              open: toSide.length,
+              overdue: toSide.filter((r) => isOverdue(r, today)).length,
+              list: sortTasks(toSide, today).slice(0, 10).map(view),
+            },
+          }
+        : { toOwner: { open: toSide.length, done: await this._doneForManagerSince(who.personal.documentId, now) } }),
     };
+  },
+
+  /** Сколько задач управляющей владельцу он выполнил за последние 7 дней (для «Сегодня»). */
+  async _doneForManagerSince(personalDocId: string, now: Date) {
+    const since = new Date(now.getTime() - 7 * 86400_000).toISOString();
+    const rows = await strapi.documents(TASK_UID).findMany({
+      filters: { personal: { documentId: { $eq: personalDocId } }, assignee: { $eq: 'owner' }, status: { $eq: 'accepted' }, closedAt: { $gte: since } },
+      fields: ['closedAt'],
+      limit: 200,
+    });
+    return rows.length;
   },
 
   // ── вложения ───────────────────────────────────────────────────────────────

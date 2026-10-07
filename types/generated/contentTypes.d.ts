@@ -1868,6 +1868,7 @@ export interface ApiMasterScheduleMasterSchedule
     overrides: Schema.Attribute.JSON;
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
+    requestPushes: Schema.Attribute.JSON;
     requests: Schema.Attribute.JSON;
     templates: Schema.Attribute.JSON;
     updatedAt: Schema.Attribute.DateTime;
@@ -2057,6 +2058,8 @@ export interface ApiOwnerTaskOwnerTask extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
+    assignee: Schema.Attribute.Enumeration<['manager', 'owner']> &
+      Schema.Attribute.DefaultTo<'manager'>;
     closedAt: Schema.Attribute.DateTime;
     closedBy: Schema.Attribute.String;
     createdAt: Schema.Attribute.DateTime;
@@ -2064,6 +2067,8 @@ export interface ApiOwnerTaskOwnerTask extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     createdByAccountId: Schema.Attribute.Integer;
     createdByName: Schema.Attribute.String;
+    createdByRole: Schema.Attribute.Enumeration<['owner', 'manager']> &
+      Schema.Attribute.DefaultTo<'owner'>;
     description: Schema.Attribute.Text;
     doneAt: Schema.Attribute.DateTime;
     dueDate: Schema.Attribute.Date;
@@ -3125,6 +3130,7 @@ export interface ApiTimeBlockTimeBlock extends Struct.CollectionTypeSchema {
     noonaBlockedId: Schema.Attribute.String;
     noonaEmployeeId: Schema.Attribute.String;
     noonaKey: Schema.Attribute.String;
+    pendingPushAt: Schema.Attribute.DateTime;
     proposedAt: Schema.Attribute.DateTime;
     proposedByName: Schema.Attribute.String;
     proposedEndsAt: Schema.Attribute.DateTime;

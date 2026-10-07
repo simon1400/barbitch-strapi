@@ -11,6 +11,8 @@
 //   - Фаза 2 (s240): «Systém zaznamenal» — журналы по логину учётки за пражский день, действия
 //     с výkazem не считаются, чужие логины не попадают; снимок в systemFacts при подаче;
 //     сбой журналов не гасит отчёты; итог месяца по категориям пунктов.
+//   - s247: первая подача дня — push владельцу (правка, повтор, volno — нет; сбой push не ломает
+//     подачу); кому напомнить о výkazu — день «ещё можно вовремя» у работающих управляющих.
 // Сервис — НАСТОЯЩИЙ work-reports.ts (+ slots-core, staff-identity) на заглушке базы в памяти.
 //
 // Запуск: cd strapi && node --test tests/work-reports.test.mjs
@@ -183,12 +185,27 @@ function makeStrapi() {
     },
     service: (uid) => {
       if (uid === 'api::booking-engine.owner-tasks') return T.default;
+      // s247: push — шпион manager-notify
+      if (uid === 'api::booking-engine.manager-notify') {
+        return {
+          async reportSubmitted(x) {
+            await tick();
+            strapi.pushes.push({ kind: 'report', ...clone(x) });
+            if (strapi.failPush) throw new Error('push down');
+          },
+          async taskEvent(task, ev) {
+            strapi.pushes.push({ kind: `task_${ev.kind}`, id: task.documentId });
+          },
+        };
+      }
       assert.equal(uid, 'api::calendar-log.calendar-log');
       return { write: async (e) => void logs.push(e) };
     },
     log: { error() {} },
   };
   strapi.rows = db;
+  strapi.pushes = [];
+  strapi.failPush = false;
   return strapi;
 }
 
@@ -708,6 +725,18 @@ test('поручения в отчёте: открытые в /mine, замет�
   });
   assert.deepEqual(t1.events.map((e) => [e.kind, e.text]), [['done', 'Objednáno u dodavatele'], ['comment', 'Doplnění: faktura']]);
   assert.equal(t1.status, 'done');
+  // s245: из правки отчёта «hotovo» снято (undone) — поручение снова в работе, один раз; повтор правки ленту не трогает
+  const undoneBody = { ...body, hours: 8, tasks: [{ id: 'task0000000000000000001', undone: true, note: 'Chybí faktura' }, { id: 'task0000000000000000002', note: 'Polovina hotová' }] };
+  const un = await svc.saveMine({ session: manager, date: '2026-10-01', body: undoneBody, now: at('2026-10-01T20:30:00Z') });
+  assert.deepEqual(un.saved.taskNotes[0], { taskId: 'task0000000000000000001', title: 'Objednat křeslo', note: 'Chybí faktura', done: false, undone: true });
+  assert.equal(t1.status, 'open');
+  assert.equal(t1.doneAt, null);
+  assert.deepEqual(t1.events.at(-1), { ...t1.events.at(-1), kind: 'undone', text: 'Chybí faktura', reportDate: '2026-10-01' });
+  assert.ok(s.logs.some((l) => l.action === 'task_undone'));
+  const evCount = t1.events.length;
+  await svc.saveMine({ session: manager, date: '2026-10-01', body: { ...undoneBody, planTomorrow: 'x' }, now: at('2026-10-01T20:40:00Z') });
+  assert.equal(t1.events.length, evCount, 'правка отчёта без изменения заметки — undone не повторяется');
+  assert.equal(un.openTasks.find((t) => t.documentId === 'task0000000000000000001').status, 'open');
   // volno — без заметок
   const off = await svc.saveMine({ session: manager, date: '2026-10-02', body: { status: 'day_off', dayOffReason: 'sick', tasks: body.tasks }, now: at('2026-10-02T18:00:00Z') });
   assert.deepEqual(off.saved.taskNotes, []);
@@ -737,4 +766,57 @@ test('ручки: шесть роутов; чтение всех, прочтен
   for (const f of ['personal', 'date', 'status', 'hours', 'items', 'done', 'late', 'history', 'reviewedAt', 'rating', 'comments', 'version']) {
     assert.ok(schema.attributes[f], `поле ${f}`);
   }
+});
+
+test('s247 push владельцу: только первая подача дня (и после volno); правка, повтор, volno — без push', async () => {
+  const s = fresh();
+  await svc.saveMine({ session: manager, date: '2026-10-01', body: BODY, now: at('2026-10-01T18:00:00Z') });
+  await tick();
+  assert.deepEqual(s.pushes, [
+    {
+      kind: 'report',
+      person: { documentId: MARIIA, name: 'Mariia Medvedeva' },
+      date: '2026-10-01',
+      content: s.pushes[0]?.content,
+    },
+  ]);
+  const c = s.pushes[0].content;
+  assert.deepEqual([c.hours, c.items.length, c.needsOwner], [7.5, 2, 'Schválit nákup křesla?']);
+  // повтор того же и правка — без push
+  await svc.saveMine({ session: manager, date: '2026-10-01', body: BODY, now: at('2026-10-01T18:05:00Z') });
+  await svc.saveMine({ session: manager, date: '2026-10-01', body: { ...BODY, hours: 6 }, now: at('2026-10-01T18:10:00Z') });
+  await tick();
+  assert.equal(s.pushes.length, 1);
+  // volno — без push; затем отчёт за тот же день — первая подача → push
+  await svc.saveMine({ session: manager, date: '2026-10-02', body: { status: 'day_off', dayOffReason: 'vacation' }, now: at('2026-10-02T18:00:00Z') });
+  await tick();
+  assert.equal(s.pushes.length, 1);
+  await svc.saveMine({ session: manager, date: '2026-10-02', body: { ...BODY, needsOwner: '' }, now: at('2026-10-02T19:00:00Z') });
+  await tick();
+  assert.deepEqual([s.pushes.length, s.pushes[1].date, s.pushes[1].content.needsOwner], [2, '2026-10-02', '']);
+  // сбой push не ломает подачу
+  s.failPush = true;
+  const r = await svc.saveMine({ session: manager, date: '2026-10-05', body: BODY, now: at('2026-10-05T18:00:00Z') });
+  assert.equal(r.saved.status, 'submitted');
+  await tick();
+});
+
+test('s247 напоминание: кому — работающим управляющим с днём «ещё можно вовремя»', async () => {
+  const s = fresh();
+  // среда 07.10, 21:00 Праги — отчёта нет → Мария; бывшая управляющая (isActive=false) — нет
+  const eve = at('2026-10-07T19:00:00Z');
+  assert.deepEqual(await svc.reminderTargets({ date: '2026-10-07', now: eve }), [{ documentId: MARIIA, name: 'Mariia Medvedeva' }]);
+  // подан — никому
+  await svc.saveMine({ session: manager, date: '2026-10-07', body: BODY, now: eve });
+  assert.deepEqual(await svc.reminderTargets({ date: '2026-10-07', now: eve }), []);
+  // volno — никому
+  await svc.saveMine({ session: manager, date: '2026-10-06', body: { status: 'day_off', dayOffReason: 'other' }, now: at('2026-10-07T06:00:00Z') });
+  assert.deepEqual(await svc.reminderTargets({ date: '2026-10-06', now: at('2026-10-07T07:00:00Z') }), []);
+  // за вчера: в 09:00 — ещё можно (напомнить), после 10:00 — уже «chybí» (не напоминать)
+  assert.deepEqual((await svc.reminderTargets({ date: '2026-10-08', now: at('2026-10-09T07:00:00Z') })).map((p) => p.name), ['Mariia Medvedeva']);
+  assert.deepEqual(await svc.reminderTargets({ date: '2026-10-08', now: at('2026-10-09T08:00:00Z') }), []);
+  // отпуск и выходной — никому
+  s.rows[TIME_OFF].push({ documentId: 'to1', personalDocId: MARIIA, type: 'vacation', startDate: '2026-10-09', endDate: '2026-10-09' });
+  assert.deepEqual(await svc.reminderTargets({ date: '2026-10-09', now: at('2026-10-09T19:00:00Z') }), []);
+  assert.deepEqual(await svc.reminderTargets({ date: '2026-10-10', now: at('2026-10-10T19:00:00Z') }), []);
 });
