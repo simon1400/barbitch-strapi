@@ -913,6 +913,7 @@ export interface ApiBookingBooking extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
+    adsConversion: Schema.Attribute.JSON;
     arrived: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     attribution: Schema.Attribute.JSON;
     bsChannel: Schema.Attribute.String;

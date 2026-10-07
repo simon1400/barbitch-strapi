@@ -140,6 +140,29 @@ export default {
       tz: 'Europe/Prague',
     },
   },
+  // Офлайн-конверсии Google Ads (s243): закрытые визиты с согласием на cookies →
+  // действие «Návštěva – uskutečněná (server-side)» через Data Manager API. Выключено
+  // по умолчанию: ТОЛЬКО env ADS_VISIT_CONVERSIONS_ENABLED=true (+ GOOGLE_DM_* как у
+  // client и GOOGLE_DM_CONVERSION_ACTION_VISIT; без них прогон no-op). Пробный режим —
+  // GOOGLE_DM_VALIDATE_ONLY=true. Идемпотентно (журнал booking.adsConversion).
+  adsVisitConversions: {
+    task: async ({ strapi }) => {
+      if (process.env.ADS_VISIT_CONVERSIONS_ENABLED !== 'true') return;
+      try {
+        const res = await strapi.service('api::booking-engine.ads-conversions').run();
+        if (res.candidates || res.skipped > 0 || res.reverted) {
+          strapi.log.info(`ads visit conversions: ${JSON.stringify(res)}`);
+        }
+      } catch (e) {
+        strapi.log.error(`ads visit conversions cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      // каждый час в :40 — визиты закрывают в течение дня и утром следующего
+      rule: '40 * * * *',
+      tz: 'Europe/Prague',
+    },
+  },
   dailyDigest: {
     task: async ({ strapi }) => {
       try {

@@ -114,6 +114,9 @@
     "attribution": {
       "type": "json"
     },
+    "adsConversion": {
+      "type": "json"
+    },
     "isNewClient": {
       "type": "boolean"
     },
