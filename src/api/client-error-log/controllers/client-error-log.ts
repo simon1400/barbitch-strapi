@@ -18,15 +18,25 @@ const NOISE_PATTERNS = [
   /window\.webkit\.messageHandlers/i,
   /Error invoking postMessage/i,
   /iabjs:\/\//i,
+  // Автоперевод Chrome/Google Translate меняет текст страницы до гидратации или
+  // под React — тот падает на несовпадении (#418, «Hydration failed») или на
+  // removeChild/insertBefore. Перевод не запрещаем (решение владельца, s248);
+  // цена — настоящая ошибка гидратации тоже не попадёт в журнал.
+  /Minified React error #418/i,
+  /Hydration failed/i,
+  /Failed to execute '(removeChild|insertBefore)' on 'Node'/i,
+  // Окружение заморозило history (headless-бот Chrome 79), Next не может его обернуть.
+  /Cannot assign to read only property '(pushState|replaceState)'/i,
 ];
 
 // Стек есть, но ни одного кадра из наших бандлов (/_next/) — упал чужой код:
 // скрипт, который встроенный браузер (Instagram, Facebook, Chrome на iOS)
-// подмешивает в страницу, или сторонний тег. Пример: «Maximum call stack size
-// exceeded» в «barbitch.cz/service/rasy:225» — у нас HTML в одну строку.
-// Кадр — строка, оканчивающаяся на «:строка:столбец» (V8, Safari, Firefox).
+// подмешивает в страницу, или сторонний тег. Примеры: «Maximum call stack size
+// exceeded» в «barbitch.cz/service/rasy:225» (у нас HTML в одну строку) и в
+// кадрах вовсе без адреса («fl@», «dl@» — код без файла, Chrome на iOS).
+// Кадр: V8 — «    at …», Safari/Firefox — «имя@…» (имя без пробелов, может быть пустым).
 const isForeignStack = (stack: string): boolean => {
-  const frames = stack.split('\n').filter((l) => /:\d+:\d+\)?\s*$/.test(l));
+  const frames = stack.split('\n').filter((l) => /^\s+at\s/.test(l) || /^[^\s@]*@/.test(l));
   return frames.length > 0 && !frames.some((l) => l.includes('/_next/'));
 };
 
