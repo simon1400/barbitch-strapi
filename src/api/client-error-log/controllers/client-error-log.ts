@@ -12,7 +12,23 @@ const NOISE_PATTERNS = [
   /^Non-Error promise rejection captured/i,
   /Network request failed/i,
   /Load failed/i,
+  // Встроенные браузеры соцсетей подмешивают в страницу свои скрипты, и те падают
+  // сами по себе: Instagram/Seznam на iOS — window.webkit.messageHandlers,
+  // Facebook на Android — «Error invoking postMessage: Java object is gone».
+  /window\.webkit\.messageHandlers/i,
+  /Error invoking postMessage/i,
+  /iabjs:\/\//i,
 ];
+
+// Стек есть, но ни одного кадра из наших бандлов (/_next/) — упал чужой код:
+// скрипт, который встроенный браузер (Instagram, Facebook, Chrome на iOS)
+// подмешивает в страницу, или сторонний тег. Пример: «Maximum call stack size
+// exceeded» в «barbitch.cz/service/rasy:225» — у нас HTML в одну строку.
+// Кадр — строка, оканчивающаяся на «:строка:столбец» (V8, Safari, Firefox).
+const isForeignStack = (stack: string): boolean => {
+  const frames = stack.split('\n').filter((l) => /:\d+:\d+\)?\s*$/.test(l));
+  return frames.length > 0 && !frames.some((l) => l.includes('/_next/'));
+};
 
 const truncate = (s: unknown, max: number): string => {
   if (typeof s !== 'string') return '';
@@ -43,7 +59,7 @@ export default factories.createCoreController(UID, ({ strapi }) => ({
       return;
     }
 
-    if (NOISE_PATTERNS.some((p) => p.test(rawMessage))) {
+    if (NOISE_PATTERNS.some((p) => p.test(rawMessage) || p.test(url)) || isForeignStack(stack)) {
       ctx.body = { skipped: 'noise' };
       return;
     }
