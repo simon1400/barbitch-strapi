@@ -173,7 +173,7 @@ export default {
     admin('POST', '/engine/admin/staff-checklist-items', 'booking-engine.adminStaffChecklistItemCreate'),
     admin('PATCH', '/engine/admin/staff-checklist-items/:itemId', 'booking-engine.adminStaffChecklistItemUpdate'),
     admin('GET', '/engine/admin/my-card', 'booking-engine.adminMyCard'),
-    // «Sklad — zásoby» (s251): смотреть/считать/приход — owner, manager, administrator; позиции — руководство
+    // «Sklad — zásoby» (s251): смотреть/считать/приход и (s257) позиции — owner, manager, administrator; цены, заказы — руководство
     admin('GET', '/engine/admin/stock', 'booking-engine.adminStockList'),
     admin('GET', '/engine/admin/stock/attention', 'booking-engine.adminStockAttention'),
     admin('GET', '/engine/admin/stock/order', 'booking-engine.adminStockOrder'),

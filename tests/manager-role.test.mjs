@@ -129,6 +129,9 @@ const CASES = [
   ['engine: затраты — чек запроса (s252)', engine.adminCostRequestFileDownload, ['owner', 'manager']],
   // склад, Фаза 2 (s252): заказы смотреть и принимать — и администратор; создавать/править/
   // отправлять/закрывать и затрата к приходу — руководство; мастеру ничего
+  // s257: позиции заводят и правят все три роли (цену — только руководство, проверка в сервисе)
+  ['engine: склад — новая позиция', engine.adminStockItemCreate, ['owner', 'manager', 'administrator']],
+  ['engine: склад — правка позиции', engine.adminStockItemUpdate, ['owner', 'manager', 'administrator']],
   ['engine: склад — заказы', engine.adminStockOrders, ['owner', 'manager', 'administrator']],
   ['engine: склад — новый заказ', engine.adminStockOrderCreate, ['owner', 'manager']],
   ['engine: склад — правка заказа', engine.adminStockOrderUpdate, ['owner', 'manager']],

@@ -220,7 +220,6 @@ test('«Co objednat»: группы по поставщику, текст без
 test('сервис: роли, цены, создание, движения, журнал', async () => {
   const s = fresh({ legacy: [{ documentId: 'l1', name: 'DARK gel' }, { documentId: 'l2', name: 'dark  gel' }] });
   await expectErr(svc.list({ session: master, now }), 403, 'not_allowed');
-  await expectErr(svc.create({ session: admin, body: { ...glovesS }, now }), 403, 'edit_not_allowed');
 
   const { item } = await svc.create({ session: manager, body: { ...glovesS, packs: 3, units: 40 }, now });
   assert.equal(item.qty, 340);
@@ -237,7 +236,8 @@ test('сервис: роли, цены, создание, движения, жу
   assert.ok(!('lastPrice' in adminList.items[0]), 'цены администратору нет');
   const one = await svc.item({ session: admin, id: item.documentId, now });
   assert.ok(!('lastPrice' in one.item));
-  await expectErr(svc.update({ session: admin, id: item.documentId, body: { min: 1 }, now }), 403, 'edit_not_allowed');
+  // s257: позиции правит и администратор, но цену — нет (поле отбрасывается)
+  await expectErr(svc.update({ session: admin, id: item.documentId, body: { lastPrice: 1 }, now }), 400, 'nothing_to_change');
 
   const c = await svc.move({ session: admin, id: item.documentId, body: { kind: 'count', packs: 1, units: 50, note: 'po směně' }, now });
   assert.equal(c.item.status, 'low');
@@ -265,10 +265,10 @@ test('сервис: роли, цены, создание, движения, жу
   assert.deepEqual(s.logs.at(-1).details.fields, ['min', 'target']);
   await svc.update({ session: owner, id: item.documentId, body: { active: false }, now });
   await expectErr(svc.move({ session: admin, id: item.documentId, body: { kind: 'in', packs: 1 }, now }), 409, 'item_archived');
-  await expectErr(svc.item({ session: admin, id: item.documentId, now }), 404, 'item_not_found');
+  assert.equal((await svc.item({ session: admin, id: item.documentId, now })).item.active, false, 's257: архив видит и администратор');
   assert.equal((await svc.list({ session: owner, now })).items.length, 0);
   assert.equal((await svc.list({ session: owner, archived: '1', now })).items.length, 1);
-  assert.equal((await svc.list({ session: admin, archived: '1', now })).items.length, 0, 'архив — только руководству');
+  assert.equal((await svc.list({ session: admin, archived: '1', now })).items.length, 1, 's257: архив — и администратору');
   assert.equal((await svc.summary(now)).total, 0);
 
   // автодополнение: свои + старая «Склад» (без дублей по регистру и пробелам) + места по умолчанию
@@ -325,4 +325,26 @@ test('сводка и дайджест: только названия', async ()
   assert.deepEqual(overdue, ['📦 <b>Склад (адмінка → Sklad):</b>', '• замовлення не прийшло: Nehtyshop (9 дн.)']);
   assert.equal(D.buildAttention({ today: '2026-10-13', stock: { out: [], low: [] } }).sections.length, 0);
   assert.ok(!JSON.stringify(sec).includes('Kč'));
+});
+
+test('s257: администратор заводит и правит позиции, архивирует; цену не задаёт и не видит', async () => {
+  const s = fresh();
+  const { item } = await svc.create({ session: admin, body: { ...glovesS, units: 30 }, now });
+  assert.ok(!('lastPrice' in item));
+  assert.equal(s.rows[ITEM][0].lastPrice, null, 'цена от администратора не записана');
+  assert.equal(s.rows[ITEM][0].createdByName, 'Julia');
+  const u = await svc.update({ session: admin, id: item.documentId, body: { min: 3, target: 8, lastPrice: 999 }, now });
+  assert.deepEqual([u.item.min, u.item.target], [3, 8]);
+  assert.deepEqual(s.logs.at(-1).details.fields, ['min', 'target']);
+  assert.equal(s.rows[ITEM][0].lastPrice, null, 'и при правке');
+  await svc.update({ session: admin, id: item.documentId, body: { active: false }, now });
+  assert.equal(s.rows[ITEM][0].active, false);
+  await svc.update({ session: admin, id: item.documentId, body: { active: true }, now });
+  // руководство цену задаёт по-прежнему
+  await svc.update({ session: manager, id: item.documentId, body: { lastPrice: 150 }, now });
+  assert.equal(s.rows[ITEM][0].lastPrice, 150);
+  const list = await svc.list({ session: admin, now });
+  assert.equal(list.meta.canEditItems, true);
+  assert.equal(list.meta.canEdit, false, 'заказы и цены — по-прежнему руководство');
+  assert.ok(!('lastPrice' in list.items[0]));
 });

@@ -13,7 +13,8 @@
  * (штуки / ml / g), показывается как «2 bal. + 5 ks» (`fmtQty`) — начатые упаковки поддержаны.
  *
  * Кто что может (§0.2): смотреть, считать, отмечать приход и «došlo» — owner, manager,
- * administrator; позиции, минимумы, поставщиков, цены — только owner и manager.
+ * administrator; позиции, минимумы, поставщиков — с s257 тоже все три (решение владельца 13.10),
+ * цены — только owner и manager (администратору поле цены не принимается и не отдаётся).
  * 🟥 Администратору цены не отдаются вовсе (`itemView(…, {showPrices: false})`).
  *
  * Коллекции без REST-роутов. Остаток пишется условным UPDATE по `version` (до трёх попыток:
@@ -529,15 +530,25 @@ export default {
       .catch((e) => strapi.log.error(`calendar-log ${action} failed: ${e.message}`));
   },
 
-  /** Кто спрашивает: owner/manager/administrator; `canEdit` — руководство. */
+  /**
+   * Кто спрашивает: owner/manager/administrator. `canEdit` — руководство (заказы, цены, затраты);
+   * `canEditItems` — позиции (s257: и администраторы, без цены).
+   */
   _who(session: any) {
     if (!session || !STOCK_ROLES.includes(session.role)) throw new StockError(403, 'not_allowed', 'Sklad není pro tuto roli');
     const canEdit = EDIT_ROLES.includes(session.role);
-    return { role: session.role, canEdit, showPrices: canEdit };
+    return { role: session.role, canEdit, canEditItems: true, showPrices: canEdit };
+  },
+
+  /** Поля позиции от сессии: цену задаёт только руководство — у администратора она отбрасывается. */
+  _itemBody(who: any, body: any) {
+    if (who.showPrices || !body || typeof body !== 'object' || !has(body, 'lastPrice')) return body;
+    const { lastPrice, ...rest } = body;
+    return rest;
   },
 
   _requireEdit(who: any) {
-    if (!who.canEdit) throw new StockError(403, 'edit_not_allowed', 'Položky upravuje jen vedení salonu');
+    if (!who.canEdit) throw new StockError(403, 'edit_not_allowed', 'Tohle může jen vedení salonu');
   },
 
   async _all({ archived = false } = {}) {
@@ -579,6 +590,7 @@ export default {
       today: pragueDateOf(now),
       role: who.role,
       canEdit: who.canEdit,
+      canEditItems: who.canEditItems,
       showPrices: who.showPrices,
       categories: CATEGORIES.map((c) => ({ ...c })),
       units: UNITS.map((u) => ({ ...u })),
@@ -591,7 +603,7 @@ export default {
   async list({ session, archived, now = new Date() }: { session: any; archived?: unknown; now?: Date }) {
     const who = this._who(session);
     const withArchived = archived === '1' || archived === 'true' || archived === true;
-    const items = sortItems(await this._views(now, who.showPrices, { archived: withArchived && who.canEdit }));
+    const items = sortItems(await this._views(now, who.showPrices, { archived: withArchived && who.canEditItems }));
     return { items, meta: this._meta(who, now) };
   },
 
@@ -599,7 +611,7 @@ export default {
   async item({ session, id, now = new Date() }: { session: any; id: unknown; now?: Date }) {
     const who = this._who(session);
     const doc = await this._find(id);
-    if (doc.active === false && !who.canEdit) throw notFound();
+    if (doc.active === false && !who.canEditItems) throw notFound();
     const [moves, onOrder] = await Promise.all([
       strapi.documents(MOVE_UID).findMany({
         filters: { itemDocId: doc.documentId },
@@ -699,11 +711,10 @@ export default {
     if (rows.some((r) => r.documentId !== exceptDocId)) throw new StockError(409, 'duplicate_name', 'Položka s tímto názvem už existuje');
   },
 
-  /** POST /stock/items — новая позиция (руководство); стартовый остаток — движение `create`. */
+  /** POST /stock/items — новая позиция (все три роли, цена — только руководство); стартовый остаток — движение `create`. */
   async create({ session, body, now = new Date() }: { session: any; body: any; now?: Date }) {
     const who = this._who(session);
-    this._requireEdit(who);
-    const input = normalizeItemInput(body);
+    const input = normalizeItemInput(this._itemBody(who, body));
     await this._dupCheck(input.name, null);
     const hasStart = body?.packs != null && body?.packs !== '' || body?.units != null && body?.units !== '';
     const qty = hasStart ? qtyFromInput(body, input) : 0;
@@ -725,12 +736,11 @@ export default {
     return { item: itemView(await this._find(doc.documentId), { now, showPrices: who.showPrices }) };
   },
 
-  /** PATCH /stock/items/:id — настройки позиции (руководство). Остаток не трогает. */
+  /** PATCH /stock/items/:id — настройки позиции (все три роли, цена — только руководство). Остаток не трогает. */
   async update({ session, id, body, now = new Date() }: { session: any; id: unknown; body: any; now?: Date }) {
     const who = this._who(session);
-    this._requireEdit(who);
     const current = await this._find(id);
-    const input = normalizeItemInput(body, { partial: true, current });
+    const input = normalizeItemInput(this._itemBody(who, body), { partial: true, current });
     if (input.name) await this._dupCheck(input.name, current.documentId);
     else if (input.active === true && current.active === false) await this._dupCheck(current.name, current.documentId);
     const changed = changedItemFields(current, input);

@@ -1354,16 +1354,16 @@ export default {
     await handle(ctx, () => stockSvc().item({ session, id: ctx.params.id }));
   },
 
-  // POST /api/engine/admin/stock/items — руководство
+  // POST /api/engine/admin/stock/items — все три роли (s257; цену сервис принимает только от руководства)
   async adminStockItemCreate(ctx) {
-    const session = requireManagement(ctx);
+    const session = requireAdmin(ctx);
     if (!session) return;
     await handle(ctx, () => stockSvc().create({ session, body: ctx.request.body }));
   },
 
-  // PATCH /api/engine/admin/stock/items/:id — руководство
+  // PATCH /api/engine/admin/stock/items/:id — все три роли (s257)
   async adminStockItemUpdate(ctx) {
-    const session = requireManagement(ctx);
+    const session = requireAdmin(ctx);
     if (!session) return;
     await handle(ctx, () => stockSvc().update({ session, id: ctx.params.id, body: ctx.request.body }));
   },
