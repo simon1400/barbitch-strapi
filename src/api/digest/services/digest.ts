@@ -456,6 +456,8 @@ export default {
         return r.documents.map((d) => ({ ...d, title: d.title || DOC_KINDS[d.kind] || d.kind }));
       }),
       settle('birthdays', async () => (await engine('birthdays').list({ session: { role: 'administrator' } })).items),
+      // склад (s251): названия позиций «došlo» / «pod minimem»
+      settle('stock', async () => ({ ...(await engine('stock').summary()), overdue: await engine('stock-orders').overdue() })),
     ]);
     const { adminLine, sections: attentionSections } = buildAttention(attention);
 

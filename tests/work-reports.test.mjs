@@ -93,7 +93,8 @@ const matchCond = (val, cond) => {
     return val != null && matchCond(val[op], arg);
   });
 };
-const matches = (row, filters = {}) => Object.entries(filters).every(([k, cond]) => matchCond(get(row, k), cond));
+const matches = (row, filters = {}) =>
+  Object.entries(filters).every(([k, cond]) => (k === '$or' ? cond.some((f) => matches(row, f)) : matchCond(get(row, k), cond)));
 
 let idSeq = 1;
 let docSeq = 1;
@@ -173,7 +174,9 @@ function makeStrapi() {
             Object.entries(cond).every(([op, arg]) =>
               op === '$in' ? arg.includes(val) : op === '$gte' ? val >= iso(arg) : op === '$lt' ? val < iso(arg) : val === arg,
             );
-          return clone(db[uid].filter((r) => Object.entries(where).every(([k, c]) => ok(r[k], c))).slice(0, limit ?? 1000));
+          // s252: журнал — «её логины ИЛИ системные действия» ($or)
+          const fits = (r, w) => Object.entries(w).every(([k, c]) => (k === '$or' ? c.some((f) => fits(r, f)) : ok(r[k], c)));
+          return clone(db[uid].filter((r) => fits(r, where)).slice(0, limit ?? 1000));
         },
         async updateMany({ where, data }) {
           await tick();
@@ -819,4 +822,19 @@ test('s247 напоминание: кому — работающим управ�
   s.rows[TIME_OFF].push({ documentId: 'to1', personalDocId: MARIIA, type: 'vacation', startDate: '2026-10-09', endDate: '2026-10-09' });
   assert.deepEqual(await svc.reminderTargets({ date: '2026-10-09', now: at('2026-10-09T19:00:00Z') }), []);
   assert.deepEqual(await svc.reminderTargets({ date: '2026-10-10', now: at('2026-10-10T19:00:00Z') }), []);
+});
+
+test('s252 Systém zaznamenal: «inventura neprovedena» (запись системы) попадает в её день, чужие системные — нет', async () => {
+  const s = fresh();
+  const log = (actorName, action, entityType, createdAt) => s.rows[LOG].push({ actorName, action, entityType, createdAt });
+  log('Mariia Medvedeva', 'stock_count', 'stock', '2026-10-01T08:00:00Z');
+  log('Systém', 'stock_inventory_missed', 'stock', '2026-10-01T17:00:00Z');
+  log('Systém', 'stock_count', 'stock', '2026-10-01T17:05:00Z'); // не системное действие — не её
+  const res = await svc.saveMine({ session: manager, date: '2026-10-01', body: BODY, now: at('2026-10-01T18:00:00Z') });
+  const day = res.facts['2026-10-01'];
+  assert.equal(day.total, 2);
+  const g = day.groups.find((x) => x.key === 'stock');
+  assert.equal(g.label, 'Sklad');
+  assert.deepEqual(g.actions.map((a) => a.label).sort(), ['inventura neprovedena', 'spočítáno']);
+  assert.deepEqual(W.SYSTEM_FACT_ACTIONS, ['stock_inventory_missed']);
 });

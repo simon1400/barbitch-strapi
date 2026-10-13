@@ -1,0 +1,56 @@
+{
+  "kind": "collectionType",
+  "collectionName": "stock_moves",
+  "info": {
+    "singularName": "stock-move",
+    "pluralName": "stock-moves",
+    "displayName": "Sklad — pohyb",
+    "description": "Журнал движений склада (s251): пересчёт, приход, «došlo/málo». Количества — в базовой единице позиции, `packSize`/`unit` — снимок на момент движения. REST-роутов нет: только ручки /engine/admin/stock"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "itemDocId": {
+      "type": "string"
+    },
+    "itemName": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "enumeration",
+      "enum": ["create", "count", "in", "out", "adjust"]
+    },
+    "mode": {
+      "type": "string"
+    },
+    "qtyBefore": {
+      "type": "decimal"
+    },
+    "qtyAfter": {
+      "type": "decimal"
+    },
+    "delta": {
+      "type": "decimal"
+    },
+    "packSize": {
+      "type": "integer"
+    },
+    "unit": {
+      "type": "string"
+    },
+    "by": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    },
+    "note": {
+      "type": "text"
+    },
+    "orderDocId": {
+      "type": "string"
+    }
+  }
+}

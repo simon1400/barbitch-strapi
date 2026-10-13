@@ -9,6 +9,7 @@
 // дни рождения — только день и месяц.
 // Запросы управляющей по затратам (s237) — только ЧИСЛО: администраторам затраты
 // не показываются (решение владельца, план затрат §0.1).
+// Склад (s251) — только названия позиций «došlo» и «pod minimem», без остатков и цен.
 
 export const BIRTHDAY_DAYS = 7;
 export const MAX_ROWS = 8;
@@ -72,6 +73,8 @@ export interface AttentionInput {
   /** staff.reminders().contracts: конец договора / испытательного срока */
   staffContracts?: any[];
   birthdays?: any[];
+  /** склад (s251): stock.summary() — только названия, без цен и остатков; s252 — + инвентура и заказы */
+  stock?: { out: any[]; low: any[]; inventory?: { isMonday?: boolean; remaining?: number }; overdue?: any[] };
 }
 
 /**
@@ -156,6 +159,24 @@ export const buildAttention = (input: AttentionInput): { adminLine: string | nul
   if (docRows.length || contractRows.length) {
     const title = contractRows.length ? '🪪 <b>Документи й договори співробітників — терміни:</b>' : '🪪 <b>Документи співробітників — терміни:</b>';
     sections.push([title, ...capped([...docRows, ...contractRows], more)]);
+  }
+
+  // ── Склад (s251): что закончилось и что ниже минимума — только названия ──
+  if (input.stock) {
+    const names = (list: any[]) => {
+      const n = (list || []).map((i) => esc(i.name)).filter(Boolean);
+      return n.length > MAX_ROWS ? `${n.slice(0, MAX_ROWS).join(', ')} і ще ${n.length - MAX_ROWS}` : n.join(', ');
+    };
+    const rows = [];
+    if (input.stock.out?.length) rows.push(`• закінчилось: <b>${names(input.stock.out)}</b>`);
+    if (input.stock.low?.length) rows.push(`• нижче мінімуму: ${names(input.stock.low)}`);
+    // s252: інвентура з понеділка не завершена (у понеділок о 08:00 вона ще попереду — не пишемо)
+    const inv = input.stock.inventory;
+    if (inv && !inv.isMonday && Number(inv.remaining) > 0) rows.push(`• інвентура з понеділка не завершена: ${Number(inv.remaining)}`);
+    if (input.stock.overdue?.length) {
+      rows.push(`• замовлення не прийшло: ${input.stock.overdue.map((o) => `${esc(o.supplier || 'без постачальника')} (${Number(o.days)} дн.)`).join(', ')}`);
+    }
+    if (rows.length) sections.push(['📦 <b>Склад (адмінка → Sklad):</b>', ...rows]);
   }
 
   // ── Дни рождения: ближайшие BIRTHDAY_DAYS дней ──

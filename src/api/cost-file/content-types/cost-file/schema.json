@@ -30,6 +30,9 @@
     },
     "uploadedBy": {
       "type": "string"
+    },
+    "requestDocId": {
+      "type": "string"
     }
   }
 }

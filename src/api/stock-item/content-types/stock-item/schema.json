@@ -1,0 +1,84 @@
+{
+  "kind": "collectionType",
+  "collectionName": "stock_items",
+  "info": {
+    "singularName": "stock-item",
+    "pluralName": "stock-items",
+    "displayName": "Sklad — položka",
+    "description": "Позиция склада расходников (s251, «Sklad — zásoby» Фаза 1). Остаток `qty` — в базовой единице (`unit`), минимум и target — в упаковках (`packSize`). Статус не хранится — выводится из qty/min. REST-роутов нет: только ручки /engine/admin/stock"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string"
+    },
+    "category": {
+      "type": "enumeration",
+      "enum": ["hygiena", "uklid", "kuchyn", "kancelar", "jine", "nehty", "rasy", "oboci"],
+      "default": "jine"
+    },
+    "location": {
+      "type": "string"
+    },
+    "unit": {
+      "type": "enumeration",
+      "enum": ["ks", "ml", "g"],
+      "default": "ks"
+    },
+    "packSize": {
+      "type": "integer",
+      "default": 1
+    },
+    "qty": {
+      "type": "decimal",
+      "default": 0
+    },
+    "min": {
+      "type": "integer",
+      "default": 0
+    },
+    "target": {
+      "type": "integer",
+      "default": 0
+    },
+    "supplier": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "lastPrice": {
+      "type": "decimal"
+    },
+    "countEveryDays": {
+      "type": "integer",
+      "default": 7
+    },
+    "lastCountedAt": {
+      "type": "datetime"
+    },
+    "lastCountedBy": {
+      "type": "string"
+    },
+    "note": {
+      "type": "text"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "createdByName": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "default": 0
+    },
+    "notifiedStatus": {
+      "type": "string"
+    }
+  }
+}

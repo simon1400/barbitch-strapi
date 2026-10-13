@@ -1531,6 +1531,7 @@ export interface ApiCostFileCostFile extends Struct.CollectionTypeSchema {
     mime: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     size: Schema.Attribute.Integer;
+    requestDocId: Schema.Attribute.String;
     storedName: Schema.Attribute.String & Schema.Attribute.Private;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -1542,7 +1543,7 @@ export interface ApiCostFileCostFile extends Struct.CollectionTypeSchema {
 export interface ApiCostRequestCostRequest extends Struct.CollectionTypeSchema {
   collectionName: 'cost_requests';
   info: {
-    description: '\u0417\u0430\u043F\u0440\u043E\u0441 \u0443\u043F\u0440\u0430\u0432\u043B\u044F\u044E\u0449\u0435\u0439 \u043D\u0430 \u043F\u0440\u0430\u0432\u043A\u0443 \u0438\u043B\u0438 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0435 \u0437\u0430\u0442\u0440\u0430\u0442\u044B; \u043F\u0440\u0438\u043C\u0435\u043D\u044F\u0435\u0442 \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446 (s236). REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/costs';
+    description: '\u0417\u0430\u043F\u0440\u043E\u0441 \u0443\u043F\u0440\u0430\u0432\u043B\u044F\u044E\u0449\u0435\u0439 \u043D\u0430 \u043F\u0440\u0430\u0432\u043A\u0443 \u0438\u043B\u0438 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0435 \u0437\u0430\u0442\u0440\u0430\u0442\u044B; \u043F\u0440\u0438\u043C\u0435\u043D\u044F\u0435\u0442 \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446 (s236). s252: `create` \u2014 \u043D\u043E\u0432\u0430\u044F \u0437\u0430\u0442\u0440\u0430\u0442\u0430 \u0441\u043E \u0441\u043A\u043B\u0430\u0434\u0430 (\u043F\u0440\u0438\u0445\u043E\u0434 \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430), \u0434\u0432\u0443\u0445\u0441\u0442\u0443\u043F\u0435\u043D\u0447\u0430\u0442\u043E\u0435 \u043E\u0434\u043E\u0431\u0440\u0435\u043D\u0438\u0435 `stage` manager \u2192 owner. REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/costs';
     displayName: '\u0417\u0430\u0442\u0440\u0430\u0442\u044B \u2014 \u0437\u0430\u043F\u0440\u043E\u0441 \u043D\u0430 \u043F\u0440\u0430\u0432\u043A\u0443';
     pluralName: 'cost-requests';
     singularName: 'cost-request';
@@ -1551,7 +1552,9 @@ export interface ApiCostRequestCostRequest extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
-    action: Schema.Attribute.Enumeration<['edit', 'delete', 'file_delete']>;
+    action: Schema.Attribute.Enumeration<
+      ['edit', 'delete', 'file_delete', 'create']
+    >;
     baseUpdatedAt: Schema.Attribute.DateTime;
     before: Schema.Attribute.JSON;
     changes: Schema.Attribute.JSON;
@@ -1569,9 +1572,14 @@ export interface ApiCostRequestCostRequest extends Struct.CollectionTypeSchema {
       'api::cost-request.cost-request'
     > &
       Schema.Attribute.Private;
+    managerApprovedAt: Schema.Attribute.DateTime;
+    managerApprovedBy: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     requestedBy: Schema.Attribute.String;
     requestedById: Schema.Attribute.Integer;
+    source: Schema.Attribute.String;
+    sourceDocId: Schema.Attribute.String;
+    stage: Schema.Attribute.Enumeration<['manager', 'owner']>;
     status: Schema.Attribute.Enumeration<
       ['pending', 'approved', 'rejected', 'cancelled']
     > &
@@ -3017,6 +3025,139 @@ export interface ApiStaffNoteStaffNote extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiStockItemStockItem extends Struct.CollectionTypeSchema {
+  collectionName: 'stock_items';
+  info: {
+    description: '\u041F\u043E\u0437\u0438\u0446\u0438\u044F \u0441\u043A\u043B\u0430\u0434\u0430 \u0440\u0430\u0441\u0445\u043E\u0434\u043D\u0438\u043A\u043E\u0432 (s251). REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/stock';
+    displayName: 'Sklad \u2014 polo\u017Eka';
+    pluralName: 'stock-items';
+    singularName: 'stock-item';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    active: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    category: Schema.Attribute.Enumeration<
+      ['hygiena', 'uklid', 'kuchyn', 'kancelar', 'jine', 'nehty', 'rasy', 'oboci']
+    > &
+      Schema.Attribute.DefaultTo<'jine'>;
+    countEveryDays: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<7>;
+    createdByName: Schema.Attribute.String;
+    lastCountedAt: Schema.Attribute.DateTime;
+    lastCountedBy: Schema.Attribute.String;
+    lastPrice: Schema.Attribute.Decimal;
+    location: Schema.Attribute.String;
+    min: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    name: Schema.Attribute.String;
+    note: Schema.Attribute.Text;
+    notifiedStatus: Schema.Attribute.String;
+    packSize: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<1>;
+    qty: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
+    supplier: Schema.Attribute.String;
+    target: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    unit: Schema.Attribute.Enumeration<['ks', 'ml', 'g']> &
+      Schema.Attribute.DefaultTo<'ks'>;
+    url: Schema.Attribute.String;
+    version: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::stock-item.stock-item'> &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiStockMoveStockMove extends Struct.CollectionTypeSchema {
+  collectionName: 'stock_moves';
+  info: {
+    description: '\u0416\u0443\u0440\u043D\u0430\u043B \u0434\u0432\u0438\u0436\u0435\u043D\u0438\u0439 \u0441\u043A\u043B\u0430\u0434\u0430 (s251). REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/stock';
+    displayName: 'Sklad \u2014 pohyb';
+    pluralName: 'stock-moves';
+    singularName: 'stock-move';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    by: Schema.Attribute.String;
+    delta: Schema.Attribute.Decimal;
+    itemDocId: Schema.Attribute.String;
+    itemName: Schema.Attribute.String;
+    kind: Schema.Attribute.Enumeration<
+      ['create', 'count', 'in', 'out', 'adjust']
+    >;
+    mode: Schema.Attribute.String;
+    note: Schema.Attribute.Text;
+    orderDocId: Schema.Attribute.String;
+    packSize: Schema.Attribute.Integer;
+    qtyAfter: Schema.Attribute.Decimal;
+    qtyBefore: Schema.Attribute.Decimal;
+    role: Schema.Attribute.String;
+    unit: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::stock-move.stock-move'> &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiStockOrderStockOrder extends Struct.CollectionTypeSchema {
+  collectionName: 'stock_orders';
+  info: {
+    description: '\u0417\u0430\u043A\u0430\u0437 \u0440\u0430\u0441\u0445\u043E\u0434\u043D\u0438\u043A\u043E\u0432 (s252, \u00ABSklad \u2014 z\u00E1soby\u00BB \u0424\u0430\u0437\u0430 2): draft \u2192 sent \u2192 received / cancelled. `lines` \u2014 \u0441\u043D\u0438\u043C\u043E\u043A \u043F\u043E\u0437\u0438\u0446\u0438\u0439 {itemDocId, name, packSize, unit, packs, receivedPacks, price}, `receipts` \u2014 \u043F\u0440\u0438\u0445\u043E\u0434\u044B \u0441 \u0437\u0430\u0442\u0440\u0430\u0442\u043E\u0439 \u0438\u043B\u0438 \u0437\u0430\u043F\u0440\u043E\u0441\u043E\u043C \u043D\u0430 \u043D\u0435\u0451. REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/stock/orders';
+    displayName: 'Sklad \u2014 objedn\u00E1vka';
+    pluralName: 'stock-orders';
+    singularName: 'stock-order';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    closedBy: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    createdByName: Schema.Attribute.String;
+    createdByRole: Schema.Attribute.String;
+    expectedDays: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<7>;
+    lines: Schema.Attribute.JSON;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::stock-order.stock-order'
+    > &
+      Schema.Attribute.Private;
+    note: Schema.Attribute.Text;
+    payment: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    receipts: Schema.Attribute.JSON;
+    receivedAt: Schema.Attribute.DateTime;
+    sentAt: Schema.Attribute.DateTime;
+    sentBy: Schema.Attribute.String;
+    status: Schema.Attribute.Enumeration<
+      ['draft', 'sent', 'received', 'cancelled']
+    > &
+      Schema.Attribute.DefaultTo<'draft'>;
+    supplier: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    version: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+  };
+}
+
 export interface ApiStockStock extends Struct.CollectionTypeSchema {
   collectionName: 'stocks';
   info: {
@@ -4005,6 +4146,9 @@ declare module '@strapi/strapi' {
       'api::staff-checklist-item.staff-checklist-item': ApiStaffChecklistItemStaffChecklistItem;
       'api::staff-document.staff-document': ApiStaffDocumentStaffDocument;
       'api::staff-note.staff-note': ApiStaffNoteStaffNote;
+      'api::stock-item.stock-item': ApiStockItemStockItem;
+      'api::stock-move.stock-move': ApiStockMoveStockMove;
+      'api::stock-order.stock-order': ApiStockOrderStockOrder;
       'api::stock.stock': ApiStockStock;
       'api::tax.tax': ApiTaxTax;
       'api::time-block.time-block': ApiTimeBlockTimeBlock;

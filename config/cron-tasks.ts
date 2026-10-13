@@ -223,6 +223,55 @@ export default {
       tz: 'Europe/Prague',
     },
   },
+  // Склад (s252, STOCK_NEXT_SESSION_PROMPT.md Фаза 2): сводка управляющей 10:00 (новые «málo/došlo»,
+  // заказы не пришли в срок, по понедельникам — давно не считали) и владельцу (просроченные заказы);
+  // понедельник 10:00 — «Rychlá inventura» администраторам, 19:00 — не сделана → управляющей + запись
+  // в журнал (строка в её výkazu). Выключено по умолчанию: ТОЛЬКО env STOCK_PUSH_ENABLED=true
+  // (+ VAPID — без них push no-op). Тот же env гасит и push-события склада.
+  stockDaily: {
+    task: async ({ strapi }) => {
+      if (process.env.STOCK_PUSH_ENABLED !== 'true') return;
+      try {
+        const res = await strapi.service('api::booking-engine.stock-notify').daily();
+        if (res.items || res.overdue || res.stale) strapi.log.info(`stock daily: ${JSON.stringify(res)}`);
+      } catch (e) {
+        strapi.log.error(`stock daily cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '0 10 * * *', // каждый день 10:00
+      tz: 'Europe/Prague',
+    },
+  },
+  stockInventoryStart: {
+    task: async ({ strapi }) => {
+      if (process.env.STOCK_PUSH_ENABLED !== 'true') return;
+      try {
+        await strapi.service('api::booking-engine.stock-notify').inventoryStart();
+      } catch (e) {
+        strapi.log.error(`stock inventory start cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '0 10 * * 1', // понедельник 10:00 — решение владельца §0.6
+      tz: 'Europe/Prague',
+    },
+  },
+  stockInventoryEscalate: {
+    task: async ({ strapi }) => {
+      if (process.env.STOCK_PUSH_ENABLED !== 'true') return;
+      try {
+        const res = await strapi.service('api::booking-engine.stock-notify').inventoryEscalate();
+        if (res.remaining) strapi.log.info(`stock inventory missed: ${JSON.stringify(res)}`);
+      } catch (e) {
+        strapi.log.error(`stock inventory escalate cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '0 19 * * 1', // понедельник 19:00 — не сделана до вечера → управляющей
+      tz: 'Europe/Prague',
+    },
+  },
   dailyDigest: {
     task: async ({ strapi }) => {
       try {

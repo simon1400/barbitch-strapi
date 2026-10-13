@@ -116,6 +116,7 @@ export const FACT_GROUPS = {
   visit: 'Uzavření návštěv',
   shift_close: 'Uzavření směny',
   task: 'Úkoly od majitele',
+  stock: 'Sklad',
   upsell: 'Dozápisy — označení klientů',
   dedupe: 'Duplicity klientů',
   other: 'Jiné',
@@ -196,7 +197,28 @@ export const FACT_ACTIONS: Record<string, string> = {
   dedupe_ignore: 'nejsou duplicity',
   dedupe_unignore: 'zpět do kontroly',
   dedupe_blacklist: 'blacklist',
+  // s252: склад — свои действия управляющей и одна системная запись (см. SYSTEM_FACT_ACTIONS)
+  stock_item_create: 'nová položka',
+  stock_item_edit: 'úprava položky',
+  stock_count: 'spočítáno',
+  stock_in: 'přišlo',
+  stock_out: 'došlo / dochází',
+  stock_order_create: 'objednávka',
+  stock_order_edit: 'úprava objednávky',
+  stock_order_send: 'objednáno',
+  stock_order_receive: 'příjem objednávky',
+  stock_order_cost: 'náklad k příjmu',
+  stock_order_close: 'objednávka uzavřena',
+  stock_order_cancel: 'objednávka zrušena',
+  stock_inventory_missed: 'inventura neprovedena',
 };
+
+/**
+ * s252: записи журнала, которые делает сама система (не от имени сотрудника), но которые должны
+ * попасть в «Systém zaznamenal» управляющей за этот день: понедельничная инвентура склада не сделана
+ * (stock-notify.inventoryEscalate).
+ */
+export const SYSTEM_FACT_ACTIONS = ['stock_inventory_missed'];
 
 /** Предел строк одного источника за период (месяц управляющей — сотни). */
 export const FACTS_LIMIT = 5000;
@@ -723,7 +745,7 @@ export default {
     const range = { $gte: new Date(pragueMinToUtcIso(from, 0)), $lt: new Date(pragueMinToUtcIso(addDaysYmd(to, 1), 0)) };
     const [logs, attempts, merges] = await Promise.all([
       strapi.db.query(LOG_UID).findMany({
-        where: { actorName: { $in: names }, createdAt: range },
+        where: { $or: [{ actorName: { $in: names } }, { action: { $in: SYSTEM_FACT_ACTIONS } }], createdAt: range },
         select: ['action', 'entityType', 'createdAt'],
         limit: FACTS_LIMIT,
       }),

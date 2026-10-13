@@ -152,7 +152,7 @@ function makeStrapi(seed = [], { categories = CATS, cash = [] } = {}) {
     }
     if (uid === C.FILE_UID) {
       const matchFile = (r, f) =>
-        Object.entries(f || {}).every(([k, v]) => ('$in' in v ? v.$in.includes(r[k]) : r[k] === v.$eq));
+        Object.entries(f || {}).every(([k, v]) => ('$in' in v ? v.$in.includes(r[k]) : '$null' in v ? (r[k] == null) === v.$null : r[k] === v.$eq));
       return {
         findMany: async (q) => files.filter((r) => matchFile(r, q.filters)).map((r) => project(r, q.fields)),
         create: async ({ data }) => {
@@ -201,6 +201,16 @@ function makeStrapi(seed = [], { categories = CATS, cash = [] } = {}) {
     contentTypes: { [C.COST_UID]: { attributes: { category: { enum: categories } } } },
     db: {
       query: (uid) => {
+        // s252: чеки запроса переезжают к затрате при одобрении
+        if (uid === C.FILE_UID) {
+          return {
+            updateMany: async ({ where, data }) => {
+              let count = 0;
+              for (const r of files) if (Object.entries(where).every(([k, v]) => r[k] === v)) Object.assign(r, data) && count++;
+              return { count };
+            },
+          };
+        }
         assert.equal(uid, C.REQUEST_UID);
         return {
           updateMany: async ({ where, data }) => {
@@ -1140,4 +1150,110 @@ test('receiptsZip: чеки месяца по дате, имена UTF-8, CRC; �
   // слишком большой месяц — до чтения диска (по размерам из базы)
   st.files[0].size = C.MAX_ZIP_BYTES + 1;
   await expectErr(() => svc.receiptsZip({ month: '2026-09' }), 413, 'zip_too_big');
+});
+
+// ── s252: новая затрата со склада (приход администратора) ─────────────────────
+const ADMIN = { id: 7, username: 'Julia', role: 'administrator' };
+const STOCK_BODY = { date: '2026-10-05', name: 'Sklad — Nehtyshop', category: 'Материалы', sum: 1210, noDph: 1000, payment: 'card', comment: 'Objednávka ze skladu: Rukavice S 3×' };
+const spyServices = (st) => {
+  const events = [];
+  globalThis.strapi.service = (uid) => {
+    if (uid === 'api::booking-engine.stock-notify') return { costRequestEvent: async (req, stage) => void events.push(['push', stage, req.documentId]) };
+    if (uid === 'api::booking-engine.stock-orders') return { onRequestDecided: async (x) => void events.push(['order', x.status, x.orderDocId, x.costDocId || null]) };
+    return { write: async (e) => void st.logs.push(e) };
+  };
+  return events;
+};
+
+test('s252 схема: action create, ступень manager/owner, чек запроса — requestDocId', () => {
+  assert.ok(REQ_SCHEMA.attributes.action.enum.includes('create'));
+  assert.deepEqual(REQ_SCHEMA.attributes.stage.enum, ['manager', 'owner']);
+  assert.equal(FILE_SCHEMA.attributes.requestDocId.type, 'string');
+  assert.equal(C.canDecideCreate('owner', 'owner'), true);
+  assert.equal(C.canDecideCreate('manager', 'manager'), true);
+  assert.equal(C.canDecideCreate('manager', 'owner'), false);
+  assert.equal(C.canDecideCreate('administrator', 'manager'), false);
+});
+
+test('s252 запрос create: управляющая одобряет (с правкой суммы) → владелец; затрата появляется только после владельца', async () => {
+  const st = makeStrapi(SEED);
+  const events = spyServices(st);
+  useDir('store-s252a');
+  await expectErr(() => svc.requestCreate({ session: ADMIN, body: { ...STOCK_BODY, sum: 0 }, now: NOW }), 400, 'bad_sum');
+  const { request } = await svc.requestCreate({ session: ADMIN, body: STOCK_BODY, source: { kind: 'stock-order', docId: 'ord00000000000000000001' }, now: NOW });
+  await flush();
+  assert.equal(request.stage, 'manager');
+  assert.equal(request.costDocId, null);
+  assert.equal(st.reqs[0].status, 'pending');
+  assert.equal(st.reqs[0].sourceDocId, 'ord00000000000000000001');
+  assert.deepEqual(events, [['push', 'manager', request.id]]);
+  assert.equal(st.logs.at(-1).action, 'cost_request');
+  assert.equal(st.costs.length, SEED.length * 2, 'затраты ещё нет');
+
+  // чек к запросу — до одобрения, не к затрате
+  const { file } = await svc.attachFile({ session: ADMIN, requestDocId: request.id, files: upload(PDF, 'faktura.pdf') });
+  assert.equal(st.files[0].costDocId, null);
+  assert.equal(st.files[0].requestDocId, request.id);
+  const dl = await svc.downloadRequestFile({ rid: request.id, fid: file.id });
+  assert.ok((await readAll(dl.stream)).equals(PDF));
+
+  // видят обе: управляющая — свои и все create; «Сегодня» — по ступени
+  const mm = await svc.list({ session: MANAGER, month: '2026-10' });
+  assert.deepEqual(mm.pending.map((r) => [r.action, r.stage, r.files.length, r.cost]), [['create', 'manager', 1, null]]);
+  assert.equal((await svc.attention({ session: MANAGER, now: NOW })).stockReceipts, 1);
+  assert.equal((await svc.attention({ session: OWNER, now: NOW })).stockReceipts, 1);
+
+  // управляющая: поправила сумму → ступень owner; повторно решать не может
+  const a1 = await svc.approve({ session: MANAGER, rid: request.id, body: { changes: { sum: 1331, noDph: 1100 } }, now: NOW });
+  await flush();
+  assert.equal(a1.request.stage, 'owner');
+  assert.equal(a1.row, null);
+  assert.equal(st.reqs[0].status, 'pending');
+  assert.equal(st.reqs[0].managerApprovedBy, 'Mariia Medvedeva');
+  assert.equal(st.reqs[0].changes.sum, 1331);
+  assert.deepEqual(events.at(-1), ['push', 'owner', request.id]);
+  assert.equal((await svc.attention({ session: MANAGER, now: NOW })).stockReceipts, 0);
+  await expectErr(() => svc.approve({ session: MANAGER, rid: request.id, now: NOW }), 403, 'request_at_owner');
+  await expectErr(() => svc.reject({ session: MANAGER, rid: request.id, body: {}, now: NOW }), 403, 'request_at_owner');
+  await expectErr(() => svc.approve({ session: OWNER, rid: request.id, body: { changes: { sum: -5 } }, now: NOW }), 400, 'bad_sum');
+  assert.equal(st.reqs[0].status, 'pending', 'неверная поправка — запрос ждёт');
+
+  // владелец: затрата опубликована, автор — кто принял заказ, чек переехал, заказ узнал
+  const a2 = await svc.approve({ session: OWNER, rid: request.id, now: NOW });
+  await flush();
+  const cost = st.published(a2.row.documentId);
+  assert.equal(cost.author, 'Julia');
+  assert.equal(cost.sum, '1331');
+  assert.equal(cost.category, 'Материалы');
+  assert.equal(st.reqs[0].status, 'approved');
+  assert.equal(st.reqs[0].costDocId, a2.row.documentId);
+  assert.equal(st.files[0].costDocId, a2.row.documentId, 'чек — у затраты');
+  assert.deepEqual(events.at(-1), ['order', 'approved', 'ord00000000000000000001', a2.row.documentId]);
+  await expectErr(() => svc.approve({ session: OWNER, rid: request.id, now: NOW }), 409, 'request_closed');
+  // правки/удаления по-прежнему одобряет только владелец
+  const { request: edit } = await svc.request({ session: MANAGER, id: NAJEM, body: { action: 'delete' }, now: NOW });
+  await expectErr(() => svc.approve({ session: MANAGER, rid: edit.id, now: NOW }), 403, 'owner_only');
+  await expectErr(() => svc.reject({ session: MANAGER, rid: edit.id, body: {}, now: NOW }), 403, 'owner_only');
+});
+
+test('s252 запрос create: владелец одобряет сразу на ступени управляющей; отклонение — чеки с диска, заказ узнаёт', async () => {
+  const st = makeStrapi(SEED);
+  const events = spyServices(st);
+  const dir = useDir('store-s252b');
+  const r1 = (await svc.requestCreate({ session: ADMIN, body: STOCK_BODY, source: { kind: 'stock-order', docId: 'ord00000000000000000002' }, now: NOW })).request;
+  const a = await svc.approve({ session: OWNER, rid: r1.id, now: NOW });
+  assert.equal(st.reqs[0].status, 'approved');
+  assert.ok(st.published(a.row.documentId));
+
+  const r2 = (await svc.requestCreate({ session: ADMIN, body: STOCK_BODY, source: { kind: 'stock-order', docId: 'ord00000000000000000003' }, now: NOW })).request;
+  await svc.attachFile({ session: ADMIN, requestDocId: r2.id, files: upload(JPG, 'foto.jpg') });
+  const stored = path.join(dir, st.files.at(-1).storedName);
+  assert.ok(fs.existsSync(stored));
+  await svc.reject({ session: MANAGER, rid: r2.id, body: { note: 'zaplaceno z jiné objednávky' }, now: NOW });
+  await flush();
+  assert.equal(st.reqs.at(-1).status, 'rejected');
+  assert.equal(st.files.length, 0);
+  assert.ok(!fs.existsSync(stored), 'чек отклонённого запроса удалён с диска');
+  assert.deepEqual(events.at(-1), ['order', 'rejected', 'ord00000000000000000003', null]);
+  await expectErr(() => svc.attachFile({ session: ADMIN, requestDocId: r2.id, files: upload(JPG, 'x.jpg') }), 409, 'request_closed');
 });

@@ -1,0 +1,62 @@
+{
+  "kind": "collectionType",
+  "collectionName": "stock_orders",
+  "info": {
+    "singularName": "stock-order",
+    "pluralName": "stock-orders",
+    "displayName": "Sklad — objednávka",
+    "description": "Заказ расходников (s252, «Sklad — zásoby» Фаза 2): draft → sent → received / cancelled. `lines` — снимок позиций {itemDocId, name, packSize, unit, packs, receivedPacks, price}, `receipts` — приходы с затратой или запросом на неё. REST-роутов нет: только ручки /engine/admin/stock/orders"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "status": {
+      "type": "enumeration",
+      "enum": ["draft", "sent", "received", "cancelled"],
+      "default": "draft"
+    },
+    "supplier": {
+      "type": "string"
+    },
+    "lines": {
+      "type": "json"
+    },
+    "receipts": {
+      "type": "json"
+    },
+    "note": {
+      "type": "text"
+    },
+    "expectedDays": {
+      "type": "integer",
+      "default": 7
+    },
+    "payment": {
+      "type": "string"
+    },
+    "createdByName": {
+      "type": "string"
+    },
+    "createdByRole": {
+      "type": "string"
+    },
+    "sentAt": {
+      "type": "datetime"
+    },
+    "sentBy": {
+      "type": "string"
+    },
+    "receivedAt": {
+      "type": "datetime"
+    },
+    "closedBy": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "default": 0
+    }
+  }
+}

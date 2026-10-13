@@ -5,7 +5,7 @@
     "singularName": "cost-request",
     "pluralName": "cost-requests",
     "displayName": "Затраты — запрос на правку",
-    "description": "Запрос управляющей на правку или удаление затраты; применяет владелец (s236). REST-роутов нет: только ручки /engine/admin/costs"
+    "description": "Запрос управляющей на правку или удаление затраты; применяет владелец (s236). s252: `create` — новая затрата со склада (приход администратора), двухступенчатое одобрение `stage` manager → owner. REST-роутов нет: только ручки /engine/admin/costs"
   },
   "options": {
     "draftAndPublish": false
@@ -17,7 +17,7 @@
     },
     "action": {
       "type": "enumeration",
-      "enum": ["edit", "delete", "file_delete"]
+      "enum": ["edit", "delete", "file_delete", "create"]
     },
     "changes": {
       "type": "json"
@@ -35,6 +35,22 @@
       "type": "enumeration",
       "enum": ["pending", "approved", "rejected", "cancelled"],
       "default": "pending"
+    },
+    "stage": {
+      "type": "enumeration",
+      "enum": ["manager", "owner"]
+    },
+    "source": {
+      "type": "string"
+    },
+    "sourceDocId": {
+      "type": "string"
+    },
+    "managerApprovedBy": {
+      "type": "string"
+    },
+    "managerApprovedAt": {
+      "type": "datetime"
     },
     "requestedBy": {
       "type": "string"

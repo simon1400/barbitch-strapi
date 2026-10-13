@@ -86,6 +86,8 @@ const costsSvc = () => strapi.service('api::booking-engine.costs');
 const reportsSvc = () => strapi.service('api::booking-engine.work-reports');
 const shiftLogSvc = () => strapi.service('api::booking-engine.shift-close-log');
 const tasksSvc = () => strapi.service('api::booking-engine.owner-tasks');
+const stockSvc = () => strapi.service('api::booking-engine.stock');
+const stockOrdersSvc = () => strapi.service('api::booking-engine.stock-orders');
 
 // personal.documentId сотрудника сессии: по связи учётки, без связи — по имени (s229, §5а.1)
 const resolveSessionPersonalDocId = async (session) =>
@@ -724,18 +726,34 @@ export default {
     await handle(ctx, () => costsSvc().cancelRequest({ session, rid: ctx.params.rid }));
   },
 
-  // POST /api/engine/admin/costs/requests/:rid/approve
+  // POST /api/engine/admin/costs/requests/:rid/approve {changes?}
+  // Правки/удаления — только владелец (проверка в сервисе); s252: новую затрату со склада
+  // одобряет и управляющая на своей ступени (передаёт владельцу).
   async adminCostRequestApprove(ctx) {
-    const session = requireOwner(ctx);
+    const session = requireManagement(ctx);
     if (!session) return;
-    await handle(ctx, () => costsSvc().approve({ session, rid: ctx.params.rid }));
+    await handle(ctx, () => costsSvc().approve({ session, rid: ctx.params.rid, body: ctx.request.body }));
   },
 
-  // POST /api/engine/admin/costs/requests/:rid/reject {note?}
+  // POST /api/engine/admin/costs/requests/:rid/reject {note?} — как approve
   async adminCostRequestReject(ctx) {
-    const session = requireOwner(ctx);
+    const session = requireManagement(ctx);
     if (!session) return;
     await handle(ctx, () => costsSvc().reject({ session, rid: ctx.params.rid, body: ctx.request.body }));
+  },
+
+  // GET /api/engine/admin/costs/requests/:rid/files/:fid — чек ждущего запроса (s252), не кэшировать
+  async adminCostRequestFileDownload(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const f = await costsSvc().downloadRequestFile({ rid: ctx.params.rid, fid: ctx.params.fid });
+      ctx.set('Content-Type', f.mime);
+      ctx.set('Content-Length', String(f.size));
+      ctx.set('Content-Disposition', f.disposition);
+      ctx.set('Cache-Control', 'private, no-store');
+      return f.stream;
+    });
   },
 
   // Фаза 2 (s237). GET /api/engine/admin/costs/recurring?month=YYYY-MM — записи прошлого месяца к повтору
@@ -1285,6 +1303,133 @@ export default {
     const session = requireManagement(ctx);
     if (!session) return;
     await handle(ctx, () => staffSvc().updateChecklistItem({ session, itemId: ctx.params.itemId, body: ctx.request.body }));
+  },
+
+  // «Sklad — zásoby» (s251): смотреть, считать, приход, «došlo» — owner/manager/administrator;
+  // позиции и настройки — руководство (проверка роли — в сервисе, цены администратору не отдаются).
+  // GET /api/engine/admin/stock?archived=1
+  async adminStockList(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => stockSvc().list({ session, archived: ctx.query?.archived }));
+  },
+
+  // GET /api/engine/admin/stock/attention — «Сегодня» и кабинет администратора
+  async adminStockAttention(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => stockSvc().attention({ session }));
+  },
+
+  // GET /api/engine/admin/stock/order — «Co objednat»
+  async adminStockOrder(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => stockSvc().order({ session }));
+  },
+
+  // GET /api/engine/admin/stock/suggest — автодополнение названий, мест, поставщиков
+  async adminStockSuggest(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => stockSvc().suggest({ session }));
+  },
+
+  // GET /api/engine/admin/stock/moves?item=&before=&limit=
+  async adminStockMoves(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => stockSvc().moves({ session, item: ctx.query?.item, before: ctx.query?.before, limit: ctx.query?.limit }));
+  },
+
+  // GET /api/engine/admin/stock/items/:id — экран позиции (QR-ярлык)
+  async adminStockItem(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => stockSvc().item({ session, id: ctx.params.id }));
+  },
+
+  // POST /api/engine/admin/stock/items — руководство
+  async adminStockItemCreate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => stockSvc().create({ session, body: ctx.request.body }));
+  },
+
+  // PATCH /api/engine/admin/stock/items/:id — руководство
+  async adminStockItemUpdate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => stockSvc().update({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/stock/items/:id/moves {kind, packs?, units?, mode?, note?}
+  async adminStockMove(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => stockSvc().move({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // Фаза 2 (s252): заказы. GET /api/engine/admin/stock/orders — администратору без цен
+  async adminStockOrders(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => stockOrdersSvc().list({ session }));
+  },
+
+  // POST /api/engine/admin/stock/orders {supplier, lines, note?, expectedDays?, payment?, status?} — руководство
+  async adminStockOrderCreate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => stockOrdersSvc().create({ session, body: ctx.request.body }));
+  },
+
+  // PATCH /api/engine/admin/stock/orders/:id — руководство, пока ничего не пришло
+  async adminStockOrderUpdate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => stockOrdersSvc().update({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/stock/orders/:id/send — «Objednáno»
+  async adminStockOrderSend(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => stockOrdersSvc().send({ session, id: ctx.params.id }));
+  },
+
+  // POST /api/engine/admin/stock/orders/:id/close — отменить / закрыть без остатка
+  async adminStockOrderClose(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => stockOrdersSvc().close({ session, id: ctx.params.id }));
+  },
+
+  // POST /api/engine/admin/stock/orders/:id/receive {lines, complete?, note?, cost?} — все три роли
+  async adminStockOrderReceive(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => stockOrdersSvc().receive({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/stock/orders/:id/cost {receipt, cost} — затрата к приходу без неё (руководство)
+  async adminStockOrderCost(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => stockOrdersSvc().addCost({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/stock/orders/:id/file?receipt= (multipart `files`) — фото чека прихода, все три роли
+  async adminStockOrderFile(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => stockOrdersSvc().uploadFile({ session, id: ctx.params.id, receipt: ctx.query?.receipt, files: ctx.request.files }));
   },
 
   // GET /api/engine/admin/my-card — «Мои данные»: своя карточка, только чтение. Любая роль

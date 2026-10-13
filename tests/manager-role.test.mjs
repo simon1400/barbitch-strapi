@@ -105,7 +105,8 @@ const CASES = [
   ['engine: корректировки — удалить', engine.adminCorrectionDelete, ['owner', 'manager']],
   // затраты (s236): руководство; администратору и мастеру — ничего (решение владельца);
   // правка/удаление гейтом — руководство, управляющей сервис отвечает 403 approval_required;
-  // одобрение и отклонение запросов — только владелец
+  // одобрение и отклонение запросов — гейт руководство (s252: новую затрату со склада одобряет и
+  // управляющая на своей ступени); правки/удаления сервис по-прежнему отдаёт только владельцу (costs.test)
   ['engine: затраты — месяц', engine.adminCostsList, ['owner', 'manager']],
   ['engine: затраты — автодополнение', engine.adminCostsSuggest, ['owner', 'manager']],
   ['engine: затраты — добавить', engine.adminCostCreate, ['owner', 'manager']],
@@ -113,8 +114,8 @@ const CASES = [
   ['engine: затраты — удалить', engine.adminCostDelete, ['owner', 'manager']],
   ['engine: затраты — запрос', engine.adminCostRequest, ['owner', 'manager']],
   ['engine: затраты — отозвать запрос', engine.adminCostRequestCancel, ['owner', 'manager']],
-  ['engine: затраты — одобрить запрос', engine.adminCostRequestApprove, ['owner']],
-  ['engine: затраты — отклонить запрос', engine.adminCostRequestReject, ['owner']],
+  ['engine: затраты — одобрить запрос', engine.adminCostRequestApprove, ['owner', 'manager']],
+  ['engine: затраты — отклонить запрос', engine.adminCostRequestReject, ['owner', 'manager']],
   ['engine: затраты — повтор прошлого месяца', engine.adminCostsRecurring, ['owner', 'manager']],
   ['engine: затраты — пачка', engine.adminCostsBatch, ['owner', 'manager']],
   ['engine: затраты — «Сегодня»', engine.adminCostsAttention, ['owner', 'manager']],
@@ -125,6 +126,17 @@ const CASES = [
   ['engine: затраты — «не затрата»', engine.adminCostsCashSkip, ['owner', 'manager']],
   ['engine: затраты — снять «не затрата»', engine.adminCostsCashUnskip, ['owner', 'manager']],
   ['engine: затраты — ZIP чеков месяца', engine.adminCostsReceiptsZip, ['owner', 'manager']],
+  ['engine: затраты — чек запроса (s252)', engine.adminCostRequestFileDownload, ['owner', 'manager']],
+  // склад, Фаза 2 (s252): заказы смотреть и принимать — и администратор; создавать/править/
+  // отправлять/закрывать и затрата к приходу — руководство; мастеру ничего
+  ['engine: склад — заказы', engine.adminStockOrders, ['owner', 'manager', 'administrator']],
+  ['engine: склад — новый заказ', engine.adminStockOrderCreate, ['owner', 'manager']],
+  ['engine: склад — правка заказа', engine.adminStockOrderUpdate, ['owner', 'manager']],
+  ['engine: склад — заказ отправлен', engine.adminStockOrderSend, ['owner', 'manager']],
+  ['engine: склад — закрыть заказ', engine.adminStockOrderClose, ['owner', 'manager']],
+  ['engine: склад — приход заказа', engine.adminStockOrderReceive, ['owner', 'manager', 'administrator']],
+  ['engine: склад — затрата к приходу', engine.adminStockOrderCost, ['owner', 'manager']],
+  ['engine: склад — чек прихода', engine.adminStockOrderFile, ['owner', 'manager', 'administrator']],
   ['engine: отпуска — брони на эти дни', engine.adminTimeOffConflicts, ['owner', 'manager']],
   ['engine: отпуска — создать', engine.adminTimeOffCreate, ['owner', 'manager']],
   ['engine: отпуска — изменить', engine.adminTimeOffUpdate, ['owner', 'manager']],

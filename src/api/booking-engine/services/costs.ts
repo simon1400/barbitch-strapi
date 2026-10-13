@@ -30,6 +30,14 @@
  * (`cost-cash-skip` без REST); «Скачать чеки месяца» — ZIP без сжатия потоком
  * (utils/zip-store.ts). Сравнение с прошлым месяцем считает админка из двух списков.
  *
+ * s252 (склад, Фаза 2 плана STOCK_NEXT_SESSION_PROMPT.md, решение владельца §0.5): запрос `create` —
+ * новая затрата от администратора, принявшего заказ склада (у него прав на затраты нет).
+ * Одобрение в две ступени (`stage`): управляющая → владелец; владелец может одобрить сразу на любой
+ * ступени. Одобряющий может поправить поля (сумму, оплату…). Пока запрос ждёт — затраты нет,
+ * итоги месяца не меняются. Чек прихода лежит на запросе (`cost-file.requestDocId`) и при
+ * одобрении переезжает к затрате; при отклонении — удаляется. Решение передаётся в заказ склада
+ * (stock-orders.onRequestDecided), push — stock-notify.
+ *
  * Верх файла — чистые функции (tests/costs.test.mjs), ниже — сервис.
  */
 
@@ -265,10 +273,17 @@ export const toRow = (doc: any, pending?: any, files: any[] = []) => {
   };
 };
 
-export const requestRow = (r: any) => ({
+export const requestRow = (r: any, files: any[] = []) => ({
   id: r.documentId,
-  costDocId: r.costDocId,
+  costDocId: r.costDocId || null,
   action: r.action,
+  // s252: новая затрата со склада — ступень одобрения и откуда пришла
+  stage: r.action === 'create' ? r.stage || 'manager' : null,
+  source: r.source || null,
+  sourceDocId: r.sourceDocId || null,
+  managerApprovedBy: r.managerApprovedBy || null,
+  managerApprovedAt: r.managerApprovedAt ?? null,
+  files: files.map(fileView),
   fileId: r.fileId || null,
   changes: r.changes ?? null,
   before: r.before ?? null,
@@ -585,7 +600,20 @@ export const logSummary = (head: string, row: any): string => {
 
 /** Что просили — для журнала. */
 const requestWhat = (req: any): string =>
-  req.action === 'delete' ? 'smazání' : req.action === 'file_delete' ? 'smazání dokladu' : diffSummary(req.before, req.changes);
+  req.action === 'delete'
+    ? 'smazání'
+    : req.action === 'file_delete'
+      ? 'smazání dokladu'
+      : req.action === 'create'
+        ? 'nový náklad'
+        : diffSummary(req.before, req.changes);
+
+/**
+ * Кто может решить запрос `create` (s252): владелец — на любой ступени; управляющая — только на
+ * своей (`stage: manager`), и её «одобрить» — передать владельцу.
+ */
+export const canDecideCreate = (role: string, stage: unknown): boolean =>
+  role === 'owner' || (role === 'manager' && (stage || 'manager') === 'manager');
 
 const PRAGUE_DAY = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Europe/Prague',
@@ -601,7 +629,7 @@ const isOwner = (session: any) => session?.role === 'owner';
 const notFound = () => new CostError(404, 'not_found', 'Затрата не найдена');
 const fileNotFound = () => new CostError(404, 'file_not_found', 'Чек не найден');
 
-const FILE_FIELDS = ['costDocId', 'fileName', 'mime', 'size', 'uploadedBy', 'createdAt'];
+const FILE_FIELDS = ['costDocId', 'requestDocId', 'fileName', 'mime', 'size', 'uploadedBy', 'createdAt'];
 
 const toDbData = (v: any) => {
   const data = { ...v };
@@ -670,8 +698,8 @@ export default {
    * Перевод запроса из pending — условным UPDATE: два одновременных решения
    * (одобрить + отозвать) не применятся оба. 0 строк — запрос уже закрыт.
    */
-  async _claim(rid: string, data: any) {
-    const res = await strapi.db.query(REQUEST_UID).updateMany({ where: { documentId: rid, status: 'pending' }, data });
+  async _claim(rid: string, data: any, where: any = {}) {
+    const res = await strapi.db.query(REQUEST_UID).updateMany({ where: { documentId: rid, status: 'pending', ...where }, data });
     if (!res || !res.count) throw new CostError(409, 'request_closed', 'Запрос уже решён или отозван');
   },
 
@@ -708,8 +736,11 @@ export default {
     const files = await this._filesFor(docs.map((d) => d.documentId));
     const rows = sortRows(docs.map((d) => toRow(d, byCost.get(d.documentId), files.get(d.documentId))));
 
-    // владелец видит все запросы, управляющая — свои
-    const mine = isOwner(session) ? pendingAll : pendingAll.filter((r) => Number(r.requestedById) === Number(session?.id));
+    // владелец видит все запросы, управляющая — свои и новые затраты со склада (s252: она их одобряет первой)
+    const mine = isOwner(session)
+      ? pendingAll
+      : pendingAll.filter((r) => Number(r.requestedById) === Number(session?.id) || r.action === 'create');
+    const reqFiles = await this._requestFilesFor(mine.filter((r) => r.action === 'create').map((r) => r.documentId));
     const inMonth = new Map(docs.map((d) => [d.documentId, d]));
     const missing = [...new Set(mine.map((r) => r.costDocId).filter((id) => id && !inMonth.has(id)))];
     if (missing.length) {
@@ -723,8 +754,11 @@ export default {
     }
     const otherFiles = missing.length ? await this._filesFor(missing) : new Map();
     const pending = mine.map((r) => {
-      const cur = inMonth.get(r.costDocId);
-      return { ...requestRow(r), cost: cur ? toRow(cur, r, files.get(r.costDocId) || otherFiles.get(r.costDocId)) : null };
+      const cur = r.costDocId ? inMonth.get(r.costDocId) : null;
+      return {
+        ...requestRow(r, reqFiles.get(r.documentId) || []),
+        cost: cur ? toRow(cur, r, files.get(r.costDocId) || otherFiles.get(r.costDocId)) : null,
+      };
     });
 
     return { month: from.slice(0, 7), rows, categories: this.categories(), payments: Object.keys(PAYMENTS), pending };
@@ -740,6 +774,51 @@ export default {
       limit: 5000,
     });
     return { items: suggestFrom(docs.map((d) => toRow(d))) };
+  },
+
+  /** Проверка новой затраты без записи (склад проверяет до того, как вырастут остатки). */
+  checkInput({ body, now = new Date() }: { body: any; now?: Date }) {
+    return normalizeCostInput(body, this._today(now), this.categories());
+  },
+
+  /**
+   * s252: запрос на новую затрату (администратор принял заказ склада). Ступень `manager`:
+   * сначала одобряет управляющая, потом владелец. `source` — откуда (заказ склада).
+   */
+  async requestCreate({ session, body, source, now = new Date() }: { session: any; body: any; source?: { kind: string; docId: string }; now?: Date }) {
+    const input = normalizeCostInput(body, this._today(now), this.categories());
+    const req = await strapi.documents(REQUEST_UID).create({
+      data: {
+        costDocId: null,
+        action: 'create',
+        changes: input,
+        before: null,
+        status: 'pending',
+        stage: 'manager',
+        source: source?.kind || null,
+        sourceDocId: source?.docId || null,
+        requestedBy: session?.username || null,
+        requestedById: Number(session?.id) || null,
+      },
+    });
+    this._log('cost_request', session, req.documentId, logSummary('Žádost o nový náklad', input), { ...this._details(input), žádost: 'nový náklad' });
+    this._notify(req, 'manager');
+    return { request: requestRow(req) };
+  },
+
+  /** Push о запросе склада (stock-notify решает, включено ли); сбой не мешает. */
+  _notify(req: any, stage: 'manager' | 'owner') {
+    Promise.resolve()
+      .then(() => strapi.service('api::booking-engine.stock-notify').costRequestEvent(req, stage))
+      .catch((e) => strapi.log.error(`stock-notify costRequestEvent failed: ${e?.message || e}`));
+  },
+
+  /** Решение по запросу склада — в заказ (сбой не мешает решению). */
+  _toOrder(req: any, status: string, costDocId: string | null, now: Date) {
+    if (req.source !== 'stock-order' || !req.sourceDocId) return;
+    Promise.resolve()
+      .then(() => strapi.service('api::booking-engine.stock-orders').onRequestDecided({ orderDocId: req.sourceDocId, requestDocId: req.documentId, status, costDocId, now }))
+      .catch((e) => strapi.log.error(`stock-orders onRequestDecided failed: ${e?.message || e}`));
   },
 
   async create({ session, body, now = new Date() }: { session: any; body: any; now?: Date }) {
@@ -832,10 +911,15 @@ export default {
     return { request: requestRow({ ...req, status: 'cancelled' }) };
   },
 
-  /** Одобрить запрос — применяет правку или удаляет. Только владелец. */
-  async approve({ session, rid, now = new Date() }: { session: any; rid: unknown; now?: Date }) {
-    if (!isOwner(session)) throw new CostError(403, 'owner_only', 'Одобряет только владелец');
+  /**
+   * Одобрить запрос — применяет правку или удаляет. Только владелец.
+   * s252: новая затрата со склада — управляющая (своя ступень) или владелец; `body.changes` — поправки.
+   */
+  async approve({ session, rid, body, now = new Date() }: { session: any; rid: unknown; body?: any; now?: Date }) {
+    if (!isOwner(session) && session?.role !== 'manager') throw new CostError(403, 'owner_only', 'Одобряет только владелец');
     const req = await this._findRequest(rid);
+    if (req.action === 'create') return this._approveCreate(session, req, body, now);
+    if (!isOwner(session)) throw new CostError(403, 'owner_only', 'Одобряет только владелец');
     if (req.status !== 'pending') throw new CostError(409, 'request_closed', 'Запрос уже решён или отозван');
 
     const doc = await strapi.documents(COST_UID).findOne({ documentId: req.costDocId, status: 'published', fields: COST_FIELDS });
@@ -884,26 +968,96 @@ export default {
     };
   },
 
-  /** Отклонить запрос с причиной. Только владелец. */
+  /** Отклонить запрос с причиной. Только владелец; s252: новую затрату со склада — и управляющая на своей ступени. */
   async reject({ session, rid, body, now = new Date() }: { session: any; rid: unknown; body: any; now?: Date }) {
-    if (!isOwner(session)) throw new CostError(403, 'owner_only', 'Отклоняет только владелец');
+    if (!isOwner(session) && session?.role !== 'manager') throw new CostError(403, 'owner_only', 'Отклоняет только владелец');
     const note = String(body?.note ?? '').trim();
     if (note.length > MAX_TEXT) throw new CostError(400, 'text_too_long', `Комментарий длиннее ${MAX_TEXT} символов`);
     const req = await this._findRequest(rid);
+    const isCreate = req.action === 'create';
+    if (isCreate ? !canDecideCreate(session?.role, req.stage) : !isOwner(session)) {
+      throw new CostError(403, isCreate ? 'request_at_owner' : 'owner_only', isCreate ? 'Запрос уже у владельца' : 'Отклоняет только владелец');
+    }
     if (req.status !== 'pending') throw new CostError(409, 'request_closed', 'Запрос уже решён или отозван');
-    await this._claim(req.documentId, {
-      status: 'rejected',
-      decidedBy: session?.username || null,
-      decidedAt: now,
-      decisionNote: note || null,
-    });
+    await this._claim(
+      req.documentId,
+      {
+        status: 'rejected',
+        decidedBy: session?.username || null,
+        decidedAt: now,
+        decisionNote: note || null,
+      },
+      isOwner(session) ? {} : { stage: 'manager' }
+    );
+    if (isCreate) {
+      await this._deleteRequestFiles(req.documentId);
+      this._toOrder(req, 'rejected', null, now);
+    }
     const what = requestWhat(req);
-    this._log('cost_reject', session, req.costDocId, `${logSummary('Žádost zamítnuta', req.before || {})} — ${what}${note ? ` · ${cut(note, 80)}` : ''}`, {
+    this._log('cost_reject', session, req.costDocId || req.documentId, `${logSummary('Žádost zamítnuta', req.before || req.changes || {})} — ${what}${note ? ` · ${cut(note, 80)}` : ''}`, {
       žádost: what,
       podal: req.requestedBy || '—',
       důvod: note || '—',
     });
     return { request: requestRow({ ...req, status: 'rejected', decidedBy: session?.username || null, decidedAt: now, decisionNote: note || null }) };
+  },
+
+  /**
+   * s252: одобрение новой затраты со склада. Управляющая — передаёт владельцу (ступень `owner`),
+   * владелец — создаёт затрату (автор — кто принял заказ), чеки запроса переезжают к ней.
+   * Поправки `body.changes` проверяются как новая затрата целиком.
+   */
+  async _approveCreate(session: any, req: any, body: any, now: Date) {
+    if (req.status !== 'pending') throw new CostError(409, 'request_closed', 'Запрос уже решён или отозван');
+    if (!canDecideCreate(session?.role, req.stage)) throw new CostError(403, 'request_at_owner', 'Запрос уже у владельца');
+    const patch = body?.changes && typeof body.changes === 'object' && !Array.isArray(body.changes) ? body.changes : {};
+    const merged = { ...(req.changes || {}) };
+    for (const k of EDITABLE) if (has(patch, k)) merged[k] = patch[k];
+    const input = normalizeCostInput(merged, this._today(now), this.categories());
+    const by = session?.username || null;
+
+    if (!isOwner(session)) {
+      await this._claim(req.documentId, { stage: 'owner', managerApprovedBy: by, managerApprovedAt: now, changes: input }, { stage: 'manager' });
+      const next = { ...req, stage: 'owner', managerApprovedBy: by, managerApprovedAt: now, changes: input };
+      this._log('cost_approve', session, req.documentId, `${logSummary('Žádost schválena vedoucí — čeká na majitele', input)}`, {
+        ...this._details(input),
+        žádost: 'nový náklad',
+        podal: req.requestedBy || '—',
+      });
+      this._notify(next, 'owner');
+      return { request: requestRow(next), row: null, deleted: null };
+    }
+
+    await this._claim(req.documentId, { status: 'approved', decidedBy: by, decidedAt: now, changes: input });
+    let doc;
+    try {
+      doc = await strapi.documents(COST_UID).create({
+        status: 'published',
+        data: toDbData({ ...input, author: req.requestedBy || by }),
+        fields: COST_FIELDS,
+      });
+    } catch (e) {
+      await strapi.db.query(REQUEST_UID).updateMany({
+        where: { documentId: req.documentId, status: 'approved' },
+        data: { status: 'pending', decidedBy: null, decidedAt: null },
+      });
+      throw e;
+    }
+    await strapi.db.query(REQUEST_UID).updateMany({ where: { documentId: req.documentId }, data: { costDocId: doc.documentId } });
+    // чеки запроса — к затрате
+    await strapi.db.query(FILE_UID).updateMany({ where: { requestDocId: req.documentId }, data: { costDocId: doc.documentId } });
+    const row = toRow(doc);
+    this._log('cost_approve', session, doc.documentId, `${logSummary('Žádost schválena — nový náklad', row)}`, {
+      ...this._details(row),
+      žádost: 'nový náklad',
+      podal: req.requestedBy || '—',
+    });
+    this._toOrder(req, 'approved', doc.documentId, now);
+    return {
+      request: requestRow({ ...req, status: 'approved', costDocId: doc.documentId, decidedBy: by, decidedAt: now, changes: input }),
+      row,
+      deleted: null,
+    };
   },
 
   // ── чеки (Фаза 2) ──────────────────────────────────────────────────────
@@ -931,6 +1085,39 @@ export default {
       out.get(f.costDocId).push(f);
     }
     return out;
+  },
+
+  /** s252: чеки запросов на новую затрату: requestDocId → [запись] (ещё без затраты). */
+  async _requestFilesFor(requestDocIds: string[]) {
+    const out = new Map<string, any[]>();
+    const ids = [...new Set(requestDocIds.filter(Boolean))];
+    if (!ids.length) return out;
+    const rows = await strapi.documents(FILE_UID).findMany({
+      filters: { requestDocId: { $in: ids }, costDocId: { $null: true } },
+      fields: FILE_FIELDS,
+      sort: [{ createdAt: 'asc' }],
+      limit: ids.length * MAX_FILES_PER_COST + 50,
+    });
+    for (const f of rows) {
+      if (!out.has(f.requestDocId)) out.set(f.requestDocId, []);
+      out.get(f.requestDocId).push(f);
+    }
+    return out;
+  },
+
+  /** s252: запрос отклонён — его чеки (ещё без затраты) удаляются с диска. */
+  async _deleteRequestFiles(requestDocId: string) {
+    const rows = await strapi.documents(FILE_UID).findMany({
+      filters: { requestDocId: { $eq: requestDocId }, costDocId: { $null: true } },
+      fields: ['storedName'],
+      limit: 100,
+    });
+    if (!rows.length) return;
+    const dir = await this._filesDir().catch(() => null);
+    for (const f of rows) {
+      await strapi.documents(FILE_UID).delete({ documentId: f.documentId });
+      await removePrivateFile(dir, f.storedName, `costs: чек запроса ${f.documentId}`);
+    }
   },
 
   /** Чек этой затраты (со storedName) или 404. */
@@ -971,15 +1158,32 @@ export default {
    * ≤ 10 МБ, ≤ MAX_FILES_PER_COST на затрату. Руководство — сразу (деньги не меняются).
    */
   async uploadFile({ session, id, files }: { session: any; id: unknown; files: any }) {
+    const doc = await this._findCost(id);
+    return this.attachFile({ session, costDocId: doc.documentId, files, cost: doc });
+  },
+
+  /**
+   * Сохранить чек: к затрате (`costDocId`) или, s252, к ждущему запросу на новую затрату
+   * (`requestDocId`, приход склада) — при одобрении он переедет к затрате.
+   */
+  async attachFile({ session, costDocId = null, requestDocId = null, files, cost = null }: { session: any; costDocId?: string | null; requestDocId?: string | null; files: any; cost?: any }) {
     const file = files?.files;
     if (!file || Array.isArray(file) || !file.filepath) throw new CostError(400, 'file_required', 'Выберите один файл');
     const size = Number(file.size) || 0;
     if (size <= 0) throw new CostError(400, 'file_empty', 'Файл пустой');
     if (size > MAX_FILE_BYTES) throw new CostError(413, 'file_too_big', 'Файл больше 10 МБ');
-    const doc = await this._findCost(id);
+    let doc = cost;
+    let req = null;
+    if (costDocId) doc = doc || (await this._findCost(costDocId));
+    else {
+      req = await this._findRequest(requestDocId);
+      if (req.action !== 'create' || req.status !== 'pending') throw new CostError(409, 'request_closed', 'Запрос уже решён или отозван');
+    }
     const type = detectFile(await readHead(file.filepath));
     if (!type) throw new CostError(400, 'bad_file_type', 'Поддерживаются JPG, PNG, WEBP и PDF');
-    const existing = (await this._filesFor([doc.documentId])).get(doc.documentId) || [];
+    const existing = doc
+      ? (await this._filesFor([doc.documentId])).get(doc.documentId) || []
+      : (await this._requestFilesFor([req.documentId])).get(req.documentId) || [];
     if (existing.length >= MAX_FILES_PER_COST) {
       throw new CostError(409, 'too_many_files', `К затрате — не больше ${MAX_FILES_PER_COST} чеков`);
     }
@@ -989,18 +1193,50 @@ export default {
     let created;
     try {
       created = await strapi.documents(FILE_UID).create({
-        data: { costDocId: doc.documentId, fileName, mime: type.mime, size, storedName, uploadedBy: session?.username || null },
+        data: {
+          costDocId: doc ? doc.documentId : null,
+          ...(req ? { requestDocId: req.documentId } : {}),
+          fileName,
+          mime: type.mime,
+          size,
+          storedName,
+          uploadedBy: session?.username || null,
+        },
       });
     } catch (e) {
       await removePrivateFile(dir, storedName, `costs: чек ${storedName}`);
       throw e;
     }
-    const row = toRow(doc);
-    this._log('cost_file_add', session, doc.documentId, `${logSummary('Doklad přidán', row)} — ${cut(fileName, 60)}`, {
-      ...this._details(row),
-      doklad: fileName,
-    });
+    if (doc) {
+      const row = toRow(doc);
+      this._log('cost_file_add', session, doc.documentId, `${logSummary('Doklad přidán', row)} — ${cut(fileName, 60)}`, {
+        ...this._details(row),
+        doklad: fileName,
+      });
+    } else {
+      this._log('cost_file_add', session, req.documentId, `${logSummary('Doklad k žádosti', req.changes || {})} — ${cut(fileName, 60)}`, {
+        doklad: fileName,
+      });
+    }
     return { file: fileView({ ...created, fileName, mime: type.mime, size, uploadedBy: session?.username || null }) };
+  },
+
+  /** s252: чек ждущего запроса на новую затрату — потоком (руководство). */
+  async downloadRequestFile({ rid, fid }: { rid: unknown; fid: unknown }) {
+    const req = await this._findRequest(rid);
+    const documentId = String(fid ?? '').trim();
+    if (!DOC_ID.test(documentId)) throw fileNotFound();
+    const rows = await strapi.documents(FILE_UID).findMany({
+      filters: { documentId: { $eq: documentId }, requestDocId: { $eq: req.documentId } },
+      fields: [...FILE_FIELDS, 'storedName'],
+      limit: 1,
+    });
+    const file = rows[0];
+    if (!file) throw fileNotFound();
+    const opened = await openPrivateFile(await this._filesDir(), file.storedName);
+    if (!opened) throw new CostError(404, 'file_missing', 'Файл чека на сервере не найден');
+    const name = safeFileName(file.fileName, '', 'doklad');
+    return { stream: opened.stream, size: opened.size, mime: file.mime || 'application/octet-stream', disposition: contentDisposition(name) };
   },
 
   /** Чек потоком (контроллер ставит заголовки). */
@@ -1109,16 +1345,19 @@ export default {
     return (await this._pendingRequests()).length;
   },
 
-  /** «Сегодня»: запросы ждут одобрения (владельцу) и не внесённые постоянные расходы. */
+  /**
+   * «Сегодня»: запросы ждут одобрения (владельцу) и не внесённые постоянные расходы.
+   * s252: `stockReceipts` — новые затраты со склада, которые ждут решения этой сессии
+   * (владельцу — все, управляющей — на её ступени).
+   */
   async attention({ session, now = new Date() }: { session: any; now?: Date }) {
     const today = this._today(now);
-    const [rows, pending] = await Promise.all([
-      this._historyRows(today.slice(0, 7)),
-      isOwner(session) ? this._pendingRequests() : Promise.resolve(null),
-    ]);
+    const [rows, pending] = await Promise.all([this._historyRows(today.slice(0, 7)), this._pendingRequests()]);
+    const creates = pending.filter((r) => r.action === 'create');
     return {
       today,
-      pending: pending ? pending.length : null,
+      pending: isOwner(session) ? pending.length : null,
+      stockReceipts: isOwner(session) ? creates.length : creates.filter((r) => canDecideCreate(session?.role, r.stage)).length,
       missingRecurring: missingRecurring(rows, today),
     };
   },
