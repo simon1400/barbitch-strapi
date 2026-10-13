@@ -21,7 +21,12 @@ const transpile = (file) =>
   }).outputText;
 const dataUrl = (js) => 'data:text/javascript;base64,' + Buffer.from(js, 'utf8').toString('base64');
 const coreUrl = dataUrl(transpile('slots-core.ts'));
-const svcJs = transpile('time-offs.ts').split("from './slots-core'").join(`from '${coreUrl}'`);
+const wamUrl = dataUrl(transpile('../../../utils/works-as-master.ts'));
+const svcJs = transpile('time-offs.ts')
+  .split("from './slots-core'")
+  .join(`from '${coreUrl}'`)
+  .split("from '../../../utils/works-as-master'")
+  .join(`from '${wamUrl}'`);
 assert.ok(svcJs.includes(coreUrl), 'импорт slots-core подменён');
 const T = await import(dataUrl(svcJs.split("from 'crypto'").join("from 'node:crypto'")));
 const svc = T.default;
@@ -185,6 +190,9 @@ test('needsBlocks: только активный мастер с Noona-id', () =
   assert.equal(T.needsBlocks(PERSONALS[MANAGER]), false, 'у управляющей колонки нет, хотя Noona-id остался');
   assert.equal(T.needsBlocks(PERSONALS[GONE]), false);
   assert.equal(T.needsBlocks({ ...PERSONALS[MASTER], noonaEmployeeId: '  ' }), false);
+  // s249: управляющая, которая принимает клиенток, — как мастер
+  assert.equal(T.needsBlocks({ ...PERSONALS[MANAGER], alsoMaster: true }), true);
+  assert.equal(T.needsBlocks({ ...PERSONALS[ADMIN], noonaEmployeeId: 'X', alsoMaster: true }), false, 'флаг у другой должности не действует');
 });
 
 test('blockWindow: часы салона, без строки/закрыто — 10:00–19:00', () => {

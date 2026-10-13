@@ -4,7 +4,7 @@
  * «Управляющая»). Раньше записи `time-off` велись только в Strapi CM, а мастеру
  * на время отсутствия руками ставили серию блоков (у Марии — 125 штук).
  *
- * Запись отсутствия МАСТЕРА (position master, активна, есть noonaEmployeeId —
+ * Запись отсутствия МАСТЕРА (worksAsMaster — мастер или управляющая с alsoMaster, активна, есть noonaEmployeeId —
  * по нему календарь раскладывает блоки по колонкам) материализуется серией
  * own-блоков: по блоку на каждый день периода С СЕГОДНЯШНЕГО (пражского) дня
  * (решение владельца s216: прошлое не трогаем — ни календарь, ни загрузку
@@ -31,6 +31,7 @@
 
 import crypto from 'crypto';
 import { minToHHMM, pragueDateOf, pragueMinOf, pragueMinToUtcIso } from './slots-core';
+import { worksAsMaster } from '../../../utils/works-as-master';
 
 const TIME_OFF_UID = 'api::time-off.time-off';
 const TIME_BLOCK_UID = 'api::time-block.time-block';
@@ -144,7 +145,7 @@ export const normalizeTimeOffInput = (body: any, today: string, base: any = null
 /** Мастер с колонкой в календаре — ему нужны блоки. */
 export const needsBlocks = (person: any): boolean =>
   Boolean(person) &&
-  person.position === 'master' &&
+  worksAsMaster(person) &&
   person.isActive !== false &&
   Boolean(String(person.noonaEmployeeId ?? '').trim());
 
@@ -215,7 +216,7 @@ const PRAGUE_DAY = new Intl.DateTimeFormat('en-CA', {
   day: '2-digit',
 });
 
-const PERSON_FIELDS = ['name', 'position', 'isActive', 'noonaEmployeeId'];
+const PERSON_FIELDS = ['name', 'position', 'alsoMaster', 'isActive', 'noonaEmployeeId'];
 const ROW_FIELDS = ['type', 'startDate', 'endDate', 'paid', 'comment', 'blockSeriesKey'];
 
 export default {

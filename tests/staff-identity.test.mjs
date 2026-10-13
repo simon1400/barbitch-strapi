@@ -31,6 +31,7 @@ for (const [from, to] of [
   ["from '../../../utils/admin-account'", `from '${dataUrl('export const invalidateAdminAccount = () => {};')}'`],
   ["from './slots-core'", `from '${dataUrl(toJs(src('src/api/booking-engine/services/slots-core.ts')))}'`],
   ["from '../../../utils/staff-identity'", `from '${dataUrl(toJs(src('src/utils/staff-identity.ts')))}'`],
+  ["from '../../../utils/works-as-master'", `from '${dataUrl(toJs(src('src/utils/works-as-master.ts')))}'`],
   ["from 'crypto'", "from 'node:crypto'"],
   // s237: файлы — общие помощники закрытого хранилища
   ["from '../../../utils/private-files'", `from '${dataUrl(toJs(src('src/utils/private-files.ts')))}'`],

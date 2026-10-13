@@ -39,6 +39,7 @@
  */
 
 import { minToHHMM, pragueDateOf, pragueMinOf, pragueMinToUtcIso, utcToPragueMinClamped } from './slots-core';
+import { WORKS_AS_MASTER_FILTER, worksAsMaster } from '../../../utils/works-as-master';
 
 const SCHEDULE_UID = 'api::master-schedule.master-schedule';
 const TIME_BLOCK_UID = 'api::time-block.time-block';
@@ -351,12 +352,12 @@ const PRAGUE_DAY = new Intl.DateTimeFormat('en-CA', {
   day: '2-digit',
 });
 
-const PERSON_FIELDS = ['name', 'position', 'isActive', 'noonaEmployeeId', 'calendarOrder'];
+const PERSON_FIELDS = ['name', 'position', 'alsoMaster', 'isActive', 'noonaEmployeeId', 'calendarOrder'];
 
-/** Мастер с колонкой в календаре — только ему нужен план. */
+/** Мастер с колонкой в календаре — только ему нужен план (управляющая — с alsoMaster, s249). */
 export const isPlannedMaster = (p: any) =>
   Boolean(p) &&
-  p.position === 'master' &&
+  worksAsMaster(p) &&
   p.isActive !== false &&
   Boolean(String(p.noonaEmployeeId ?? '').trim()) &&
   !String(p.name ?? '').trim().startsWith('❌');
@@ -389,7 +390,7 @@ export default {
   async _masters() {
     const list = await strapi.documents(PERSONAL_UID).findMany({
       status: 'published',
-      filters: { position: { $eq: 'master' }, isActive: { $eq: true } },
+      filters: { ...WORKS_AS_MASTER_FILTER, isActive: { $eq: true } },
       fields: PERSON_FIELDS,
       limit: 200,
     });

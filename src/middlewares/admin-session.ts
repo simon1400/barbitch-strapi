@@ -109,11 +109,11 @@ export const deniedForMaster = (path: string, collections: Set<string> = new Set
 //     деньгам (`ratePercent` сортировкой подбирался бы у коллег по порядку) — 403;
 //   • ответ — у чужих карточек только поля календаря, процент — только у своей
 //     (своя = связь учётки из базы; у учётки без связи — имя = логин, как до s229).
-export const MASTER_PERSONAL_FIELDS = new Set(['name', 'noonaEmployeeId', 'tier', 'calendarOrder', 'ratePercent', 'position', 'isActive']);
-const MASTER_PERSONAL_FILTERS = new Set(['isActive', 'position', 'documentId', 'name', 'noonaEmployeeId', 'tier']);
+export const MASTER_PERSONAL_FIELDS = new Set(['name', 'noonaEmployeeId', 'tier', 'calendarOrder', 'ratePercent', 'position', 'alsoMaster', 'isActive']);
+const MASTER_PERSONAL_FILTERS = new Set(['isActive', 'position', 'alsoMaster', 'documentId', 'name', 'noonaEmployeeId', 'tier']);
 const MASTER_PERSONAL_SORT = new Set(['name', 'calendarOrder']);
 const MASTER_PERSONAL_KEEP = new Set([
-  'id', 'documentId', 'name', 'noonaEmployeeId', 'tier', 'calendarOrder', 'position', 'isActive',
+  'id', 'documentId', 'name', 'noonaEmployeeId', 'tier', 'calendarOrder', 'position', 'alsoMaster', 'isActive',
   'createdAt', 'updatedAt', 'publishedAt', 'locale',
 ]);
 

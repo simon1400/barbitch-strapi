@@ -41,6 +41,7 @@ import { classifyTitle, isExcludedOfferService, windowAfter, windowBefore } from
 import { withoutInternal } from './booking-kind';
 import { EngineError } from './booking-engine';
 import { findSessionPersonal, sessionPersonalDocId } from '../../../utils/staff-identity';
+import { WORKS_AS_MASTER_FILTER } from '../../../utils/works-as-master';
 
 const BOOKING_UID = 'api::booking.booking';
 const SALON_SERVICE_UID = 'api::salon-service.salon-service';
@@ -293,7 +294,7 @@ export default {
   async _masters(offerable) {
     const personals = await strapi.documents(PERSONAL_UID).findMany({
       status: 'published',
-      filters: { isActive: true, position: 'master' }, // управляющая (s213) — не мастер
+      filters: { isActive: true, ...WORKS_AS_MASTER_FILTER }, // управляющая (s213) — только с alsoMaster (s249)
       fields: ['name', 'tier', 'noonaEmployeeId'],
       populate: { services: { fields: ['title'] } },
       limit: 100,

@@ -37,6 +37,7 @@ const svcJs = swap(toJs(dir + 'upsell.ts'), [
   ["from './booking-kind'", dataUrl(toJs(dir + 'booking-kind.ts'))],
   ["from './booking-engine'", dataUrl('export class EngineError extends Error {}')],
   ["from '../../../utils/staff-identity'", dataUrl(toJs('src/utils/staff-identity.ts'))],
+  ["from '../../../utils/works-as-master'", dataUrl(toJs('src/utils/works-as-master.ts'))],
 ]);
 const U = (await import(dataUrl(svcJs))).default;
 

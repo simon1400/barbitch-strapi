@@ -28,6 +28,7 @@ let svcJs = toJs('src/api/booking-engine/services/staff.ts');
 for (const [from, to] of [
   ["from '../../../utils/admin-account'", `from '${dataUrl('export const invalidateAdminAccount = () => {};')}'`],
   ["from '../../../utils/staff-identity'", `from '${dataUrl(toJs('src/utils/staff-identity.ts'))}'`],
+  ["from '../../../utils/works-as-master'", `from '${dataUrl(toJs('src/utils/works-as-master.ts'))}'`],
   ["from './slots-core'", `from '${dataUrl(toJs('src/api/booking-engine/services/slots-core.ts'))}'`],
   ["from 'crypto'", "from 'node:crypto'"],
   // s237: файлы — общие помощники закрытого хранилища

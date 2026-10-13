@@ -41,6 +41,7 @@ import {
   internalPayrollSum,
   internalServiceTitles,
 } from './internal-payroll';
+import { WORKS_AS_MASTER_FILTER } from '../../../utils/works-as-master';
 
 const SALON_SERVICE_UID = 'api::salon-service.salon-service';
 const SLOT_HOLD_UID = 'api::slot-hold.slot-hold';
@@ -310,7 +311,7 @@ export default {
     const svc = await this.resolveService(serviceDocId);
     const all = await strapi.documents(PERSONAL_UID).findMany({
       status: 'published',
-      filters: { isActive: true, position: 'master', services: { documentId: { $eq: svc.documentId } } },
+      filters: { isActive: true, ...WORKS_AS_MASTER_FILTER, services: { documentId: { $eq: svc.documentId } } },
       fields: ['name', 'tier'],
       populate: { photo: true },
       limit: 100,
@@ -370,7 +371,7 @@ export default {
   async listEmployeesForService(serviceDocId) {
     return strapi.documents(PERSONAL_UID).findMany({
       status: 'published',
-      filters: { isActive: true, position: 'master', services: { documentId: { $eq: serviceDocId } } },
+      filters: { isActive: true, ...WORKS_AS_MASTER_FILTER, services: { documentId: { $eq: serviceDocId } } },
       fields: ['name', 'tier', 'bookingPriority', 'noonaEmployeeId'],
       limit: 100,
     });

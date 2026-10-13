@@ -146,10 +146,12 @@ test('contentCollectionsOf: plural и singular типов api::*, пользов
 
 // ───────────────────────── 2. /api/personals мастеру ─────────────────────────
 // ровно те запросы, что шлют экраны мастера (lib/personals.ts)
+// s249: мастер = worksAsMaster (position + alsoMaster), отсев в браузере — фильтра по должности в query нет
 const CALENDAR_QUERY =
-  'filters[isActive][$eq]=true&filters[position][$eq]=master&fields[0]=name&fields[1]=noonaEmployeeId&fields[2]=tier' +
-  '&fields[3]=calendarOrder&fields[4]=ratePercent&pagination[pageSize]=100&status=published';
-const RECIPIENTS_QUERY = 'filters[isActive][$eq]=true&fields[0]=name&fields[1]=position&pagination[pageSize]=100&status=published';
+  'filters[isActive][$eq]=true&fields[0]=name&fields[1]=noonaEmployeeId&fields[2]=tier' +
+  '&fields[3]=calendarOrder&fields[4]=ratePercent&fields[5]=position&fields[6]=alsoMaster&pagination[pageSize]=100&status=published';
+const RECIPIENTS_QUERY =
+  'filters[isActive][$eq]=true&fields[0]=name&fields[1]=position&fields[2]=alsoMaster&pagination[pageSize]=100&status=published';
 
 test('personals: запросы календаря проходят; populate, деньги, неизвестные ключи — 403', async () => {
   const admin = fs.readFileSync(path.join(root, '../admin/src/lib/personals.ts'), 'utf8');
@@ -159,7 +161,10 @@ test('personals: запросы календаря проходят; populate, �
   };
   assert.equal(q('QUERY'), CALENDAR_QUERY, 'запрос календаря в админке изменился — обнови белый список');
   assert.equal(q('RECIPIENTS_QUERY'), RECIPIENTS_QUERY);
-  for (const qs of [CALENDAR_QUERY, RECIPIENTS_QUERY, '', 'sort[0]=calendarOrder:asc&sort[1]=name', 'filters[documentId][$in][0]=a&filters[documentId][$in][1]=b']) {
+  const OLD_CALENDAR_QUERY = // админка до s249 — должна работать, пока не задеплоена новая
+    'filters[isActive][$eq]=true&filters[position][$eq]=master&fields[0]=name&fields[1]=noonaEmployeeId&fields[2]=tier' +
+    '&fields[3]=calendarOrder&fields[4]=ratePercent&pagination[pageSize]=100&status=published';
+  for (const qs of [CALENDAR_QUERY, RECIPIENTS_QUERY, OLD_CALENDAR_QUERY, 'filters[alsoMaster][$eq]=true', '', 'sort[0]=calendarOrder:asc&sort[1]=name', 'filters[documentId][$in][0]=a&filters[documentId][$in][1]=b']) {
     assert.equal((await run('master', 'GET', '/api/personals', { querystring: qs })).passed, true, qs);
   }
   assert.equal((await run('master', 'GET', '/api/personals/abc', { querystring: 'fields[0]=name' })).passed, true);
@@ -230,6 +235,22 @@ test('personals: процент — только у своей карточки 
     const o = await run(role, 'GET', '/api/personals', { response: ROWS() });
     assert.deepEqual(o.body, ROWS(), role);
   }
+});
+
+test('s249 personals: мастеру видны position и alsoMaster коллег (колонка управляющей-мастера), процент — только свой', async () => {
+  ACCOUNTS.get(ROLE_IDS.master).personalDocId = 'card-me';
+  ACCOUNTS.get(ROLE_IDS.master).username = 'Kira Nová';
+  account.invalidateAdminAccount();
+  const rows = {
+    data: [
+      { id: 1, documentId: 'card-me', name: 'Kira Nová', position: 'master', alsoMaster: false, ratePercent: 45 },
+      { id: 3, documentId: 'card-boss', name: 'Mariia', position: 'manager', alsoMaster: true, ratePercent: 40, excessThreshold: 0 },
+    ],
+  };
+  const r = await run('master', 'GET', '/api/personals', { querystring: CALENDAR_QUERY, response: rows, username: 'Kira Nová' });
+  assert.equal(r.passed, true, r.code);
+  assert.deepEqual(r.body.data[1], { id: 3, documentId: 'card-boss', name: 'Mariia', position: 'manager', alsoMaster: true });
+  assert.equal(r.body.data[0].ratePercent, 45);
 });
 
 // ───────────────────────── 3. my-month ─────────────────────────

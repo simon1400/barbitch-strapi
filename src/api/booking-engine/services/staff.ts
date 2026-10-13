@@ -52,6 +52,7 @@ import {
   storePrivateFile,
 } from '../../../utils/private-files';
 import { minToHHMM, pragueDateOf, pragueMinOf } from './slots-core';
+import { WORKS_AS_MASTER_FILTER, worksAsMaster } from '../../../utils/works-as-master';
 
 const PERSONAL_UID = 'api::personal.personal';
 const ADMIN_UID = 'api::admin-user.admin-user';
@@ -324,12 +325,23 @@ const onlyKeys = (data: any, allowed: string[]) => {
  * Возвращает patch и список изменений [{key, from, to}].
  */
 export const normalizeBasic = (data: any, current: any, today: string) => {
-  const keys = onlyKeys(data, ['position', 'tier', 'hiredAt', 'leftAt']);
+  const keys = onlyKeys(data, ['position', 'alsoMaster', 'tier', 'hiredAt', 'leftAt']);
   const patch: Record<string, any> = {};
   if (keys.includes('position')) {
     const v = String(data.position ?? '');
     if (!hasOwn(POSITIONS, v)) throw new StaffError(400, 'bad_position', 'Неизвестная должность');
     patch.position = v;
+  }
+  // «Работает и мастером» (s249) — только у управляющей; смена должности флаг снимает
+  const positionAfter = hasOwn(patch, 'position') ? patch.position : current?.position;
+  if (keys.includes('alsoMaster')) {
+    if (typeof data.alsoMaster !== 'boolean') throw new StaffError(400, 'bad_field', 'Работает и мастером — да или нет');
+    if (data.alsoMaster && positionAfter !== 'manager') {
+      throw new StaffError(409, 'also_master_manager_only', 'Работать и мастером может только управляющая');
+    }
+    patch.alsoMaster = data.alsoMaster;
+  } else if (positionAfter !== 'manager' && current?.alsoMaster === true) {
+    patch.alsoMaster = false;
   }
   if (keys.includes('tier')) {
     const v = String(data.tier ?? '');
@@ -358,7 +370,13 @@ export const normalizeBasic = (data: any, current: any, today: string) => {
     throw new StaffError(400, 'bad_date', 'Дата приёма позже даты ухода');
   }
   const before = (k: string) =>
-    k === 'hiredAt' || k === 'leftAt' ? ymdOf(current?.[k]) : k === 'tier' ? current?.tier || 'senior' : current?.[k] ?? null;
+    k === 'hiredAt' || k === 'leftAt'
+      ? ymdOf(current?.[k])
+      : k === 'tier'
+        ? current?.tier || 'senior'
+        : k === 'alsoMaster'
+          ? current?.alsoMaster === true
+          : current?.[k] ?? null;
   const changes = Object.keys(patch)
     .filter((k) => before(k) !== patch[k])
     .map((k) => ({ key: k, from: before(k), to: patch[k] }));
@@ -520,6 +538,16 @@ export const rateLabel = (r: any) => {
 };
 
 /**
+ * Ставка задана: мастеру — доля от услуг, остальным — действующая запись `rates`;
+ * управляющей, работающей и мастером (s249), — и то, и другое.
+ */
+export const rateReady = (p: any, today: string): boolean => {
+  const pct = p?.ratePercent != null;
+  if (p?.position === 'master') return pct;
+  return Boolean(rateOn(p?.rates, today)) && (!worksAsMaster(p) || pct);
+};
+
+/**
  * «Чего не хватает» — для бейджей списка. Ушедшим не считается.
  * ctx: { account, servicesCount, hasSchedule, today }.
  * Заполненность личных данных — в чек-листе (фаза 2, buildChecklist), не здесь.
@@ -527,13 +555,13 @@ export const rateLabel = (r: any) => {
 export const missingFlags = (p: any, ctx: any): string[] => {
   if (isLeft(p)) return [];
   const out = [];
-  const master = p?.position === 'master';
+  const master = worksAsMaster(p);
   if (!ctx.account) out.push('no_account');
   else if (ctx.account.isActive !== true) out.push('account_disabled');
   if (master && !cleanText(p?.noonaEmployeeId)) out.push('not_in_calendar');
   if (master && !ctx.servicesCount) out.push('no_services');
   if (master && !ctx.hasSchedule) out.push('no_schedule');
-  if (master ? p?.ratePercent == null : !rateOn(p?.rates, ctx.today)) out.push('no_rate');
+  if (!rateReady(p, ctx.today)) out.push('no_rate');
   return out;
 };
 
@@ -719,7 +747,7 @@ const docValid = (d: any, today: string) => !d?.validUntil || ymdOf(d.validUntil
  */
 export const buildChecklist = (p: any, ctx: any) => {
   if (isLeft(p)) return null;
-  const master = p?.position === 'master';
+  const master = worksAsMaster(p);
   const today = ctx.today;
   const o = ctx.oficial || {};
   const docs = ctx.documents || [];
@@ -735,7 +763,7 @@ export const buildChecklist = (p: any, ctx: any) => {
     health: has('health'),
     contract: Boolean(current),
     contract_doc: has(current?.type === 'ico' ? 'license' : 'contract'),
-    rate: master ? p?.ratePercent != null : Boolean(rateOn(p?.rates, today)),
+    rate: rateReady(p, today),
     calendar: Boolean(cleanText(p?.noonaEmployeeId)),
     services: Boolean(ctx.servicesCount),
     schedule: Boolean(ctx.hasSchedule),
@@ -856,9 +884,11 @@ const FIELD_CS = {
   dualRole: 'souběh mistr + administrátor',
   dualRoleUntil: 'souběh do',
   managerSince: 'vedoucí od',
+  alsoMaster: 'pracuje i jako mistrová',
 };
 const showValue = (key: string, v: any) => {
   if (key === 'dualRole') return v === 'yes' ? 'ano' : 'ne';
+  if (key === 'alsoMaster') return v === true ? 'ano' : 'ne';
   if (v == null || v === '') return '—';
   if (key === 'position') return POSITIONS[v] || v;
   if (key === 'hiredAt' || key === 'leftAt') return fmtDay(v);
@@ -1127,6 +1157,7 @@ const PRAGUE_DAY = new Intl.DateTimeFormat('en-CA', {
 const CARD_FIELDS = [
   'name',
   'position',
+  'alsoMaster',
   'isActive',
   'tier',
   'ratePercent',
@@ -1233,7 +1264,7 @@ export default {
   async _nextCalendarOrder() {
     const last = await strapi.documents(PERSONAL_UID).findMany({
       status: 'draft',
-      filters: { position: { $eq: 'master' } },
+      filters: { ...WORKS_AS_MASTER_FILTER },
       fields: ['calendarOrder'],
       sort: ['calendarOrder:desc'],
       limit: 1,
@@ -1327,7 +1358,7 @@ export default {
     const owners = this._ownerNames(accounts);
     const visible = docs.filter((d) => !hiddenFromSession(d.name, owners, session?.role));
     const [scheduled, docKinds, items] = await Promise.all([
-      this._hasSchedule(visible.filter((d) => d.position === 'master').map((d) => d.documentId)),
+      this._hasSchedule(visible.filter(worksAsMaster).map((d) => d.documentId)),
       this._docKinds(),
       this._checklistItems(),
     ]);
@@ -1349,6 +1380,7 @@ export default {
         documentId: d.documentId,
         name: d.name,
         position: d.position,
+        alsoMaster: d.alsoMaster === true,
         tier: d.tier || 'senior',
         isActive: d.isActive !== false,
         left: isLeft(d),
@@ -1469,7 +1501,7 @@ export default {
     const documentId = doc.documentId;
     const [pub, scheduled, timeOffs, notes, docsCount, history, docKinds, items] = await Promise.all([
       strapi.documents(PERSONAL_UID).findOne({ documentId, status: 'published', fields: ['name'] }),
-      doc.position === 'master' ? this._hasSchedule([documentId]) : Promise.resolve(new Set()),
+      worksAsMaster(doc) ? this._hasSchedule([documentId]) : Promise.resolve(new Set()),
       strapi.documents(TIME_OFF_UID).findMany({
         filters: { personal: { documentId: { $eq: documentId } }, endDate: { $gte: today } },
         fields: ['type', 'startDate', 'endDate'],
@@ -1502,6 +1534,7 @@ export default {
       documentId,
       name: doc.name,
       position: doc.position,
+      alsoMaster: doc.alsoMaster === true,
       tier: doc.tier || 'senior',
       isActive: doc.isActive !== false,
       left: isLeft(doc),
@@ -1610,7 +1643,7 @@ export default {
     let result;
     if (section === 'basic') result = normalizeBasic(body?.data, doc, today);
     else if (section === 'booking') {
-      if (doc.position !== 'master') throw new StaffError(409, 'not_master', 'Приоритет записи — только у мастеров');
+      if (!worksAsMaster(doc)) throw new StaffError(409, 'not_master', 'Приоритет записи — только у мастеров');
       result = normalizeBooking(body?.data, doc);
     } else result = normalizePay(body?.data, doc);
     if (!result.changes.length) return { ...(await this.card({ session, id: documentId, now })), unchanged: true };
@@ -1624,22 +1657,25 @@ export default {
         throw new StaffError(409, 'self_position', 'Свою должность менять нельзя — вместе с ней сменится ваша роль входа');
       }
       if (account?.role === 'owner') throw new StaffError(409, 'owner_account', 'Учётка владельца из карточки не меняется');
-      if (posChange.from === 'master') {
-        const rows = await this._futureBookings(doc, now);
-        if (rows.length) {
-          throw new StaffError(
-            409,
-            'future_bookings',
-            `У мастера ${rows.length} будущих броней — сначала перенесите их на других мастеров`,
-            { bookings: rows }
-          );
-        }
+    }
+    // Перестаёт / начинает работать как мастер (должность или флаг alsoMaster, s249)
+    const wasMaster = worksAsMaster(doc);
+    const willMaster = worksAsMaster({ ...doc, ...data });
+    if (wasMaster && !willMaster) {
+      const rows = await this._futureBookings(doc, now);
+      if (rows.length) {
+        throw new StaffError(
+          409,
+          'future_bookings',
+          `У мастера ${rows.length} будущих броней — сначала перенесите их на других мастеров`,
+          { bookings: rows }
+        );
       }
-      if (posChange.to === 'master') {
-        // колонка календаря: ключ — documentId карточки (§5а.3), место — в конце
-        if (!cleanText(doc.noonaEmployeeId)) data.noonaEmployeeId = documentId;
-        if (!(Number(doc.calendarOrder) > 0)) data.calendarOrder = await this._nextCalendarOrder();
-      }
+    }
+    if (!wasMaster && willMaster) {
+      // колонка календаря: ключ — documentId карточки (§5а.3), место — в конце
+      if (!cleanText(doc.noonaEmployeeId)) data.noonaEmployeeId = documentId;
+      if (!(Number(doc.calendarOrder) > 0)) data.calendarOrder = await this._nextCalendarOrder();
     }
 
     await this._write(documentId, data);
@@ -1803,7 +1839,7 @@ export default {
     const today = this._today(now);
     const doc = await findSessionPersonal(strapi, session, {
       status: 'draft',
-      fields: ['name', 'position', 'tier', 'hiredAt', 'ratePercent', 'isActive'],
+      fields: ['name', 'position', 'alsoMaster', 'tier', 'hiredAt', 'ratePercent', 'isActive'],
       populate: { photo: { fields: ['url', 'formats'] }, rates: true, contracts: true, oficial: true },
     });
     if (!doc) throw new StaffError(404, 'no_card', 'Карточка сотрудника не найдена — скажите руководству');
@@ -1832,10 +1868,15 @@ export default {
         return { kind: d.kind || 'other', title: d.title || '', validUntil, ...docState(validUntil, today) };
       }),
       contracts: { list: contracts, current: current ? noId(current) : null },
-      pay:
-        doc.position === 'master'
-          ? { ratePercent: doc.ratePercent ?? null, currentRate: null }
-          : { ratePercent: null, currentRate: rate ? { typeWork: rate.typeWork, rate: rate.rate, hourlyRate: rate.hourlyRate, from: rate.from } : null },
+      alsoMaster: doc.alsoMaster === true,
+      // управляющая с alsoMaster (s249) видит и оклад, и долю от услуг
+      pay: {
+        ratePercent: worksAsMaster(doc) ? doc.ratePercent ?? null : null,
+        currentRate:
+          doc.position !== 'master' && rate
+            ? { typeWork: rate.typeWork, rate: rate.rate, hourlyRate: rate.hourlyRate, from: rate.from }
+            : null,
+      },
     };
   },
 

@@ -33,6 +33,7 @@ for (const [from, to] of [
   ["from '../../../utils/admin-account'", `from '${INVALIDATE_URL}'`],
   ["from './slots-core'", `from '${CORE_URL}'`],
   ["from '../../../utils/staff-identity'", `from '${dataUrl(toJs('src/utils/staff-identity.ts'))}'`],
+  ["from '../../../utils/works-as-master'", `from '${dataUrl(toJs('src/utils/works-as-master.ts'))}'`],
   ["from 'crypto'", "from 'node:crypto'"],
   // s237: файлы — общие помощники закрытого хранилища
   ["from '../../../utils/private-files'", `from '${dataUrl(toJs('src/utils/private-files.ts'))}'`],
@@ -1695,4 +1696,97 @@ test('чек-лист карточки: документы и договор з�
   const created = await svc.create({ session: MANAGER, body: { name: 'Nová Mistrová', position: 'master', account: false }, now: NOW });
   assert.ok(created.checklist.open > 0);
   assert.ok(created.checklist.items.some((i) => i.key === 'services' && !i.done));
+});
+
+// ── s249: управляющая работает и мастером (флаг alsoMaster) ─────────────────
+test('s249 normalizeBasic: alsoMaster — только у управляющей, смена должности снимает флаг', () => {
+  const mgr = { position: 'manager', alsoMaster: null };
+  const on = S.normalizeBasic({ alsoMaster: true }, mgr, '2026-10-12');
+  assert.deepEqual(on.patch, { alsoMaster: true });
+  assert.deepEqual(on.changes, [{ key: 'alsoMaster', from: false, to: true }]);
+  assert.deepEqual(S.normalizeBasic({ alsoMaster: false }, mgr, '2026-10-12').changes, [], 'NULL = false');
+  assert.throws(() => S.normalizeBasic({ alsoMaster: 'ano' }, mgr, '2026-10-12'), (e) => e.code === 'bad_field');
+  assert.throws(() => S.normalizeBasic({ alsoMaster: true }, { position: 'administrator' }, '2026-10-12'), (e) => e.code === 'also_master_manager_only' && e.status === 409);
+  assert.throws(() => S.normalizeBasic({ alsoMaster: true }, { position: 'master' }, '2026-10-12'), (e) => e.code === 'also_master_manager_only');
+  assert.throws(() => S.normalizeBasic({ position: 'administrator', alsoMaster: true }, mgr, '2026-10-12'), (e) => e.code === 'also_master_manager_only');
+  assert.deepEqual(S.normalizeBasic({ position: 'manager', alsoMaster: true }, { position: 'administrator' }, '2026-10-12').patch, {
+    position: 'manager',
+    alsoMaster: true,
+  });
+  const off = S.normalizeBasic({ position: 'administrator' }, { position: 'manager', alsoMaster: true }, '2026-10-12');
+  assert.equal(off.patch.alsoMaster, false, 'флаг у другой должности не остаётся');
+  assert.ok(off.changes.some((c) => c.key === 'alsoMaster' && c.from === true && c.to === false));
+});
+
+test('s249 rateReady / missingFlags: управляющей-мастеру нужны и оклад, и доля', () => {
+  const today = '2026-10-12';
+  const rates = [{ typeWork: 'hpp', rate: 19011, from: '2026-10-01', to: null }];
+  assert.equal(S.rateReady({ position: 'manager', rates }, today), true);
+  assert.equal(S.rateReady({ position: 'manager', alsoMaster: true, rates }, today), false, 'без доли');
+  assert.equal(S.rateReady({ position: 'manager', alsoMaster: true, rates, ratePercent: 40 }, today), true);
+  assert.equal(S.rateReady({ position: 'manager', alsoMaster: true, rates: [], ratePercent: 40 }, today), false, 'без оклада');
+  assert.equal(S.rateReady({ position: 'master', ratePercent: 40 }, today), true);
+  assert.equal(S.rateReady({ position: 'master', ratePercent: null, rates }, today), false);
+  const ctx = { account: { isActive: true }, servicesCount: 0, hasSchedule: false, today };
+  assert.deepEqual(S.missingFlags({ position: 'manager', rates, noonaEmployeeId: 'x' }, ctx), [], 'просто управляющая — без мастерских бейджей');
+  assert.deepEqual(S.missingFlags({ position: 'manager', alsoMaster: true, rates, ratePercent: 40, noonaEmployeeId: 'x' }, ctx), [
+    'no_services',
+    'no_schedule',
+  ]);
+});
+
+test('s249 карточка: флаг включается и выключается, роль входа не меняется, брони держат выключение', async () => {
+  const st = makeStrapi();
+  const before = await svc.card({ session: OWNER, id: P.mariia, now: NOW });
+  assert.equal(before.alsoMaster, false);
+  await expectErr(
+    () => svc.patch({ session: OWNER, id: P.mariia, body: { section: 'booking', base: st.draft(P.mariia).updatedAt, data: { bookingPriority: 2 } }, now: NOW }),
+    409,
+    'not_master'
+  );
+  const on = await svc.patch({ session: OWNER, id: P.mariia, body: { section: 'basic', base: st.draft(P.mariia).updatedAt, data: { alsoMaster: true } }, now: NOW });
+  assert.equal(on.alsoMaster, true);
+  assert.equal(on.position, 'manager');
+  assert.equal(st.draft(P.mariia).alsoMaster, true);
+  assert.equal(st.pub(P.mariia).alsoMaster, true, 'опубликовано — сайт и календарь читают published');
+  assert.equal(on.booking.noonaEmployeeId, 'noona-mar', 'прежний ключ колонки сохранён — старые брони снова в её колонке');
+  assert.equal(st.accounts.find((a) => a.id === 2).role, 'manager');
+  assert.ok(on.flags.includes('no_rate') && on.flags.includes('no_services'), on.flags.join(','));
+  assert.match(st.logs.at(-1).summary, /pracuje i jako mistrová: ne → ano/);
+  const list = await svc.list({ session: OWNER, now: NOW });
+  assert.equal(list.rows.find((r) => r.documentId === P.mariia).alsoMaster, true);
+  // теперь как у мастера: приоритет записи
+  const prio = await svc.patch({ session: OWNER, id: P.mariia, body: { section: 'booking', base: st.draft(P.mariia).updatedAt, data: { bookingPriority: 2 } }, now: NOW });
+  assert.equal(prio.booking.bookingPriority, 2);
+  // будущая бронь не даёт выключить
+  st.store['api::booking.booking'].push({
+    documentId: 'bm', status: 'active', date: '2026-10-14', startsAt: '2026-10-14T08:00:00.000Z', clientNameRaw: 'Eva', employee: { documentId: P.mariia },
+  });
+  await assert.rejects(
+    () => svc.patch({ session: OWNER, id: P.mariia, body: { section: 'basic', base: st.draft(P.mariia).updatedAt, data: { alsoMaster: false } }, now: NOW }),
+    (e) => e.code === 'future_bookings' && e.details.bookings[0].documentId === 'bm'
+  );
+  assert.equal(st.pub(P.mariia).alsoMaster, true);
+  st.store['api::booking.booking'].length = 0;
+  const off = await svc.patch({ session: OWNER, id: P.mariia, body: { section: 'basic', base: st.draft(P.mariia).updatedAt, data: { alsoMaster: false } }, now: NOW });
+  assert.equal(off.alsoMaster, false);
+  assert.equal(st.pub(P.mariia).alsoMaster, false);
+});
+
+test('s249 карточка: администратору флаг не поставить; новая колонка выдаётся, если ключа не было', async () => {
+  const st = makeStrapi();
+  await expectErr(
+    () => svc.patch({ session: OWNER, id: P.olga, body: { section: 'basic', base: st.draft(P.olga).updatedAt, data: { alsoMaster: true } }, now: NOW }),
+    409,
+    'also_master_manager_only'
+  );
+  // администратор → управляющая-мастер одним действием: ключ колонки = documentId
+  const r = await svc.patch({
+    session: OWNER,
+    id: P.newbie,
+    body: { section: 'basic', base: st.draft(P.newbie).updatedAt, data: { position: 'manager', alsoMaster: true } },
+    now: NOW,
+  });
+  assert.equal(r.booking.noonaEmployeeId, P.newbie);
+  assert.equal(r.booking.calendarOrder, 6);
 });

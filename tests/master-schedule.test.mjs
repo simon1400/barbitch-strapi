@@ -22,7 +22,12 @@ const transpile = (file) =>
   }).outputText;
 const dataUrl = (js) => 'data:text/javascript;base64,' + Buffer.from(js, 'utf8').toString('base64');
 const coreUrl = dataUrl(transpile('slots-core.ts'));
-const svcJs = transpile('master-schedule.ts').split("from './slots-core'").join(`from '${coreUrl}'`);
+const wamUrl = dataUrl(transpile('../../../utils/works-as-master.ts'));
+const svcJs = transpile('master-schedule.ts')
+  .split("from './slots-core'")
+  .join(`from '${coreUrl}'`)
+  .split("from '../../../utils/works-as-master'")
+  .join(`from '${wamUrl}'`);
 assert.ok(svcJs.includes(coreUrl), 'импорт slots-core подменён');
 const M = await import(dataUrl(svcJs));
 const svc = M.default;
@@ -533,4 +538,13 @@ test('предпросмотр дня: брони, которые уже нач�
   });
   const r = await svc.preview({ personal: VERONIKA, body: { changes: [{ date: '2026-09-25', state: 'off' }] }, now: NOW });
   assert.deepEqual(r.conflicts.map((c) => [c.client, c.time]), [['Odpoledne', '16:00']]);
+});
+
+test('s249 isPlannedMaster: управляющая с alsoMaster — с планом, без флага — нет', () => {
+  const base = { name: 'Mariia', isActive: true, noonaEmployeeId: 'N1' };
+  assert.equal(M.isPlannedMaster({ ...base, position: 'master' }), true);
+  assert.equal(M.isPlannedMaster({ ...base, position: 'manager' }), false);
+  assert.equal(M.isPlannedMaster({ ...base, position: 'manager', alsoMaster: true }), true);
+  assert.equal(M.isPlannedMaster({ ...base, position: 'manager', alsoMaster: true, isActive: false }), false);
+  assert.equal(M.isPlannedMaster({ ...base, position: 'administrator', alsoMaster: true }), false);
 });

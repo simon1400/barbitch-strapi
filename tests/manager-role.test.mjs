@@ -251,12 +251,15 @@ test('сервисы: блоки и дозаписи считают manager ру
   assert.ok(up.includes("const isOwner = session?.role === 'owner' || session?.role === 'manager';"), 'upsell mine/byAdmin');
 });
 
-test('сайт и движок: мастера только position=master', () => {
+test('сайт и движок: мастера — position=master или управляющая с alsoMaster (s249)', () => {
   const be = src('src/api/booking-engine/services/booking-engine.ts');
-  const n = be.split("filters: { isActive: true, position: 'master', services: { documentId:").length - 1;
+  const n = be.split("filters: { isActive: true, ...WORKS_AS_MASTER_FILTER, services: { documentId:").length - 1;
   assert.equal(n, 2, 'publicServiceEmployees + listEmployeesForService');
+  assert.ok(!be.includes("position: 'master'"), 'в движке не осталось прямого сравнения с master');
   for (const f of ['rebook.ts', 'upsell.ts']) {
-    assert.ok(src(`src/api/booking-engine/services/${f}`).includes("filters: { isActive: true, position: 'master' },"), f);
+    const code = src(`src/api/booking-engine/services/${f}`);
+    assert.ok(code.includes('filters: { isActive: true, ...WORKS_AS_MASTER_FILTER },'), f);
+    assert.ok(!code.includes("position: 'master'"), f);
   }
 });
 

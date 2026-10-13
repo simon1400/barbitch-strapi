@@ -2213,6 +2213,13 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
         };
       }> &
       Schema.Attribute.DefaultTo<0>;
+    alsoMaster: Schema.Attribute.Boolean &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<false>;
     contracts: Schema.Attribute.Component<'items.contracts', true> &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
