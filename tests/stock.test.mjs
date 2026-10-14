@@ -124,10 +124,14 @@ test('количество текстом и из формы', () => {
   assert.equal(S.qtyFromInput({ packs: '3' }, item), 300);
   assert.equal(S.qtyFromInput({ units: '0' }, item), 0);
   assert.throws(() => S.qtyFromInput({}, item), (e) => e.code === 'qty_required');
-  assert.throws(() => S.qtyFromInput({ units: 1.5 }, item), (e) => e.code === 'bad_qty', 'штуки — целые');
-  assert.throws(() => S.qtyFromInput({ packs: -1 }, item), (e) => e.code === 'bad_qty');
-  assert.throws(() => S.qtyFromInput({ packs: 1.5 }, item), (e) => e.code === 'bad_qty', 'упаковки — целые');
+  assert.throws(() => S.qtyFromInput({ units: 1.5 }, item), (e) => e.code === 'bad_units', 'штуки — целые');
+  assert.throws(() => S.qtyFromInput({ packs: -1 }, item), (e) => e.code === 'bad_packs');
+  assert.throws(() => S.qtyFromInput({ packs: 1.5 }, item), (e) => e.code === 'bad_packs', 'упаковки штучных — целые');
   assert.equal(S.qtyFromInput({ units: '12,5' }, { packSize: 1, unit: 'ml' }), 12.5);
+  // s258: у ml/g упаковки дробные — «0,2 канистры по 5000 ml» = 1000 ml; складывается с «navíc»
+  assert.equal(S.qtyFromInput({ packs: '0,2' }, { packSize: 5000, unit: 'ml' }), 1000);
+  assert.equal(S.qtyFromInput({ packs: '1.5', units: '250' }, { packSize: 500, unit: 'g' }), 1000);
+  assert.throws(() => S.qtyFromInput({ packs: '-0.5' }, { packSize: 5000, unit: 'ml' }), (e) => e.code === 'bad_packs');
 });
 
 test('статус, «докупать до», сколько заказать', () => {
@@ -144,6 +148,18 @@ test('статус, «докупать до», сколько заказать',
   assert.equal(S.effectiveTarget({ min: 0, target: 0 }), 1);
   assert.equal(S.effectiveTarget({ min: 3, target: 2 }), 6, 'target ≤ min не действует');
   assert.equal(S.suggestedPacks({ min: 0, target: 0, qty: 0, packSize: 1 }), 1, 'без минимума — došlo → одна');
+  // s258: канистра 5 l — минимум 0,2 канистры (1000 ml); у штучных дробный минимум режется до целого
+  const can = (qty, extra = {}) => ({ packSize: 5000, unit: 'ml', min: 0.2, target: 0, qty, ...extra });
+  assert.equal(S.minBase(can(0)), 1000);
+  assert.deepEqual([S.statusOf(can(1000)), S.statusOf(can(1000.5)), S.statusOf(can(4000))], ['low', 'ok', 'ok']);
+  assert.equal(S.effectiveTarget(can(0)), 1.2, 'не задан — минимум + 1 (больше двойного)');
+  assert.equal(S.suggestedPacks(can(500)), 2, '1,2 − 0,1 → 2 целых канистры');
+  assert.equal(S.suggestedPacks(can(500, { target: 1 })), 1);
+  assert.equal(S.minBase({ packSize: 100, unit: 'ks', min: 0.8 }), 0, 'штучные — целые упаковки');
+  assert.equal(S.normalizeItemInput({ ...glovesS, unit: 'ml', packSize: 5000, min: '0,2', target: '' }).min, 0.2);
+  assert.throws(() => S.normalizeItemInput({ ...glovesS, min: '0,2' }), (e) => e.code === 'bad_min', 'ks — целое');
+  assert.throws(() => S.normalizeItemInput({ min: '0,5' }, { partial: true, current: { ...glovesS } }), (e) => e.code === 'bad_min', 'правка: единица из текущей');
+  assert.equal(S.normalizeItemInput({ min: '0.5' }, { partial: true, current: { ...glovesS, unit: 'g' } }).min, 0.5);
 });
 
 test('движения', () => {

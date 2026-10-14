@@ -82,3 +82,53 @@ test('ручка под requireManagement; откат и визиты пишут
   assert.ok(logFn.includes("entityType: 'visit'") && logFn.includes('actorName: session.username'), 'entityType visit, автор — сессия');
   assert.doesNotMatch(logFn, /staffSalaries|salonSalaries|tip|sale/);
 });
+
+test('s258 результат смены: тело — день в окне и конечные числа; дописывается в свежую запись закрытия дня', async () => {
+  const today = '2026-10-14';
+  assert.deepEqual(L.normalizeShiftResult({ date: '2026-10-13', before: '1000.005', after: -250 }, today), { date: '2026-10-13', before: 1000.01, after: -250 });
+  expectErr(() => L.normalizeShiftResult({ date: '2026-10-15', before: 1, after: 2 }, today), 'bad_date');
+  expectErr(() => L.normalizeShiftResult({ date: '2026-10-13', before: 'x', after: 2 }, today), 'bad_result');
+  expectErr(() => L.normalizeShiftResult({ date: '2026-10-13', before: 1 }, today), 'bad_result');
+  assert.deepEqual(L.withShiftResult({ datum: '13.10.2026', zveřejněno: 9 }, { before: 1000, after: 4250.5 }), {
+    datum: '13.10.2026',
+    zveřejněno: 9,
+    'výsledek směny': 3250.5,
+    'výsledek měsíce před': 1000,
+    'výsledek měsíce po': 4250.5,
+    resultBefore: 1000,
+    resultAfter: 4250.5,
+  });
+  assert.equal(L.withShiftResult('{broken', { before: 0, after: 1 }).resultAfter, 1);
+
+  const calls = [];
+  let rows = [{ id: 7, details: { datum: '13.10.2026', zveřejněno: 9 } }];
+  globalThis.strapi = {
+    db: {
+      query: (uid) => ({
+        async findMany(q) {
+          calls.push(['findMany', uid, q.where, q.orderBy, q.limit]);
+          return rows;
+        },
+        async update(q) {
+          calls.push(['update', uid, q.where, q.data]);
+        },
+      }),
+    },
+  };
+  const svc = L.default;
+  const r = await svc.logResult({ session: { username: 'Dima' }, body: { date: '2026-10-13', before: 1000, after: 4250.5 }, now: new Date('2026-10-13T20:00:00Z') });
+  assert.deepEqual(r, { ok: true, updated: true });
+  assert.deepEqual(calls[0], [
+    'findMany',
+    'api::calendar-log.calendar-log',
+    { entityType: 'shift_close', action: 'shift_close', entityDocId: '2026-10-13' },
+    { createdAt: 'desc' },
+    1,
+  ]);
+  assert.deepEqual(calls[1], ['update', 'api::calendar-log.calendar-log', { id: 7 }, { details: L.withShiftResult(rows[0].details, { before: 1000, after: 4250.5 }) }]);
+  // записи закрытия нет — ничего не пишем
+  rows = [];
+  calls.length = 0;
+  assert.deepEqual(await svc.logResult({ session: { username: 'Dima' }, body: { date: '2026-10-13', before: 1, after: 2 }, now: new Date('2026-10-13T20:00:00Z') }), { ok: true, updated: false });
+  assert.equal(calls.filter((c) => c[0] === 'update').length, 0);
+});

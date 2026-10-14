@@ -901,6 +901,20 @@ export default {
     await handle(ctx, () => shiftLogSvc().logClose({ session, body: ctx.request.body }));
   },
 
+  // POST /api/engine/admin/shift-close/result {date, before, after} — результат смены в запись журнала (s258)
+  async adminShiftCloseResult(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => shiftLogSvc().logResult({ session, body: ctx.request.body }));
+  },
+
+  // GET /api/engine/admin/overview — касса и последняя закрытая смена для главной (s258), только владелец
+  async adminOwnerOverview(ctx) {
+    const session = requireOwner(ctx);
+    if (!session) return;
+    await handle(ctx, () => strapi.service('api::booking-engine.owner-overview').overview());
+  },
+
   // Поручения владельца (s240): создаёт, правит, принимает — владелец; исполнитель (manager)
   // видит свои, пишет ход работы и «hotovo». Роль исполнителя проверяет сервис (403/404).
   // s246: задачи ставит и управляющая (себе/владельцу) — create/update тоже requireStaff,
@@ -940,6 +954,13 @@ export default {
     const session = requireStaff(ctx);
     if (!session) return;
     await handle(ctx, () => tasksSvc().act({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/tasks/:id/events/remove {at} — автор удаляет свой комментарий / ход работы (s258)
+  async adminTaskEventRemove(ctx) {
+    const session = requireStaff(ctx);
+    if (!session) return;
+    await handle(ctx, () => tasksSvc().removeEvent({ session, id: ctx.params.id, body: ctx.request.body }));
   },
 
   // POST /api/engine/admin/tasks/:id/files — multipart: files (один файл)

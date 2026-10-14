@@ -55,6 +55,9 @@ export class TaskError extends Error {
 export const TASK_UID = 'api::owner-task.owner-task';
 export const TASK_FILE_UID = 'api::owner-task-file.owner-task-file';
 const PERSONAL_UID = 'api::personal.personal';
+const LOG_UID = 'api::calendar-log.calendar-log';
+/** Журнал пишется сразу после записи события — ищем его в этом окне от `at`. */
+const LOG_MATCH_MS = 30_000;
 
 /** Кому дают поручения — те же роли, что пишут výkaz. */
 export const TASK_ROLES = ['manager'];
@@ -226,6 +229,24 @@ export const applyTaskAction = (
     }
   }
   return { data, event };
+};
+
+/**
+ * s258 (просьба владельца): свою запись с текстом — комментарий или ход работы — автор
+ * удаляет бесследно: запись уходит из ленты, событие «удалено» не пишется.
+ * Запись ищется по времени `at` + автору (`by` и роль) — своего id у записей ленты нет.
+ */
+export const REMOVABLE_EVENTS = ['comment', 'progress'];
+
+export const removeTaskEvent = (task: any, { at, role, by }: { at: unknown; role: string; by: string }) => {
+  const events = Array.isArray(task?.events) ? task.events : [];
+  const idx = events.findIndex((e) => e?.at === at && REMOVABLE_EVENTS.includes(e?.kind) && e?.by === by && e?.role === role);
+  if (idx < 0) {
+    const other = events.some((e) => e?.at === at && REMOVABLE_EVENTS.includes(e?.kind));
+    if (other) throw new TaskError(403, 'not_your_event', 'Smazat můžete jen svůj záznam');
+    throw new TaskError(404, 'event_not_found', 'Záznam nenalezen — možná už je smazaný');
+  }
+  return { events: events.filter((_, i) => i !== idx), removed: events[idx] };
 };
 
 /** Поручение просрочено: в работе и срок прошёл. */
@@ -565,6 +586,46 @@ export default {
     this._log(`task_${action}`, session, saved, `${head}: ${cut(saved.title, 120)}${reportDate ? ` (výkaz ${fmtDay(reportDate)})` : ''}`);
     this._notify(saved, { kind: action, role: who.role, text: event.text });
     return { task: await this._row(saved, today) };
+  },
+
+  /**
+   * POST /tasks/:id/events/remove {at} — s258: автор удаляет свой комментарий / ход работы.
+   * Бесследно: ни события в ленте, ни записи журнала, ни push; запись журнала о самом
+   * комментарии тоже стирается (иначе она всплывёт в «Systém zaznamenal» výkazu).
+   * Уже отправленный push не отозвать.
+   */
+  async removeEvent({ session, id, body, now = new Date() }: { session: any; id: unknown; body: any; now?: Date }) {
+    const who = await this._who(session);
+    const today = this._today(now);
+    const existing = await this._find(id, who);
+    const by = session?.username || '';
+    const { events, removed } = removeTaskEvent(existing, { at: body?.at, role: who.role, by });
+    const saved = await this._write(existing, { events }, now);
+    await this._dropEventLog(existing.documentId, removed);
+    return { task: await this._row(saved, today) };
+  },
+
+  /** Запись журнала о событии ленты: то же действие, задача и автор, записана сразу после события. */
+  async _dropEventLog(taskDocId: string, ev: any) {
+    try {
+      const from = Date.parse(ev?.at);
+      if (!Number.isFinite(from)) return;
+      const rows = await strapi.db.query(LOG_UID).findMany({
+        where: {
+          action: `task_${ev.kind}`,
+          entityType: 'task',
+          entityDocId: taskDocId,
+          actorName: ev.by,
+          createdAt: { $gte: new Date(from), $lte: new Date(from + LOG_MATCH_MS) },
+        },
+        select: ['id'],
+        orderBy: { createdAt: 'asc' },
+        limit: 1,
+      });
+      if (rows?.[0]) await strapi.db.query(LOG_UID).delete({ where: { id: rows[0].id } });
+    } catch (e) {
+      strapi.log.error(`owner-tasks: журнал удалённой записи ${taskDocId} не стёрт: ${e?.message || e}`);
+    }
   },
 
   /**

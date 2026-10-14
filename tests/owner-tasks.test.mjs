@@ -13,6 +13,8 @@
 //     поручения владельца управляющей.
 //   - s247: создание и каждое действие отдают событие в manager-notify (кому слать — решает он);
 //     сбой push не ломает поручение.
+//   - s258: автор удаляет свой комментарий / ход работы бесследно — без события, журнала и push,
+//     запись журнала о комментарии стирается; чужое — 403, нет такой — 404.
 // Запуск: cd strapi && node --test tests/owner-tasks.test.mjs
 
 import { test } from 'node:test';
@@ -82,6 +84,22 @@ function fresh() {
     [FILE]: [],
   };
   const logs = [];
+  // s258: журнал как таблица — найти запись удалённого события и стереть её
+  const logQuery = {
+    async findMany({ where, limit }) {
+      await tick();
+      const { createdAt: c, ...eq } = where;
+      return logs
+        .filter((l) => Object.entries(eq).every(([k, v]) => l[k] === v))
+        .filter((l) => Date.parse(l.createdAt) >= c.$gte.getTime() && Date.parse(l.createdAt) <= c.$lte.getTime())
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+        .slice(0, limit);
+    },
+    async delete({ where }) {
+      const i = logs.findIndex((l) => l.id === where.id);
+      if (i >= 0) logs.splice(i, 1);
+    },
+  };
   const withPersonal = (r) => ({ ...clone(r), personal: r.personalDocId ? { documentId: r.personalDocId, name: db[PERSONAL].find((p) => p.documentId === r.personalDocId)?.name } : null });
   globalThis.strapi = {
     rows: db,
@@ -109,7 +127,7 @@ function fresh() {
       },
     }),
     db: {
-      query: (uid) => ({
+      query: (uid) => uid === 'api::calendar-log.calendar-log' ? logQuery : ({
         async updateMany({ where, data }) {
           await tick();
           const rows = db[uid].filter((r) => matches(r, where));
@@ -132,7 +150,7 @@ function fresh() {
         };
       }
       assert.equal(uid, 'api::calendar-log.calendar-log');
-      return { write: async (e) => void logs.push(e) };
+      return { write: async (e) => void logs.push({ id: logs.length + 1, createdAt: globalThis.strapi.logAt || new Date().toISOString(), ...e }) };
     },
     log: { error() {}, warn() {} },
   };
@@ -352,6 +370,7 @@ test('ручки и коллекции: гейты, REST-роутов нет', (
     adminTaskCreate: ['POST', '/engine/admin/tasks', 'requireStaff'],
     adminTaskUpdate: ['PATCH', '/engine/admin/tasks/:id', 'requireStaff'],
     adminTaskAction: ['POST', '/engine/admin/tasks/:id/actions', 'requireStaff'],
+    adminTaskEventRemove: ['POST', '/engine/admin/tasks/:id/events/remove', 'requireStaff'],
     adminTaskFileUpload: ['POST', '/engine/admin/tasks/:id/files', 'requireStaff'],
     adminTaskFileDownload: ['GET', '/engine/admin/tasks/:id/files/:fid', 'requireStaff'],
     adminTaskFileDelete: ['DELETE', '/engine/admin/tasks/:id/files/:fid', 'requireStaff'],
@@ -539,4 +558,58 @@ test('s247 push: создание и действия отдают событи�
     return orig(uid)
   }
   assert.equal((await svc.create({ session: owner, body: { title: 'Bez služby', personal: MARIIA }, now })).task.status, 'open')
+})
+
+test('s258 удаление своей записи: бесследно — без события, журнала и push; чужое — 403', async () => {
+  const s = fresh()
+  const t = (await svc.create({ session: owner, body: { title: 'Nová lashmakerka', personal: MARIIA }, now })).task
+  const at1 = new Date('2026-10-02T10:05:00Z')
+  const at2 = new Date('2026-10-02T10:05:10Z')
+  s.logAt = '2026-10-02T10:05:00.200Z'
+  await svc.act({ session: owner, id: t.documentId, body: { action: 'comment', text: 'Podepsala smlouvu?' }, now: at1 })
+  s.logAt = '2026-10-02T10:05:10.200Z'
+  await svc.act({ session: manager, id: t.documentId, body: { action: 'progress', text: 'Zítra podepíšeme' }, now: at2 })
+  await tick()
+  await tick()
+  const logsBefore = s.logs.length
+  const pushesBefore = s.pushes.length
+  assert.deepEqual(s.logs.map((l) => l.action), ['task_create', 'task_comment', 'task_progress'])
+
+  // чужую — нельзя (и владельцу), не свою роль — тоже
+  await expectErr(svc.removeEvent({ session: owner, id: t.documentId, body: { at: at2.toISOString() }, now }), 403, 'not_your_event')
+  await expectErr(svc.removeEvent({ session: manager, id: t.documentId, body: { at: at1.toISOString() }, now }), 403, 'not_your_event')
+  // «zadáno» и прочие события — не удаляются; несуществующее — 404
+  const createdAt = s.rows[TASK][0].events[0].at
+  await expectErr(svc.removeEvent({ session: owner, id: t.documentId, body: { at: createdAt }, now }), 404, 'event_not_found')
+  await expectErr(svc.removeEvent({ session: owner, id: t.documentId, body: { at: 'x' }, now }), 404, 'event_not_found')
+  await expectErr(svc.removeEvent({ session: admin, id: t.documentId, body: { at: at1.toISOString() }, now }), 403)
+  await expectErr(svc.removeEvent({ session: anna, id: t.documentId, body: { at: at2.toISOString() }, now }), 404, 'task_not_found')
+
+  // владелец — свой комментарий: ушёл из ленты, событие «удалено» не появилось, журнал о нём стёрт
+  const r1 = await svc.removeEvent({ session: owner, id: t.documentId, body: { at: at1.toISOString() }, now })
+  assert.deepEqual(r1.task.events.map((e) => e.kind), ['created', 'progress'])
+  await tick()
+  await tick()
+  assert.deepEqual(s.logs.map((l) => l.action), ['task_create', 'task_progress'])
+  assert.equal(s.logs.length, logsBefore - 1, 'новых записей журнала нет')
+  assert.equal(s.pushes.length, pushesBefore, 'push нет')
+  // повторно — уже нет
+  await expectErr(svc.removeEvent({ session: owner, id: t.documentId, body: { at: at1.toISOString() }, now }), 404, 'event_not_found')
+
+  // управляющая — свой průběh, в закрытой задаче тоже
+  s.rows[TASK][0].status = 'accepted'
+  const r2 = await svc.removeEvent({ session: manager, id: t.documentId, body: { at: at2.toISOString() }, now })
+  assert.deepEqual(r2.task.events.map((e) => e.kind), ['created'])
+  assert.deepEqual(s.logs.map((l) => l.action), ['task_create'])
+  assert.equal(r2.task.version, s.rows[TASK][0].version, 'запись условная по version')
+
+  // журнал не нашёлся / сбой журнала — запись всё равно удалена
+  const at3 = new Date('2026-10-02T11:00:00Z')
+  s.logAt = '2026-10-02T12:00:00.000Z'
+  s.rows[TASK][0].status = 'open'
+  await svc.act({ session: owner, id: t.documentId, body: { action: 'comment', text: 'Pozdní zápis' }, now: at3 })
+  await tick()
+  const r3 = await svc.removeEvent({ session: owner, id: t.documentId, body: { at: at3.toISOString() }, now })
+  assert.deepEqual(r3.task.events.map((e) => e.kind), ['created'])
+  assert.equal(s.logs.filter((l) => l.action === 'task_comment').length, 1, 'чужое окно времени — журнал не тронут')
 })

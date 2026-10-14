@@ -119,8 +119,14 @@ export const fmtQty = (qty: unknown, packSize: unknown = 1, unit: unknown = 'ks'
   return parts.length ? parts.join(' + ') : `0 ${u}`;
 };
 
+/** Минимум и «doplnit do» в упаковках: у штучных целые, у ml/g дробные (s258: канистра — min 0,2). */
+export const packsOf = (v: unknown, item: any): number => {
+  const n = Math.max(0, n0(v));
+  return unitOf(item) === 'ks' ? Math.floor(n) : r2(n);
+};
+
 /** Минимум в базовой единице. */
-export const minBase = (item: any): number => Math.max(0, Math.floor(n0(item?.min))) * packOf(item);
+export const minBase = (item: any): number => r2(packsOf(item?.min, item) * packOf(item));
 
 /** Статус из остатка: ≤ 0 — došlo, ≤ минимума — málo, иначе skladem. */
 export const statusOf = (item: any): 'ok' | 'low' | 'out' => {
@@ -132,9 +138,9 @@ export const statusOf = (item: any): 'ok' | 'low' | 'out' => {
 
 /** «Докупать до» в упаковках: заданный target или, если не задан, двойной минимум (не меньше минимум + 1). */
 export const effectiveTarget = (item: any): number => {
-  const min = Math.max(0, Math.floor(n0(item?.min)));
-  const t = Math.max(0, Math.floor(n0(item?.target)));
-  return t > min ? t : Math.max(min * 2, min + 1);
+  const min = packsOf(item?.min, item);
+  const t = packsOf(item?.target, item);
+  return t > min ? t : Math.max(r2(min * 2), r2(min + 1));
 };
 
 /** Сколько упаковок заказать: 0 — позиция в порядке; иначе до target, минимум одна. */
@@ -239,8 +245,11 @@ export const normalizeItemInput = (body: any, { partial = false, current = null 
     out.unit = u;
   }
   if (take('packSize')) out.packSize = body?.packSize == null || body?.packSize === '' ? 1 : intIn(body.packSize, 1, MAX_PACK_SIZE, 'bad_pack_size', 'Kusů v balení');
-  if (take('min')) out.min = body?.min == null || body?.min === '' ? 0 : intIn(body.min, 0, MAX_PACKS, 'bad_min', 'Minimum');
-  if (take('target')) out.target = body?.target == null || body?.target === '' ? 0 : intIn(body.target, 0, MAX_PACKS, 'bad_target', 'Doplnit do');
+  // минимум и «doplnit do» — в упаковках: штучные целые, ml/g дробные (s258)
+  const pieces = (has(out, 'unit') ? out.unit : unitOf(current)) === 'ks';
+  const packsIn = (v: unknown, code: string, label: string) => (pieces ? intIn(v, 0, MAX_PACKS, code, label) : numIn(v, 0, MAX_PACKS, code, label));
+  if (take('min')) out.min = body?.min == null || body?.min === '' ? 0 : packsIn(body.min, 'bad_min', 'Minimum');
+  if (take('target')) out.target = body?.target == null || body?.target === '' ? 0 : packsIn(body.target, 'bad_target', 'Doplnit do');
   const min = has(out, 'min') ? out.min : n0(current?.min);
   const target = has(out, 'target') ? out.target : n0(current?.target);
   if ((has(out, 'min') || has(out, 'target')) && target > 0 && target <= min) {
@@ -272,21 +281,25 @@ export const normalizeItemInput = (body: any, { partial = false, current = null 
 };
 
 /**
- * Количество из формы → базовая единица: `packs` целых упаковок + `units` штук/ml/g.
- * Штуки — только целые; ml и g — до сотых.
+ * Количество из формы → базовая единица: `packs` упаковок + `units` штук/ml/g.
+ * Штуки — только целые (и упаковки штучных позиций); у ml и g дробные и упаковки
+ * (s258: «0,2 канистры по 5000 ml» = 1000 ml — администратор так и пытался ввести),
+ * и количество — до сотых. Коды ошибок — по полю: `bad_packs` / `bad_units` (админка
+ * показывает ошибку под нужным полем).
  */
 export const qtyFromInput = (body: any, item: any): number => {
   const p = packOf(item);
+  const pieces = unitOf(item) === 'ks';
   const hasPacks = body?.packs != null && body?.packs !== '';
   const hasUnits = body?.units != null && body?.units !== '';
   if (!hasPacks && !hasUnits) throw new StockError(400, 'qty_required', 'Zadejte množství');
-  const packs = hasPacks ? intIn(body.packs, 0, MAX_PACKS, 'bad_qty', 'Balení') : 0;
+  const packs = !hasPacks ? 0 : pieces ? intIn(body.packs, 0, MAX_PACKS, 'bad_packs', 'Balení') : numIn(body.packs, 0, MAX_PACKS, 'bad_packs', 'Balení');
   let units = 0;
   if (hasUnits) {
-    units = unitOf(item) === 'ks' ? intIn(body.units, 0, MAX_QTY, 'bad_qty', 'Kusy') : numIn(body.units, 0, MAX_QTY, 'bad_qty', 'Množství');
+    units = pieces ? intIn(body.units, 0, MAX_QTY, 'bad_units', 'Kusy') : numIn(body.units, 0, MAX_QTY, 'bad_units', 'Množství');
   }
   const q = r2(packs * p + units);
-  if (q > MAX_QTY) throw new StockError(400, 'bad_qty', 'Příliš velké množství');
+  if (q > MAX_QTY) throw new StockError(400, 'bad_units', 'Příliš velké množství');
   return q;
 };
 
@@ -339,8 +352,8 @@ export const itemView = (doc: any, { now, showPrices, onOrder }: { now: Date; sh
     unit: unitOf(doc),
     packSize: packOf(doc),
     qty: r2(n0(doc.qty)),
-    min: Math.max(0, Math.floor(n0(doc.min))),
-    target: Math.max(0, Math.floor(n0(doc.target))),
+    min: packsOf(doc.min, doc),
+    target: packsOf(doc.target, doc),
     supplier: String(doc.supplier ?? ''),
     url: String(doc.url ?? ''),
     countEveryDays: Math.max(1, Math.floor(n0(doc.countEveryDays)) || DEFAULT_COUNT_EVERY),
@@ -359,7 +372,7 @@ export const itemView = (doc: any, { now, showPrices, onOrder }: { now: Date; sh
     ...item,
     status,
     qtyText: fmtQty(item.qty, item.packSize, item.unit),
-    minText: item.packSize > 1 ? `${item.min} bal.` : `${item.min} ${item.unit}`,
+    minText: item.packSize > 1 ? `${numText(item.min)} bal.` : `${numText(item.min)} ${item.unit}`,
     effectiveTarget: effectiveTarget(item),
     suggestedPacks: suggested,
     onOrderPacks,

@@ -9,6 +9,8 @@
  * публикации зовёт `POST /engine/admin/shift-close/journal`: автор — из сессии (не из тела),
  * число опубликованных услуг дня сервер считает сам по базе. Отмена закрытия (`/shift-revert`)
  * пишется прямо на сервере. entityType `shift_close`.
+ * s258: результат смены (до → после) страница дописывает отдельной ручкой `logResult` —
+ * его читает главная владельца (owner-overview).
  */
 
 import { pragueDateOf } from './slots-core';
@@ -53,6 +55,33 @@ export const normalizeShiftCloseLog = (body: any, today: string) => {
   return { date, published: count(body?.published), failures: count(body?.failures), skipped: count(body?.skipped) };
 };
 
+/**
+ * s258: результат смены со страницы — «до» и «после» публикации (как в её плитке), чтобы
+ * главная владельца показывала прибыль последней закрытой смены. Числа конечные, в кронах.
+ */
+export const normalizeShiftResult = (body: any, today: string) => {
+  const date = String(body?.date ?? '');
+  if (!isValidYmd(date) || date > today || date < addDaysYmd(today, -SHIFT_LOG_MAX_DAYS)) {
+    throw new ShiftLogError(400, 'bad_date', 'Neplatné datum směny');
+  }
+  const money = (v: unknown) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || Math.abs(n) > 1e9) throw new ShiftLogError(400, 'bad_result', 'Neplatný výsledek směny');
+    return Math.round(n * 100) / 100;
+  };
+  return { date, before: money(body?.before), after: money(body?.after) };
+};
+
+/** `details` записи закрытия с результатом: читаемые строки для журнала + числа для главной. */
+export const withShiftResult = (details: any, r: { before: number; after: number }) => ({
+  ...(details && typeof details === 'object' ? details : {}),
+  'výsledek směny': Math.round((r.after - r.before) * 100) / 100,
+  'výsledek měsíce před': r.before,
+  'výsledek měsíce po': r.after,
+  resultBefore: r.before,
+  resultAfter: r.after,
+});
+
 export const closeSummary = (e: { date: string; published: number; failures: number }) =>
   `Směna ${fmtDay(e.date)} uzavřena: zveřejněno ${e.published}${e.failures ? ` · chyby ${e.failures}` : ''}`;
 
@@ -80,6 +109,26 @@ export default {
       details: { datum: fmtDay(e.date), zveřejněno: e.published, chyby: e.failures, přeskočeno: e.skipped, 'služeb dne v bázi': services },
     });
     return { ok: true };
+  },
+
+  /**
+   * POST /engine/admin/shift-close/result {date, before, after} — s258: страница дописывает
+   * результат смены в уже сделанную запись закрытия этого дня (самую свежую). Записи нет
+   * (журнал не дошёл) — ничего не создаём, отвечаем updated:false.
+   */
+  async logResult({ session, body, now = new Date() }: { session: any; body: any; now?: Date }) {
+    const r = normalizeShiftResult(body, pragueDateOf(now));
+    const LOG_UID = 'api::calendar-log.calendar-log';
+    const rows = await strapi.db.query(LOG_UID).findMany({
+      where: { entityType: 'shift_close', action: 'shift_close', entityDocId: r.date },
+      select: ['id', 'details'],
+      orderBy: { createdAt: 'desc' },
+      limit: 1,
+    });
+    const row = rows?.[0];
+    if (!row) return { ok: true, updated: false };
+    await strapi.db.query(LOG_UID).update({ where: { id: row.id }, data: { details: withShiftResult(row.details, r) } });
+    return { ok: true, updated: true };
   },
 
   /** Отмена закрытия (shift-revert) — пишется после успешного отката. */

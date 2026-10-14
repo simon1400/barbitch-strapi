@@ -3048,14 +3048,14 @@ export interface ApiStockItemStockItem extends Struct.CollectionTypeSchema {
     lastCountedBy: Schema.Attribute.String;
     lastPrice: Schema.Attribute.Decimal;
     location: Schema.Attribute.String;
-    min: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    min: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     name: Schema.Attribute.String;
     note: Schema.Attribute.Text;
     notifiedStatus: Schema.Attribute.String;
     packSize: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<1>;
     qty: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     supplier: Schema.Attribute.String;
-    target: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
+    target: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     unit: Schema.Attribute.Enumeration<['ks', 'ml', 'g']> &
       Schema.Attribute.DefaultTo<'ks'>;
     url: Schema.Attribute.String;
