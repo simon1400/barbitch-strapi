@@ -164,3 +164,13 @@ test('digest.ts: разделы подключены, источники по о
   assert.match(src, /\.\.\.\(adminLine \? \[adminLine\] : \[\]\)/);
   assert.match(src, /for \(const sec of attentionSections\) lines\.push\('', \.\.\.sec\)/);
 });
+
+test('s266 смена: вчера не записаны каса/години — одна строка без сумм; всё есть / источник упал — нет раздела', () => {
+  const r = A.buildAttention({ today: TODAY, smena: { date: '2026-09-28', cash: true, workTime: true } });
+  assert.deepEqual(r.sections, [['📒 <b>Зміна 28.09:</b> не заповнено касу і години (адмінка → Směna)']]);
+  assert.match(text(A.buildAttention({ today: TODAY, smena: { date: '2026-09-28', cash: false, workTime: true } })), /не заповнено години \(/);
+  assert.deepEqual(A.buildAttention({ today: TODAY, smena: null }).sections, []);
+  assert.deepEqual(A.buildAttention({ today: TODAY }).sections, []);
+  const src = fs.readFileSync(path.join(root, 'src/api/digest/services/digest.ts'), 'utf8');
+  assert.match(src, /settle\('smena', \(\) => engine\('smena'\)\.missingOn\(/);
+});

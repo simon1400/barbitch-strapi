@@ -458,6 +458,8 @@ export default {
       settle('birthdays', async () => (await engine('birthdays').list({ session: { role: 'administrator' } })).items),
       // склад (s251): названия позиций «došlo» / «pod minimem»
       settle('stock', async () => ({ ...(await engine('stock').summary()), overdue: await engine('stock-orders').overdue() })),
+      // s266: вчерашняя смена администратора не заполнена (касса / часы)
+      settle('smena', () => engine('smena').missingOn({ date: todayRanges(today).shifts.to })),
     ]);
     const { adminLine, sections: attentionSections } = buildAttention(attention);
 

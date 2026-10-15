@@ -2066,7 +2066,7 @@ export interface ApiOwnerTaskOwnerTask extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
-    assignee: Schema.Attribute.Enumeration<['manager', 'owner']> &
+    assignee: Schema.Attribute.Enumeration<['manager', 'owner', 'administrator']> &
       Schema.Attribute.DefaultTo<'manager'>;
     closedAt: Schema.Attribute.DateTime;
     closedBy: Schema.Attribute.String;
@@ -2075,7 +2075,9 @@ export interface ApiOwnerTaskOwnerTask extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     createdByAccountId: Schema.Attribute.Integer;
     createdByName: Schema.Attribute.String;
-    createdByRole: Schema.Attribute.Enumeration<['owner', 'manager']> &
+    createdByRole: Schema.Attribute.Enumeration<
+      ['owner', 'manager', 'administrator']
+    > &
       Schema.Attribute.DefaultTo<'owner'>;
     description: Schema.Attribute.Text;
     doneAt: Schema.Attribute.DateTime;
@@ -2849,6 +2851,47 @@ export interface ApiServiceService extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+  };
+}
+
+export interface ApiShiftHandoverShiftHandover
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'shift_handovers';
+  info: {
+    description: 'Vzkaz administr\u00E1torky dal\u0161\u00ED sm\u011Bn\u011B (s265, \u0424\u0430\u0437\u0430 2 \u043F\u043B\u0430\u043D\u0430 ADMIN_SHIFT): \u043E\u0442 \u043A\u043E\u0433\u043E, \u043A\u043E\u043C\u0443, \u0442\u0435\u043A\u0441\u0442, \u043A\u0430\u043A\u0438\u0435 \u0437\u0430\u0434\u0430\u0447\u0438 \u043F\u0435\u0440\u0435\u0434\u0430\u043D\u044B/\u0441\u043E\u0437\u0434\u0430\u043D\u044B \u044D\u0442\u0438\u043C \u0436\u0435 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435\u043C, \u043A\u043E\u0433\u0434\u0430 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u043E. REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/smena';
+    displayName: 'P\u0159ed\u00E1n\u00ED sm\u011Bny';
+    pluralName: 'shift-handovers';
+    singularName: 'shift-handover';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    date: Schema.Attribute.Date;
+    fromLogin: Schema.Attribute.String;
+    fromName: Schema.Attribute.String;
+    fromPersonalDocId: Schema.Attribute.String;
+    fromRole: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::shift-handover.shift-handover'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    readAt: Schema.Attribute.DateTime;
+    readBy: Schema.Attribute.String;
+    taskDocIds: Schema.Attribute.JSON;
+    text: Schema.Attribute.Text;
+    toName: Schema.Attribute.String;
+    toPersonalDocId: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    version: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
   };
 }
 
@@ -4092,6 +4135,7 @@ declare module '@strapi/strapi' {
       'api::salon-service.salon-service': ApiSalonServiceSalonService;
       'api::service-provided.service-provided': ApiServiceProvidedServiceProvided;
       'api::service.service': ApiServiceService;
+      'api::shift-handover.shift-handover': ApiShiftHandoverShiftHandover;
       'api::shift.shift': ApiShiftShift;
       'api::slot-hold.slot-hold': ApiSlotHoldSlotHold;
       'api::staff-checklist-item.staff-checklist-item': ApiStaffChecklistItemStaffChecklistItem;

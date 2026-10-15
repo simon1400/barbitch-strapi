@@ -120,6 +120,18 @@ export default {
     admin('POST', '/engine/admin/shift-close/journal', 'booking-engine.adminShiftCloseJournal'),
     admin('POST', '/engine/admin/shift-close/result', 'booking-engine.adminShiftCloseResult'),
     admin('GET', '/engine/admin/overview', 'booking-engine.adminOwnerOverview'),
+    // «Směna» (s263): касса и часы администраторов
+    // s266 (Фаза 3): сводка руководству для «Сегодня» — раньше `/:date`; «Kontrola směny» дня
+    admin('GET', '/engine/admin/smena/attention', 'booking-engine.adminSmenaAttention'),
+    admin('GET', '/engine/admin/smena/:date/check', 'booking-engine.adminSmenaCheck'),
+    admin('GET', '/engine/admin/smena/:date/summary', 'booking-engine.adminSmenaSummary'),
+    admin('GET', '/engine/admin/smena/:date', 'booking-engine.adminSmenaDay'),
+    admin('PUT', '/engine/admin/smena/:date/cash', 'booking-engine.adminSmenaCash'),
+    admin('PUT', '/engine/admin/smena/:date/work-time', 'booking-engine.adminSmenaWorkTime'),
+    admin('DELETE', '/engine/admin/smena/:date/work-time', 'booking-engine.adminSmenaWorkTimeDelete'),
+    // s265: передача смены (сообщение + задачи коллеге + передача своих), «Přečteno»
+    admin('PUT', '/engine/admin/smena/:date/handover', 'booking-engine.adminSmenaHandover'),
+    admin('POST', '/engine/admin/smena/handover/:id/read', 'booking-engine.adminSmenaHandoverRead'),
     // поручения владельца управляющей (s240): `attention` — раньше `/:id`
     admin('GET', '/engine/admin/tasks/attention', 'booking-engine.adminTasksAttention'),
     admin('GET', '/engine/admin/tasks', 'booking-engine.adminTasksList'),

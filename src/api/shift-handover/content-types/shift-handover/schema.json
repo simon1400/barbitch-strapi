@@ -1,0 +1,53 @@
+{
+  "kind": "collectionType",
+  "collectionName": "shift_handovers",
+  "info": {
+    "singularName": "shift-handover",
+    "pluralName": "shift-handovers",
+    "displayName": "Předání směny",
+    "description": "Vzkaz administrátorky další směně (s265, Фаза 2 плана ADMIN_SHIFT): от кого, кому, текст, какие задачи переданы/созданы этим же действием, когда прочитано. REST-роутов нет: только ручки /engine/admin/smena"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "date": {
+      "type": "date"
+    },
+    "fromPersonalDocId": {
+      "type": "string"
+    },
+    "fromName": {
+      "type": "string"
+    },
+    "fromLogin": {
+      "type": "string"
+    },
+    "fromRole": {
+      "type": "string"
+    },
+    "toPersonalDocId": {
+      "type": "string"
+    },
+    "toName": {
+      "type": "string"
+    },
+    "text": {
+      "type": "text"
+    },
+    "taskDocIds": {
+      "type": "json"
+    },
+    "readAt": {
+      "type": "datetime"
+    },
+    "readBy": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "default": 0
+    }
+  }
+}

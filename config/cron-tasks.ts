@@ -272,6 +272,40 @@ export default {
       tz: 'Europe/Prague',
     },
   },
+  // «Směna administrátora» (s266, ADMIN_SHIFT_NEXT_SESSION_PROMPT.md §7 / Фаза 3): смена не заполнена
+  // (салон работал — брони или дежурный по графику, а кассы или часов нет) → push администраторкам
+  // в 20:30 за сегодня, в 09:30 за вчера — ещё управляющей и владельцу. Выключено по умолчанию:
+  // ТОЛЬКО env SMENA_PUSH_ENABLED=true (+ VAPID — без них push no-op). Тот же env — push расхождения кассы.
+  smenaReminderEvening: {
+    task: async ({ strapi }) => {
+      if (process.env.SMENA_PUSH_ENABLED !== 'true') return;
+      try {
+        const res = await strapi.service('api::booking-engine.smena').remind({ kind: 'evening' });
+        if (res?.due) strapi.log.info(`smena reminder (evening): ${JSON.stringify(res)}`);
+      } catch (e) {
+        strapi.log.error(`smena reminder (evening) cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '30 20 * * *', // каждый день 20:30 — смена за сегодня
+      tz: 'Europe/Prague',
+    },
+  },
+  smenaReminderMorning: {
+    task: async ({ strapi }) => {
+      if (process.env.SMENA_PUSH_ENABLED !== 'true') return;
+      try {
+        const res = await strapi.service('api::booking-engine.smena').remind({ kind: 'morning' });
+        if (res?.due) strapi.log.info(`smena reminder (morning): ${JSON.stringify(res)}`);
+      } catch (e) {
+        strapi.log.error(`smena reminder (morning) cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '30 9 * * *', // каждый день 09:30 — за вчера (+ руководству)
+      tz: 'Europe/Prague',
+    },
+  },
   dailyDigest: {
     task: async ({ strapi }) => {
       try {

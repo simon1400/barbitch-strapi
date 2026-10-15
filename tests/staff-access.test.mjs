@@ -242,6 +242,35 @@ test('соседние коллекции и ручки движка не зад
   assert.equal(dbCalls, calls, 'панель не должна ходить в сверку учёток');
 });
 
+// ───────────────── 2б. касса и часы — администратору только через «Směna» (s263) ─────────────────
+test('s263: cashs / work-times — администратору запись 403 engine_only, чтение и руководство как было', async () => {
+  for (const coll of ['cashs', 'work-times']) {
+    for (const [method, p] of [
+      ['POST', `/api/${coll}`],
+      ['PUT', `/api/${coll}/abc123def456ghi789jk`],
+      ['DELETE', `/api/${coll}/abc123def456ghi789jk`],
+      ['PUT', `/API/${coll.toUpperCase()}/abc123def456ghi789jk`],
+    ]) {
+      const r = await run('administrator', method, p, { body: { data: { sum: '1' } } });
+      assert.equal(r.passed, false, `${method} ${p}`);
+      assert.equal(r.status, 403);
+      assert.equal(r.code, 'engine_only');
+    }
+    assert.equal((await run('administrator', 'GET', `/api/${coll}`, { querystring: 'status=draft' })).passed, true);
+    // закрытие смены публикует REST-ом — руководству запись открыта
+    for (const role of ['owner', 'manager']) {
+      assert.equal((await run(role, 'PUT', `/api/${coll}/abc123def456ghi789jk`, { querystring: 'status=published', body: { data: {} } })).passed, true);
+    }
+  }
+  // ручки движка не задеты
+  for (const role of ['owner', 'manager', 'administrator']) {
+    assert.equal((await run(role, 'PUT', '/api/engine/admin/smena/2026-10-15/cash', { body: { flow: [] } })).passed, true);
+  }
+  assert.equal(mw.deniedAdministratorWrite('/api/cashs', 'GET', 'administrator'), false);
+  assert.equal(mw.deniedAdministratorWrite('/api/cashs', 'POST', 'manager'), false);
+  assert.equal(mw.deniedAdministratorWrite('/api/cash-flows', 'POST', 'administrator'), false);
+});
+
 // ───────────────── 3. регистр пути для старых правил (s182, s218, s221) ─────────────────
 test('регистр пути: старые правила не обходятся заглавными буквами', async () => {
   for (const p of ['/api/Bookings', '/api/CLIENTS/1', '/API/redemptions']) {

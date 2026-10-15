@@ -191,6 +191,17 @@ export const deniedCostWrite = (path: string, method: string): boolean =>
 
 export const deniedForAdministrator = (path: string): boolean => ADMINISTRATOR_DENIED.has(collectionOf(path));
 
+// 🟥 Касса и рабочие часы (s263, план «Směna administrátora» §4.4). Администраторы пишут их
+// в модуле «Směna» (`/api/engine/admin/smena/…`): там инвариант остатка, окно дат, автор из
+// сессии, журнал и запрет правки после закрытия смены. Прямой REST `POST/PUT/DELETE /api/cashs`
+// и `/api/work-times` (full-access токен) всё это обходил. Чтение — как было (кабинет, «Uzavření
+// směny»); owner/manager — без изменений (закрытие смены публикует REST-ом). Панель Strapi
+// (/admin/**) не задета — решение владельца §0.4: администраторам её пока не закрываем.
+export const ADMINISTRATOR_ENGINE_ONLY = new Set(['cashs', 'work-times']);
+
+export const deniedAdministratorWrite = (path: string, method: string, role: string): boolean =>
+  role === 'administrator' && ADMINISTRATOR_ENGINE_ONLY.has(collectionOf(path)) && !READ_METHODS.has(String(method || 'GET').toUpperCase());
+
 // 🟥 Журнал действий (s240, «Výkaz práce» Фаза 2). По `calendar-logs` строится сводка
 // «Systém zaznamenal» под отчётом управляющей — `POST /api/calendar-logs` с чужим или своим
 // `actorName` подделал бы её (сессия получает full-access токен). Пишет журнал только сервер
@@ -426,6 +437,13 @@ export default (_config: unknown, { strapi }: { strapi: any }) => {
           ctx.status = 403;
           ctx.body = {
             error: { status: 403, code: 'forbidden_for_administrator', message: 'Tato data jsou dostupná jen vedení salonu' },
+          };
+          return;
+        }
+        if (deniedAdministratorWrite(path, ctx.request?.method || ctx.method, session.role)) {
+          ctx.status = 403;
+          ctx.body = {
+            error: { status: 403, code: 'engine_only', message: 'Pokladnu a hodiny zapisujte v modulu Směna' },
           };
           return;
         }

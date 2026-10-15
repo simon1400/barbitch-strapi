@@ -88,6 +88,7 @@ const shiftLogSvc = () => strapi.service('api::booking-engine.shift-close-log');
 const tasksSvc = () => strapi.service('api::booking-engine.owner-tasks');
 const stockSvc = () => strapi.service('api::booking-engine.stock');
 const stockOrdersSvc = () => strapi.service('api::booking-engine.stock-orders');
+const smenaSvc = () => strapi.service('api::booking-engine.smena');
 
 // personal.documentId сотрудника сессии: по связи учётки, без связи — по имени (s229, §5а.1)
 const resolveSessionPersonalDocId = async (session) =>
@@ -913,6 +914,77 @@ export default {
     const session = requireOwner(ctx);
     if (!session) return;
     await handle(ctx, () => strapi.service('api::booking-engine.owner-overview').overview());
+  },
+
+  // «Směna» (s263): касса и часы администраторов из админки вместо панели Strapi. Роль и окно
+  // дат проверяет сервис (часы — только administrator, у владельца карточки нет).
+  // GET /api/engine/admin/smena/:date
+  async adminSmenaDay(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => smenaSvc().day({ session, date: ctx.params.date }));
+  },
+
+  // PUT /api/engine/admin/smena/:date/cash {flow, balance, comment?, discrepancyReason?, expectedUpdatedAt?}
+  async adminSmenaCash(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => smenaSvc().saveCash({ session, date: ctx.params.date, body: ctx.request.body }));
+  },
+
+  // PUT /api/engine/admin/smena/:date/work-time {startTime, endTime, comment, expectedUpdatedAt?}
+  async adminSmenaWorkTime(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => smenaSvc().saveWorkTime({ session, date: ctx.params.date, body: ctx.request.body }));
+  },
+
+  // DELETE /api/engine/admin/smena/:date/work-time — свои часы, только черновик
+  async adminSmenaWorkTimeDelete(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    // s266: руководство — часы администраторки `?personal=`
+    await handle(ctx, () => smenaSvc().deleteWorkTime({ session, date: ctx.params.date, personal: ctx.query?.personal }));
+  },
+
+  // PUT /api/engine/admin/smena/:date/handover {to, text, tasks[], handover[], note} — «Předat směnu» (s265)
+  async adminSmenaHandover(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => smenaSvc().handover({ session, date: ctx.params.date, body: ctx.request.body }));
+  },
+
+  // POST /api/engine/admin/smena/handover/:id/read — «Přečteno» (только получательница)
+  async adminSmenaHandoverRead(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    await handle(ctx, () => smenaSvc().readHandover({ session, id: ctx.params.id }));
+  },
+
+  // GET /api/engine/admin/smena/:date/check — «Kontrola směny» (s266, порт виджета панели)
+  async adminSmenaCheck(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => smenaSvc().check({ session, date: ctx.params.date }));
+  },
+
+  // GET /api/engine/admin/smena/attention — руководству на «Сегодня» (s266): незаполненные смены,
+  // расхождения кассы, непрочитанные передачи старше 3 дней
+  async adminSmenaAttention(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => smenaSvc().attention());
+  },
+
+  // GET /api/engine/admin/smena/:date/summary — руководству для «Uzavření směny»
+  async adminSmenaSummary(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => smenaSvc().summary({ date: ctx.params.date }));
   },
 
   // Поручения владельца (s240): создаёт, правит, принимает — владелец; исполнитель (manager)

@@ -15,6 +15,9 @@
 //     сбой push не ломает поручение.
 //   - s258: автор удаляет свой комментарий / ход работы бесследно — без события, журнала и push,
 //     запись журнала о комментарии стирается; чужое — 403, нет такой — 404.
+//   - s265: администраторка ставит задачу коллеге (не себе, не «всем»), стороны такой задачи — по
+//     людям (исполнитель — карточка, автор — учётка), закрывается по «hotovo» без принятия; автор её
+//     видит; переход `handover` — исполнительнице и руководству, только задача с карточкой в работе.
 // Запуск: cd strapi && node --test tests/owner-tasks.test.mjs
 
 import { test } from 'node:test';
@@ -36,6 +39,7 @@ for (const [from, file] of [
   ["from './slots-core'", 'src/api/booking-engine/services/slots-core.ts'],
   ["from '../../../utils/staff-identity'", 'src/utils/staff-identity.ts'],
   ["from '../../../utils/private-files'", 'src/utils/private-files.ts'],
+  ["from '../../../utils/staff-roster'", 'src/utils/staff-roster.ts'],
 ]) {
   assert.ok(js.includes(from), from);
   js = js.split(from).join(`from '${dataUrl(toJs(file))}'`);
@@ -49,11 +53,16 @@ const PERSONAL = 'api::personal.personal';
 const MARIIA = 'mariia000000000000000001';
 const ANNA = 'anna00000000000000000002';
 const OLD = 'oldmgr000000000000000003';
+// s262: администраторки — Vika (связь по personalDocId), Olga (совместитель-мастер, связь по имени)
+const VIKA = 'vika00000000000000000004';
+const OLGA = 'olga00000000000000000005';
+const ADMIN = 'api::admin-user.admin-user';
 
 const owner = { id: 1, role: 'owner', username: 'Dima' };
 const manager = { id: 11, role: 'manager', username: 'Mariia Medvedeva', personalDocId: MARIIA };
 const anna = { id: 15, role: 'manager', username: 'Anna', personalDocId: ANNA };
-const admin = { id: 12, role: 'administrator', username: 'Vika' };
+const admin = { id: 12, role: 'administrator', username: 'Vika', personalDocId: VIKA };
+const olga = { id: 16, role: 'administrator', username: 'Olga Eremina' };
 const master = { id: 13, role: 'master', username: 'Karina' };
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -70,7 +79,8 @@ const matchCond = (val, cond) => {
   });
 };
 const get = (row, key) => (key === 'personal' ? (row.personalDocId ? { documentId: row.personalDocId } : null) : row[key]);
-const matches = (row, filters = {}) => Object.entries(filters).every(([k, c]) => matchCond(get(row, k), c));
+const matches = (row, filters = {}) =>
+  Object.entries(filters).every(([k, c]) => (k === '$or' ? c.some((f) => matches(row, f)) : matchCond(get(row, k), c)));
 
 let seq = 1;
 function fresh() {
@@ -79,6 +89,15 @@ function fresh() {
       { documentId: MARIIA, name: 'Mariia Medvedeva', position: 'manager', isActive: true },
       { documentId: ANNA, name: 'Anna', position: 'manager', isActive: true },
       { documentId: OLD, name: 'Stará', position: 'manager', isActive: false },
+      { documentId: VIKA, name: 'Viktoriia Tsybuliak', position: 'administrator', isActive: true },
+      { documentId: OLGA, name: 'Olga Eremina', position: 'master', isActive: true },
+    ],
+    [ADMIN]: [
+      { documentId: 'acc1', username: 'Vika', role: 'administrator', isActive: true, personalDocId: VIKA },
+      { documentId: 'acc2', username: 'Olga Eremina', role: 'administrator', isActive: true, personalDocId: null },
+      { documentId: 'acc3', username: 'Bez karty', role: 'administrator', isActive: true, personalDocId: null },
+      { documentId: 'acc4', username: 'Stará admin', role: 'administrator', isActive: false, personalDocId: OLD },
+      { documentId: 'acc5', username: 'Mariia Medvedeva', role: 'manager', isActive: true, personalDocId: MARIIA },
     ],
     [TASK]: [],
     [FILE]: [],
@@ -124,6 +143,15 @@ function fresh() {
       },
       async delete({ documentId }) {
         db[uid] = db[uid].filter((r) => r.documentId !== documentId);
+      },
+      // s265: смена исполнительницы при передаче — Document Service (связь)
+      async update({ documentId, data }) {
+        await tick();
+        const r = db[uid].find((x) => x.documentId === documentId);
+        const { personal, ...rest } = data;
+        if (personal !== undefined) r.personalDocId = personal;
+        Object.assign(r, clone(rest), { updatedAt: new Date().toISOString() });
+        return clone(r);
       },
     }),
     db: {
@@ -273,9 +301,11 @@ test('доступ: владелец создаёт и видит всё; исп
   assert.deepEqual(mine.tasks.map((t) => t.title), ['Objednat křeslo']);
   assert.equal(mine.people, undefined, 'список людей — только владельцу');
   await expectErr(svc.act({ session: manager, id: b.documentId, body: { action: 'comment', text: 'x' }, now }), 404, 'task_not_found');
-  await expectErr(svc.list({ session: admin, now }), 403, 'not_allowed');
+  // s262: администраторка видит только задачи администраторам — поручения управляющей ей не видны
+  assert.deepEqual((await svc.list({ session: admin, now })).tasks, [])
+  await expectErr(svc.act({ session: admin, id: a.documentId, body: { action: 'comment', text: 'x' }, now }), 404, 'task_not_found')
   await expectErr(svc.list({ session: master, now }), 403, 'not_allowed');
-  await expectErr(svc.attention({ session: admin, now }), 403, 'not_allowed');
+  await expectErr(svc.attention({ session: master, now }), 403, 'not_allowed');
 });
 
 test('путь поручения: ход работы → hotovo → вернуть → hotovo → принять; правка закрытого — 409', async () => {
@@ -424,12 +454,13 @@ test('s246 стороны: матрица действий на трёх вид�
   assert.deepEqual([row.assignee, row.createdByRole], ['manager', 'owner'])
 })
 
-test('s246 создание управляющей: себе и владельцу; карточка — своя по сессии; владелец себе — нет', async () => {
+test('s246 создание управляющей: себе и владельцу; карточка — своя по сессии', async () => {
   const s = fresh()
   await expectErr(svc.create({ session: manager, body: { title: 'X' }, now }), 400, 'bad_assignee')
   await expectErr(svc.create({ session: manager, body: { title: 'X', assignee: 'admin' }, now }), 400, 'bad_assignee')
-  await expectErr(svc.create({ session: owner, body: { title: 'X', personal: MARIIA, assignee: 'owner' }, now }), 400, 'bad_assignee')
-  await expectErr(svc.create({ session: admin, body: { title: 'X', assignee: 'manager' }, now }), 403, 'not_allowed')
+  await expectErr(svc.create({ session: owner, body: { title: 'X', personal: MARIIA, assignee: 'admin' }, now }), 400, 'bad_assignee')
+  // s265: администраторка ставит задачу только коллеге
+  await expectErr(svc.create({ session: admin, body: { title: 'X', assignee: 'manager' }, now }), 400, 'bad_assignee')
   const mine = (await svc.create({ session: manager, body: { title: 'Zavolat účetní', assignee: 'manager', personal: ANNA }, now })).task
   assert.deepEqual([mine.assignee, mine.createdByRole, mine.personal, mine.createdByName], ['manager', 'manager', MARIIA, 'Mariia Medvedeva'], '«personal» из тела не читается')
   assert.deepEqual(mine.events.map((e) => [e.kind, e.role]), [['created', 'manager']])
@@ -445,6 +476,131 @@ test('s246 создание управляющей: себе и владельц
   assert.equal((await svc.list({ session: anna, now })).tasks.length, 0)
   assert.equal((await svc.list({ session: owner, now })).tasks.length, 3)
   await expectErr(svc.act({ session: anna, id: forOwner.documentId, body: { action: 'comment', text: 'x' }, now }), 404, 'task_not_found')
+})
+
+test('s259 владелец ставит задачу себе: без карточки, управляющая не видит, закрывается по hotovo', async () => {
+  const s = fresh()
+  const own = (await svc.create({ session: owner, body: { title: 'Zavřít směnu adminům', assignee: 'owner', personal: MARIIA, dueDate: '2026-10-25' }, now })).task
+  assert.deepEqual([own.assignee, own.createdByRole, own.personal, own.personalName], ['owner', 'owner', null, null], 'карточка из тела не берётся')
+  assert.deepEqual(s.logs.map((l) => [l.summary, l.employeeName]), [['Nový vlastní úkol: Zavřít směnu adminům · do 25.10.2026', '']])
+  assert.deepEqual(s.pushes.map((p) => [p.kind, p.role, p.personal]), [['created', 'owner', null]])
+  // управляющей не видно ни в списке, ни по id, ни на «Сегодня»
+  assert.equal((await svc.list({ session: manager, now })).tasks.length, 0)
+  await expectErr(svc.act({ session: manager, id: own.documentId, body: { action: 'comment', text: 'x' }, now }), 404, 'task_not_found')
+  assert.equal((await svc.attention({ session: manager, now })).open, 0)
+  // владельцу — в списке и в «forMe» на «Сегодня»; не среди поручений управляющей
+  assert.deepEqual((await svc.list({ session: owner, now })).tasks.map((t) => t.documentId), [own.documentId])
+  const att = await svc.attention({ session: owner, now })
+  assert.deepEqual([att.open, att.forMe.open, att.forMe.list[0].personalName], [0, 1, null])
+  // сам правит, hotovo — сразу закрыта, вернуть — сам
+  assert.equal((await svc.update({ session: owner, id: own.documentId, body: { priority: 'urgent' }, now })).task.priority, 'urgent')
+  await expectErr(svc.act({ session: owner, id: own.documentId, body: { action: 'progress', text: 'x' }, now }), 403, 'action_not_allowed')
+  let r = (await svc.act({ session: owner, id: own.documentId, body: { action: 'done' }, now })).task
+  assert.deepEqual([r.status, r.closedBy], ['accepted', 'Dima'])
+  r = (await svc.act({ session: owner, id: own.documentId, body: { action: 'reopen' }, now })).task
+  assert.equal(r.status, 'open')
+  assert.equal((await svc.act({ session: owner, id: own.documentId, body: { action: 'cancel' }, now })).task.status, 'cancelled')
+})
+
+// ── s262: задачи администраторам ──────────────────────────────────────────────
+test('s262 схема: enum assignee/createdByRole = стороны сервиса (иначе Strapi отвергнет запись)', () => {
+  const sch = JSON.parse(read('src/api/owner-task/content-types/owner-task/schema.json'))
+  assert.deepEqual([...sch.attributes.assignee.enum].sort(), [...T.SIDES].sort())
+  // s265: постановщик — и администраторка (задача коллеге)
+  assert.deepEqual([...sch.attributes.createdByRole.enum].sort(), ['administrator', 'manager', 'owner'])
+  assert.match(read('types/generated/contentTypes.d.ts'), /assignee: Schema\.Attribute\.Enumeration<\['manager', 'owner', 'administrator'\]>/)
+  assert.match(read('types/generated/contentTypes.d.ts'), /createdByRole: Schema\.Attribute\.Enumeration<\s*\['owner', 'manager', 'administrator'\]\s*>/)
+})
+
+test('s262 кому можно: работающие учётки administrator с карточкой (по связи или по имени)', async () => {
+  fresh()
+  assert.deepEqual(await svc._admins(), [
+    { documentId: OLGA, name: 'Olga Eremina' },
+    { documentId: VIKA, name: 'Viktoriia Tsybuliak' },
+  ])
+  const o = await svc.list({ session: owner, now })
+  const m = await svc.list({ session: manager, now })
+  const a = await svc.list({ session: admin, now })
+  // s265: администраторке тоже — кому передать / поставить задачу (+ её карточка `me`)
+  assert.deepEqual([o.admins.length, m.admins.length, a.admins.length, a.me, a.people, m.people], [2, 2, 2, VIKA, undefined, undefined])
+})
+
+test('s262 создание: владелец — конкретной, управляющая — всем; администраторка не ставит; чужая карточка — 400', async () => {
+  const s = fresh()
+  await expectErr(svc.create({ session: owner, body: { title: 'X', assignee: 'administrator' }, now }), 400, 'bad_personal')
+  await expectErr(svc.create({ session: owner, body: { title: 'X', assignee: 'administrator', personal: MARIIA }, now }), 400, 'bad_personal')
+  await expectErr(svc.create({ session: manager, body: { title: 'X', assignee: 'administrator', personal: OLD }, now }), 400, 'bad_personal')
+  // s265: администраторка — только коллеге, не «всем»
+  await expectErr(svc.create({ session: admin, body: { title: 'X', assignee: 'administrator', allAdmins: true }, now }), 400, 'bad_assignee')
+  const one = (await svc.create({ session: owner, body: { title: 'Umýt vitrínu', assignee: 'administrator', personal: VIKA, dueDate: '2026-10-03' }, now })).task
+  const all = (await svc.create({ session: manager, body: { title: 'Doplnit kávu', assignee: 'administrator', allAdmins: true, personal: VIKA }, now })).task
+  assert.deepEqual([one.assignee, one.createdByRole, one.personal, one.personalName, one.allAdmins], ['administrator', 'owner', VIKA, 'Viktoriia Tsybuliak', false])
+  assert.deepEqual([all.assignee, all.createdByRole, all.personal, all.allAdmins], ['administrator', 'manager', null, true], '«всем» — карточка из тела не берётся')
+  assert.deepEqual(s.logs.map((l) => [l.summary, l.employeeName]), [
+    ['Nový úkol pro administrátorku: Umýt vitrínu · do 03.10.2026', 'Viktoriia Tsybuliak'],
+    ['Nový úkol pro všechny administrátorky: Doplnit kávu', ''],
+  ])
+  assert.deepEqual(s.pushes.map((p) => [p.kind, p.role, p.personal]), [['created', 'owner', VIKA], ['created', 'manager', null]])
+})
+
+test('s262 видимость и путь: исполнитель — администраторка, принимает постановщик, управляющая видит все', async () => {
+  fresh()
+  const mgr = (await svc.create({ session: owner, body: { title: 'Pro Mariiu', personal: MARIIA }, now })).task
+  const one = (await svc.create({ session: owner, body: { title: 'Umýt vitrínu', assignee: 'administrator', personal: VIKA }, now })).task
+  const all = (await svc.create({ session: manager, body: { title: 'Doplnit kávu', assignee: 'administrator', allAdmins: true }, now })).task
+  const ids = async (session) => (await svc.list({ session, now })).tasks.map((t) => t.title).sort()
+  assert.deepEqual(await ids(admin), ['Doplnit kávu', 'Umýt vitrínu'])
+  assert.deepEqual(await ids(olga), ['Doplnit kávu'], 'чужая конкретная — не видна')
+  assert.deepEqual(await ids(manager), ['Doplnit kávu', 'Pro Mariiu', 'Umýt vitrínu'])
+  assert.deepEqual(await ids(anna), ['Doplnit kávu', 'Umýt vitrínu'], 'другая управляющая — задачи админов да, поручение Марии нет')
+  await expectErr(svc.act({ session: olga, id: one.documentId, body: { action: 'comment', text: 'x' }, now }), 404, 'task_not_found')
+  await expectErr(svc.act({ session: admin, id: mgr.documentId, body: { action: 'comment', text: 'x' }, now }), 404, 'task_not_found')
+  // правит только постановщик
+  await expectErr(svc.update({ session: admin, id: one.documentId, body: { title: 'Y' }, now }), 403, 'not_creator')
+  await expectErr(svc.update({ session: manager, id: one.documentId, body: { title: 'Y' }, now }), 403, 'not_creator')
+  // конкретная: průběh → hotovo (ждёт) → снять → hotovo → управляющая не принимает, владелец принимает
+  await svc.act({ session: admin, id: one.documentId, body: { action: 'progress', text: 'Půlka hotová' }, now: new Date('2026-10-02T10:05:00Z') })
+  let r = (await svc.act({ session: admin, id: one.documentId, body: { action: 'done' }, now })).task
+  assert.equal(r.status, 'done', 'ждёт постановщика')
+  r = (await svc.act({ session: admin, id: one.documentId, body: { action: 'undone' }, now })).task
+  assert.equal(r.status, 'open')
+  await svc.act({ session: admin, id: one.documentId, body: { action: 'done' }, now })
+  await expectErr(svc.act({ session: manager, id: one.documentId, body: { action: 'accept' }, now }), 403, 'action_not_allowed')
+  await svc.act({ session: manager, id: one.documentId, body: { action: 'comment', text: 'Vidím' }, now })
+  r = (await svc.act({ session: owner, id: one.documentId, body: { action: 'accept' }, now })).task
+  assert.deepEqual([r.status, r.closedBy], ['accepted', 'Dima'])
+  // общая: закрывает любая (Olga), принимает управляющая; владелец только комментирует
+  r = (await svc.act({ session: olga, id: all.documentId, body: { action: 'done', text: 'Doplněno' }, now })).task
+  assert.deepEqual([r.status, r.events.at(-1).by, r.events.at(-1).role], ['done', 'Olga Eremina', 'administrator'])
+  await expectErr(svc.act({ session: owner, id: all.documentId, body: { action: 'accept' }, now }), 403, 'action_not_allowed')
+  await expectErr(svc.act({ session: admin, id: all.documentId, body: { action: 'accept' }, now }), 403, 'action_not_allowed')
+  r = (await svc.act({ session: manager, id: all.documentId, body: { action: 'reopen', text: 'Ještě cukr' }, now })).task
+  assert.equal(r.status, 'open')
+  // свой průběh администраторка удаляет сама; управляющая — нет (чужой)
+  const prog = (await svc.list({ session: admin, now, scope: 'all' })).tasks.find((t) => t.documentId === one.documentId).events.find((e) => e.kind === 'progress')
+  await expectErr(svc.removeEvent({ session: manager, id: one.documentId, body: { at: prog.at }, now }), 403, 'not_your_event')
+  const after = (await svc.removeEvent({ session: admin, id: one.documentId, body: { at: prog.at }, now })).task
+  assert.equal(after.events.some((e) => e.kind === 'progress'), false)
+})
+
+test('s262 «Сегодня»: администраторке — её и общие в работе; управляющей — ждут её и просроченные; владельцу — его поручения', async () => {
+  fresh()
+  const one = (await svc.create({ session: owner, body: { title: 'Vitrína', assignee: 'administrator', personal: VIKA, dueDate: '2026-10-03' }, now })).task
+  const all = (await svc.create({ session: manager, body: { title: 'Káva', assignee: 'administrator', allAdmins: true, priority: 'urgent' }, now })).task
+  const fromMgr = (await svc.create({ session: manager, body: { title: 'Pro Olgu', assignee: 'administrator', personal: OLGA }, now })).task
+  await svc.act({ session: olga, id: fromMgr.documentId, body: { action: 'done' }, now })
+  const later = new Date('2026-10-05T10:00:00Z')
+  const a = await svc.attention({ session: admin, now: later })
+  assert.deepEqual([a.role, a.open, a.overdue.map((x) => x.title), a.urgent.map((x) => x.title), a.next.map((x) => x.title)], ['administrator', 2, ['Vitrína'], ['Káva'], ['Vitrína', 'Káva']])
+  assert.equal(a.next[1].allAdmins, true)
+  assert.equal(a.forMe, undefined)
+  const m = await svc.attention({ session: manager, now: later })
+  assert.deepEqual([m.open, m.admins.open, m.admins.waiting.map((x) => x.title), m.admins.overdue.map((x) => x.title)], [0, 2, ['Pro Olgu'], ['Vitrína']])
+  const o = await svc.attention({ session: owner, now: later })
+  assert.deepEqual([o.open, o.overdue.map((x) => x.title), o.waiting], [1, ['Vitrína'], []], 'задачи управляющей админам — не его поручения')
+  await svc.act({ session: admin, id: one.documentId, body: { action: 'done' }, now: later })
+  assert.deepEqual((await svc.attention({ session: owner, now: later })).waiting.map((x) => x.title), ['Vitrína'])
+  assert.ok(all)
 })
 
 test('s246 путь задачи себе и задачи владельцу; правит только постановщик', async () => {
@@ -582,7 +738,7 @@ test('s258 удаление своей записи: бесследно — бе
   const createdAt = s.rows[TASK][0].events[0].at
   await expectErr(svc.removeEvent({ session: owner, id: t.documentId, body: { at: createdAt }, now }), 404, 'event_not_found')
   await expectErr(svc.removeEvent({ session: owner, id: t.documentId, body: { at: 'x' }, now }), 404, 'event_not_found')
-  await expectErr(svc.removeEvent({ session: admin, id: t.documentId, body: { at: at1.toISOString() }, now }), 403)
+  await expectErr(svc.removeEvent({ session: admin, id: t.documentId, body: { at: at1.toISOString() }, now }), 404, 'task_not_found')
   await expectErr(svc.removeEvent({ session: anna, id: t.documentId, body: { at: at2.toISOString() }, now }), 404, 'task_not_found')
 
   // владелец — свой комментарий: ушёл из ленты, событие «удалено» не появилось, журнал о нём стёрт
@@ -612,4 +768,88 @@ test('s258 удаление своей записи: бесследно — бе
   const r3 = await svc.removeEvent({ session: owner, id: t.documentId, body: { at: at3.toISOString() }, now })
   assert.deepEqual(r3.task.events.map((e) => e.kind), ['created'])
   assert.equal(s.logs.filter((l) => l.action === 'task_comment').length, 1, 'чужое окно времени — журнал не тронут')
+})
+
+// ── s265: задачи коллеге и передача ─────────────────────────────────────────
+test('s265 стороны задачи коллеге — по людям: автор возвращает/отменяет/правит, исполнительница делает; handover', () => {
+  const task = { status: 'open', assignee: 'administrator', createdByRole: 'administrator', createdByAccountId: 12, createdByName: 'Vika', personal: { documentId: OLGA } }
+  const vika = { role: 'administrator', personal: { documentId: VIKA }, accountId: 12, login: 'Vika' }
+  const olgaW = { role: 'administrator', personal: { documentId: OLGA }, accountId: 16, login: 'Olga Eremina' }
+  const keys = (t, role, who) => Object.keys(T.transitionsFor(t, role, who)).sort().join()
+  assert.equal(keys(task, 'administrator', vika), 'cancel,comment,reopen', 'автор: вернуть/отменить, не «hotovo»')
+  assert.equal(keys(task, 'administrator', olgaW), 'comment,done,handover,progress', 'исполнительница: hotovo, průběh, передать; не undone — принимать некому')
+  assert.equal(T.transitionsFor(task, 'administrator', olgaW).done.to, 'accepted', 'закрывается сразу')
+  assert.equal(keys(task, 'manager', null), 'comment,handover', 'руководство — комментарий и передача')
+  assert.equal(keys(task, 'owner', null), 'comment,handover')
+  // старые задачи s262 (от владельца) — исполнительнице добавилась передача, общие — без неё
+  const fromOwner = { status: 'open', assignee: 'administrator', createdByRole: 'owner', personal: { documentId: VIKA } }
+  assert.equal(keys(fromOwner, 'administrator', vika), 'comment,done,handover,progress,undone')
+  assert.equal(keys(fromOwner, 'owner', null), 'accept,cancel,comment,handover,reopen')
+  assert.equal(keys({ ...fromOwner, personal: null }, 'administrator', vika), 'comment,done,progress,undone', 'общую не передать')
+  assert.equal(keys({ ...fromOwner, status: 'done' }, 'administrator', vika).includes('handover'), true, 'в таблице есть, статус проверит applyTaskAction')
+  assert.throws(() => T.applyTaskAction({ ...fromOwner, status: 'done' }, { action: 'handover', role: 'administrator', who: vika, by: 'Vika', at: 'x', to: { documentId: OLGA, name: 'Olga' } }), (e) => e.code === 'bad_transition')
+  assert.throws(() => T.applyTaskAction(fromOwner, { action: 'handover', role: 'administrator', who: vika, by: 'Vika', at: 'x', to: { documentId: VIKA, name: 'V' } }), (e) => e.code === 'same_person')
+  // автор без учётки в строке — по логину
+  assert.equal(T.isAuthor({ createdByName: 'vika' }, vika), true)
+  assert.equal(T.isAuthor({ createdByAccountId: 99, createdByName: 'Vika' }, vika), false, 'учётка главнее логина')
+})
+
+test('s265 администраторка ставит задачу коллеге: не себе, не «всем»; видят обе; закрывается по hotovo; push автору', async () => {
+  const s = fresh()
+  await expectErr(svc.create({ session: admin, body: { title: 'X', assignee: 'administrator', personal: VIKA }, now }), 400, 'self_task')
+  await expectErr(svc.create({ session: admin, body: { title: 'X', assignee: 'administrator', personal: MARIIA }, now }), 400, 'bad_personal')
+  await expectErr(svc.create({ session: admin, body: { title: 'X', assignee: 'owner' }, now }), 400, 'bad_assignee')
+  const t = (await svc.create({ session: admin, body: { title: 'Objednat kávu', assignee: 'administrator', personal: OLGA }, now })).task
+  assert.deepEqual([t.assignee, t.createdByRole, t.personal, t.createdByName, t.byMe, t.forMe], ['administrator', 'administrator', OLGA, 'Vika', true, false])
+  assert.equal(s.rows[TASK][0].createdByAccountId, 12)
+  assert.deepEqual(s.logs.map((l) => [l.summary, l.employeeName]), [['Nový úkol pro kolegyni: Objednat kávu', 'Olga Eremina']])
+  assert.deepEqual(s.pushes.map((p) => [p.kind, p.role, p.by, p.personal]), [['created', 'administrator', 'Vika', OLGA]])
+  // видят: автор, исполнительница, руководство
+  const seen = async (session) => (await svc.list({ session, now })).tasks.map((x) => [x.title, x.byMe, x.forMe])
+  assert.deepEqual(await seen(admin), [['Objednat kávu', true, false]])
+  assert.deepEqual(await seen(olga), [['Objednat kávu', false, true]])
+  assert.equal((await svc.list({ session: manager, now })).tasks.length, 1)
+  // «Сегодня»: у исполнительницы — в работе, у автора — нет
+  assert.deepEqual([(await svc.attention({ session: olga, now })).open, (await svc.attention({ session: admin, now })).open], [1, 0])
+  // автор не отмечает «hotovo», исполнительница не правит и не отменяет
+  await expectErr(svc.act({ session: admin, id: t.documentId, body: { action: 'done' }, now }), 403, 'action_not_allowed')
+  await expectErr(svc.update({ session: olga, id: t.documentId, body: { title: 'Y' }, now }), 403, 'not_creator')
+  await expectErr(svc.act({ session: olga, id: t.documentId, body: { action: 'cancel' }, now }), 403, 'action_not_allowed')
+  assert.equal((await svc.update({ session: admin, id: t.documentId, body: { dueDate: '2026-10-03' }, now })).task.dueDate, '2026-10-03')
+  const r = (await svc.act({ session: olga, id: t.documentId, body: { action: 'done', text: 'Objednáno' }, now })).task
+  assert.deepEqual([r.status, r.closedBy], ['accepted', 'Olga Eremina'], 'без принятия')
+  assert.deepEqual(s.pushes.at(-1), { id: t.documentId, personal: OLGA, kind: 'done', role: 'administrator', text: 'Objednáno', by: 'Olga Eremina' })
+  // вернуть может автор
+  assert.equal((await svc.act({ session: admin, id: t.documentId, body: { action: 'reopen', text: 'Ještě mléko' }, now })).task.status, 'open')
+  // quiet — без push (передача смены шлёт сводку сама)
+  const before = s.pushes.length
+  await svc.create({ session: admin, body: { title: 'Tiše', assignee: 'administrator', personal: OLGA }, now, quiet: true })
+  assert.equal(s.pushes.length, before)
+})
+
+test('s265 передача задачи: исполнительница → коллеге, руководство — в любую сторону; общие и чужие — нет', async () => {
+  const s = fresh()
+  const one = (await svc.create({ session: owner, body: { title: 'Vitrína', assignee: 'administrator', personal: VIKA }, now })).task
+  const all = (await svc.create({ session: manager, body: { title: 'Káva', assignee: 'administrator', allAdmins: true }, now })).task
+  s.logs.length = 0
+  s.pushes.length = 0
+  await expectErr(svc.act({ session: admin, id: one.documentId, body: { action: 'handover', to: MARIIA }, now }), 400, 'bad_personal')
+  await expectErr(svc.act({ session: admin, id: one.documentId, body: { action: 'handover', to: VIKA }, now }), 400, 'same_person')
+  await expectErr(svc.act({ session: admin, id: all.documentId, body: { action: 'handover', to: OLGA }, now }), 403, 'action_not_allowed')
+  await expectErr(svc.act({ session: olga, id: one.documentId, body: { action: 'handover', to: OLGA }, now }), 404, 'task_not_found')
+  const r = (await svc.act({ session: admin, id: one.documentId, body: { action: 'handover', to: OLGA, text: 'Chybí jen sklo' }, now, quiet: 'assignee' })).task
+  assert.deepEqual([r.status, r.personal, r.personalName], ['open', OLGA, 'Olga Eremina'], 'статус тот же, исполнительница новая')
+  assert.deepEqual(r.events.at(-1), { at: now.toISOString(), kind: 'handover', by: 'Vika', role: 'administrator', text: 'Chybí jen sklo', from: 'Viktoriia Tsybuliak', to: 'Olga Eremina', toPersonal: OLGA })
+  assert.equal(r.version, 2)
+  assert.deepEqual(s.logs.map((l) => [l.action, l.summary, l.employeeName]), [['task_handover', 'Úkol předán: Vitrína · Viktoriia Tsybuliak → Olga Eremina', 'Olga Eremina']])
+  assert.deepEqual(s.pushes.map((p) => [p.kind, p.from, p.quiet, p.personal]), [['handover', 'Viktoriia Tsybuliak', 'assignee', OLGA]])
+  // у прежней — больше не видна; у новой — её
+  await expectErr(svc.act({ session: admin, id: one.documentId, body: { action: 'comment', text: 'x' }, now }), 404, 'task_not_found')
+  assert.equal((await svc.list({ session: olga, now })).tasks.find((x) => x.documentId === one.documentId).forMe, true)
+  // руководство возвращает (управляющая — и на задаче владельца)
+  const back = (await svc.act({ session: manager, id: one.documentId, body: { action: 'handover', to: VIKA }, now })).task
+  assert.equal(back.personal, VIKA)
+  // сделанную не передать
+  await svc.act({ session: admin, id: one.documentId, body: { action: 'done' }, now })
+  await expectErr(svc.act({ session: admin, id: one.documentId, body: { action: 'handover', to: OLGA }, now }), 409, 'bad_transition')
 })

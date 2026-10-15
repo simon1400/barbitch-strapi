@@ -10,6 +10,11 @@
  * Владельцу (тексты русские): výkaz отправлен (первая подача), поручение отмечено «hotovo»,
  * управляющая поставила ему задачу.
  * Без push: задача самой себе, комментарии, `undone`, правка отчёта, «volno».
+ * s262 — администраторам (чешский): новая задача, «Vrátit do práce» (конкретной — её устройствам,
+ * общей — всем работающим администраторам по логинам); их «hotovo» — постановщику (владельцу —
+ * по-русски, управляющей — по-чешски).
+ * s265 — задачи администраторки коллеге: новая — коллеге, «hotovo» — автору (`author`: её карточка
+ * по логину учётки); передача задачи (`handover`) — получательнице и постановщику (если передал не он).
  *
  * Получатели: управляющая — устройства её карточки (`push-notify._subsFor`); владелец — подписки
  * без карточки с `employeeName` = логин учётки роли owner (у владельца карточки нет).
@@ -72,17 +77,22 @@ const polozek = (n: number) => (n === 1 ? 'položka' : n >= 2 && n <= 4 ? 'polo�
 
 // ── поручения ────────────────────────────────────────────────────────────────
 
-const side = (v: unknown, dflt: string) => (v === 'owner' || v === 'manager' ? v : dflt);
+const side = (v: unknown, dflt: string, allowed: string[]) => (allowed.includes(v as string) ? (v as string) : dflt);
 const taskSides = (task: any) => ({
-  assignee: side(task?.assignee, 'manager'),
-  creator: side(task?.createdByRole, 'owner'),
+  assignee: side(task?.assignee, 'manager', ['owner', 'manager', 'administrator']),
+  creator: side(task?.createdByRole, 'owner', ['owner', 'manager', 'administrator']),
 });
+const sameLogin = (a: unknown, b: unknown) => !!String(a ?? '').trim() && String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
 
 const taskBody = (task: any, text: unknown) => [cut(task?.title, 120), cut(text, 200)].filter(Boolean).join('\n');
 const dueCs = (task: any) => (task?.dueDate ? ` · do ${ddmm(task.dueDate)}` : '');
 const dueRu = (task: any) => (task?.dueDate ? ` · до ${ddmm(task.dueDate)}` : '');
 const toVykaz = (task: any) => `/vykaz?task=${encodeURIComponent(task.documentId)}`;
 const toTeam = (task: any) => `/global/team/tasks?task=${encodeURIComponent(task.documentId)}`;
+const toVykazTasks = (task: any) => `/vykaz?tab=ukoly&task=${encodeURIComponent(task.documentId)}`;
+const toAdminTasks = (task: any) => `/ukoly?task=${encodeURIComponent(task.documentId)}`;
+/** s262: кому из администраторов — конкретной (по карточке) или всем (общая задача). */
+const adminTarget = (task: any) => (task?.personal?.documentId ? 'admin' : 'admins');
 const tagOf = (task: any) => `task-${task.documentId}`;
 
 /**
@@ -94,9 +104,43 @@ const tagOf = (task: any) => `task-${task.documentId}`;
  *   • управляющая отметила «hotovo» поручение владельца → владельцу «✅ Поручение выполнено»;
  *   • владелец отметил «hotovo» её задачу ему → управляющей «✅ Majitel splnil váš úkol».
  */
-export const taskPushFor = (task: any, { kind, role, text = '' }: { kind: string; role: string; text?: unknown }) => {
+export const taskPushFor = (task: any, { kind, role, text = '', by = '' }: { kind: string; role: string; text?: unknown; by?: string }) => {
   if (!task?.documentId) return null;
   const { assignee, creator } = taskSides(task);
+  if (assignee === 'administrator') {
+    if (kind === 'created') {
+      return {
+        to: adminTarget(task),
+        kind: 'task_admin_created',
+        payload: {
+          title:
+            creator === 'owner'
+              ? '📋 Nový úkol od majitele'
+              : creator === 'manager'
+                ? '📋 Nový úkol od manažerky'
+                : `📋 Úkol od kolegyně${task.createdByName ? ` ${cut(task.createdByName, 40)}` : ''}`,
+          body: `${cut(task.title, 120)}${dueCs(task)}${task.priority === 'urgent' ? ' · urgentní' : ''}`,
+          url: toAdminTasks(task),
+          tag: tagOf(task),
+        },
+      };
+    }
+    if (kind === 'reopen' && role === creator) {
+      return { to: adminTarget(task), kind: 'task_admin_reopened', payload: { title: '↩️ Úkol vrácen do práce', body: taskBody(task, text), url: toAdminTasks(task), tag: tagOf(task) } };
+    }
+    if (kind === 'done' && role === 'administrator') {
+      // s265: задача от коллеги — автору (закрыта сразу, принимать нечего); сделала сама — молчим
+      if (creator === 'administrator') {
+        return sameLogin(by, task.createdByName)
+          ? null
+          : { to: 'author', kind: 'task_admin_done', payload: { title: `✅ ${cut(by, 40) || 'Kolegyně'} splnila váš úkol`, body: taskBody(task, text), url: toAdminTasks(task), tag: tagOf(task) } };
+      }
+      return creator === 'owner'
+        ? { to: 'owner', kind: 'task_admin_done', payload: { title: '✅ Задача администратора выполнена — ждёт принятия', body: taskBody(task, text), url: toTeam(task), tag: tagOf(task) } }
+        : { to: 'managers', kind: 'task_admin_done', payload: { title: '✅ Administrátorka splnila úkol — čeká na převzetí', body: taskBody(task, text), url: toVykazTasks(task), tag: tagOf(task) } };
+    }
+    return null;
+  }
   if (kind === 'created') {
     if (creator === 'owner' && assignee === 'manager') {
       return {
@@ -138,6 +182,43 @@ export const taskPushFor = (task: any, { kind, role, text = '' }: { kind: string
     return { to: 'manager', kind: 'task_owner_done', payload: { title: '✅ Majitel splnil váš úkol', body: taskBody(task, text), url: toVykaz(task), tag: tagOf(task) } };
   }
   return null;
+};
+
+/**
+ * s265: все push по событию задачи. Передача (`handover`) — двум сторонам: получательнице
+ * (`side: 'assignee'`) и постановщику, если передал не он сам; остальное — `taskPushFor`.
+ * `quiet: 'assignee'` — получательнице не слать (передача смены шлёт ей одну сводку).
+ */
+export const taskPushesFor = (
+  task: any,
+  event: { kind: string; role: string; text?: unknown; by?: string; from?: string; quiet?: string }
+): Array<{ to: string; kind: string; side?: string; payload: any }> => {
+  if (!task?.documentId) return [];
+  let plans: any[];
+  if (event.kind === 'handover') {
+    const { creator } = taskSides(task);
+    const who = cut(event.by, 40);
+    const route = `${cut(event.from, 40) || '—'} → ${cut(task.personal?.name, 40) || '—'}`;
+    plans = [
+      {
+        to: 'admin',
+        side: 'assignee',
+        kind: 'task_handover_in',
+        payload: { title: `📥 Předaný úkol${who ? ` od ${who}` : ''}`, body: taskBody(task, event.text), url: toAdminTasks(task), tag: tagOf(task) },
+      },
+    ];
+    const creatorActed = creator === 'administrator' ? sameLogin(event.by, task.createdByName) : event.role === creator;
+    if (!creatorActed) {
+      const body = [cut(task.title, 120), route, cut(event.text, 160)].filter(Boolean).join('\n');
+      if (creator === 'owner') plans.push({ to: 'owner', kind: 'task_handover', payload: { title: '🔁 Задачу администратора передали', body, url: toTeam(task), tag: tagOf(task) } });
+      else if (creator === 'manager') plans.push({ to: 'managers', kind: 'task_handover', payload: { title: '🔁 Úkol předán kolegyni', body, url: toVykazTasks(task), tag: tagOf(task) } });
+      else plans.push({ to: 'author', kind: 'task_handover', payload: { title: '🔁 Váš úkol byl předán', body, url: toAdminTasks(task), tag: tagOf(task) } });
+    }
+  } else {
+    const one = taskPushFor(task, event);
+    plans = one ? [{ ...one, ...(one.to === 'admin' || one.to === 'admins' ? { side: 'assignee' } : {}) }] : [];
+  }
+  return event.quiet === 'assignee' ? plans.filter((p) => p.side !== 'assignee') : plans;
 };
 
 // ── výkaz ────────────────────────────────────────────────────────────────────
@@ -308,6 +389,27 @@ export default {
     return rows.filter((p) => p.isActive !== false).map((p) => ({ documentId: p.documentId, name: String(p.name ?? '').trim() }));
   },
 
+  /** s262: работающие учётки администраторов (логин + связь с карточкой). */
+  async _adminAccounts() {
+    const rows = await strapi.documents(ADMIN_UID).findMany({ filters: { role: { $eq: 'administrator' } }, fields: ['username', 'isActive', 'personalDocId'], limit: 50 });
+    return rows.filter((a) => a.isActive !== false && String(a.username ?? '').trim());
+  },
+
+  /** Всем администраторам — по логинам (как склад, stock-notify.toAdmins). */
+  async toAdmins(payload: any, kind: string) {
+    const res = await this._push().notifyByNames((await this._adminAccounts()).map((a) => String(a.username).trim()), payload);
+    this._logSent(kind, res);
+    return res;
+  },
+
+  /** Конкретной администраторке: устройства карточки, иначе подписки её логина. */
+  async toAdmin(person: { documentId: string; name?: string }, payload: any, kind: string) {
+    const acc = (await this._adminAccounts()).find((a) => String(a.personalDocId ?? '').trim() === person.documentId);
+    const res = await this._push().notifyPersonal({ personalDocId: person.documentId, employeeName: acc ? String(acc.username).trim() : person.name || '' }, payload);
+    this._logSent(kind, res);
+    return res;
+  },
+
   /** Логины владельца (подписки владельца — с `employeeName` = логин, без карточки). */
   async _ownerNames() {
     const rows = await strapi.documents(ADMIN_UID).findMany({ filters: { role: { $eq: 'owner' } }, fields: ['username', 'isActive'], limit: 20 });
@@ -337,13 +439,36 @@ export default {
     return res;
   },
 
-  /** Событие поручения (create / действие): кому слать — решает `taskPushFor`. */
-  async taskEvent(task: any, event: { kind: string; role: string; text?: unknown }) {
-    const plan = taskPushFor(task, event);
-    if (!plan) return { skipped: 'no_push' };
+  /** Событие поручения (create / действие): кому слать — решает `taskPushesFor` (s265: и несколько адресатов). */
+  async taskEvent(task: any, event: { kind: string; role: string; text?: unknown; by?: string; from?: string; quiet?: string }) {
+    const plans = taskPushesFor(task, event);
+    if (!plans.length) return { skipped: 'no_push' };
+    let last = null;
+    for (const plan of plans) last = await this._sendPlan(task, plan);
+    return plans.length === 1 ? last : { sent: plans.length };
+  },
+
+  async _sendPlan(task: any, plan: any) {
     if (plan.to === 'owner') return this.toOwner(plan.payload, plan.kind);
+    if (plan.to === 'managers') return this.toManagers(plan.payload, plan.kind);
+    if (plan.to === 'admins') return this.toAdmins(plan.payload, plan.kind);
+    if (plan.to === 'author') return this.toAdminLogin(task.createdByName, plan.payload, plan.kind);
     if (!task.personal?.documentId) return { skipped: 'no_card' };
+    if (plan.to === 'admin') return this.toAdmin(task.personal, plan.payload, plan.kind);
     return this.toManager(task.personal, plan.payload, plan.kind);
+  },
+
+  /** s265: администраторке по логину учётки (автор задачи коллеге): её карточка, иначе подписки логина. */
+  async toAdminLogin(login: unknown, payload: any, kind: string) {
+    const name = String(login ?? '').trim();
+    if (!name) return { skipped: 'no_login' };
+    const acc = (await this._adminAccounts()).find((a) => sameLogin(a.username, name));
+    const personalDocId = String(acc?.personalDocId ?? '').trim();
+    const res = personalDocId
+      ? await this._push().notifyPersonal({ personalDocId, employeeName: String(acc.username).trim() }, payload)
+      : await this._push().notifyByNames([name], payload);
+    this._logSent(kind, res);
+    return res;
   },
 
   /** Первая подача výkazu — владельцу. `content` — содержимое отчёта (contentOf). */

@@ -5,7 +5,7 @@
     "singularName": "owner-task",
     "pluralName": "owner-tasks",
     "displayName": "Úkol od majitele",
-    "description": "Поручение владельца управляющей (s240, «Výkaz práce» Фаза 3); s246 — и задачи управляющей себе/владельцу (assignee, createdByRole). REST-роутов нет: только ручки /engine/admin/tasks"
+    "description": "Поручение владельца управляющей (s240, «Výkaz práce» Фаза 3); s246 — и задачи управляющей себе/владельцу (assignee, createdByRole); s262 — задачи администраторам (assignee administrator, personal пуст = всем); s265 — задачи администраторки коллеге (createdByRole administrator), передача (handover). REST-роутов нет: только ручки /engine/admin/tasks"
   },
   "options": {
     "draftAndPublish": false
@@ -38,12 +38,12 @@
     },
     "assignee": {
       "type": "enumeration",
-      "enum": ["manager", "owner"],
+      "enum": ["manager", "owner", "administrator"],
       "default": "manager"
     },
     "createdByRole": {
       "type": "enumeration",
-      "enum": ["owner", "manager"],
+      "enum": ["owner", "manager", "administrator"],
       "default": "owner"
     },
     "createdByName": {

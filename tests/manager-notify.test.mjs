@@ -101,6 +101,60 @@ test('поручения: кому и что; без push — себе, комм
   assert.equal(N.taskPushFor({ title: 'x' }, { kind: 'created', role: 'owner' }), null, 'без id — ничего');
 });
 
+test('s262 задачи администраторам: новая, возврат — им; «hotovo» — постановщику; прочее — без push', () => {
+  const VIKA = 'vika00000000000000000004'
+  const one = task({ assignee: 'administrator', createdByRole: 'owner', personal: { documentId: VIKA, name: 'Viktoriia Tsybuliak' } })
+  const all = task({ assignee: 'administrator', createdByRole: 'manager', personal: null, priority: 'urgent' })
+  assert.deepEqual(N.taskPushFor(one, { kind: 'created', role: 'owner' }), {
+    to: 'admin',
+    kind: 'task_admin_created',
+    payload: { title: '📋 Nový úkol od majitele', body: 'Objednat barvy · do 09.10.', url: '/ukoly?task=task00000000000000000001', tag: 'task-task00000000000000000001' },
+  })
+  const c = N.taskPushFor(all, { kind: 'created', role: 'manager' })
+  assert.deepEqual([c.to, c.payload.title, c.payload.body], ['admins', '📋 Nový úkol od manažerky', 'Objednat barvy · do 09.10. · urgentní'])
+  const r = N.taskPushFor(one, { kind: 'reopen', role: 'owner', text: 'Ještě vitrína' })
+  assert.deepEqual([r.to, r.payload.title, r.payload.body, r.payload.url], ['admin', '↩️ Úkol vrácen do práce', 'Objednat barvy\nJeště vitrína', '/ukoly?task=task00000000000000000001'])
+  assert.equal(N.taskPushFor(all, { kind: 'reopen', role: 'manager' }).to, 'admins')
+  assert.equal(N.taskPushFor(one, { kind: 'reopen', role: 'manager' }), null, 'вернуть может только постановщик')
+  const d1 = N.taskPushFor(one, { kind: 'done', role: 'administrator', text: 'Hotovo' })
+  assert.deepEqual([d1.to, d1.payload.title, d1.payload.url], ['owner', '✅ Задача администратора выполнена — ждёт принятия', '/global/team/tasks?task=task00000000000000000001'])
+  const d2 = N.taskPushFor(all, { kind: 'done', role: 'administrator' })
+  assert.deepEqual([d2.to, d2.payload.title, d2.payload.url], ['managers', '✅ Administrátorka splnila úkol — čeká na převzetí', '/vykaz?tab=ukoly&task=task00000000000000000001'])
+  for (const [kind, role] of [['comment', 'administrator'], ['progress', 'administrator'], ['undone', 'administrator'], ['accept', 'owner'], ['cancel', 'owner'], ['comment', 'manager']]) {
+    assert.equal(N.taskPushFor(one, { kind, role, text: 'x' }), null, `${kind}/${role}`)
+  }
+});
+
+test('s265 задача коллеге и передача: новая — коллеге, hotovo — автору; передача — получательнице и постановщику', () => {
+  const VIKA = 'vika00000000000000000004'
+  const OLGA = 'olga00000000000000000005'
+  const peer = task({ assignee: 'administrator', createdByRole: 'administrator', createdByName: 'Vika', personal: { documentId: OLGA, name: 'Olga Eremina' } })
+  const c = N.taskPushFor(peer, { kind: 'created', role: 'administrator', by: 'Vika' })
+  assert.deepEqual([c.to, c.payload.title], ['admin', '📋 Úkol od kolegyně Vika'])
+  const d = N.taskPushFor(peer, { kind: 'done', role: 'administrator', by: 'Olga Eremina', text: 'Ok' })
+  assert.deepEqual([d.to, d.payload.title, d.payload.body, d.payload.url], ['author', '✅ Olga Eremina splnila váš úkol', 'Objednat barvy\nOk', '/ukoly?task=task00000000000000000001'])
+  assert.equal(N.taskPushFor(peer, { kind: 'done', role: 'administrator', by: 'vika' }), null, 'сделала сама (после передачи обратно) — молчим')
+  // передача: задача владельца, передала администраторка — ей и владельцу
+  const fromOwner = task({ assignee: 'administrator', createdByRole: 'owner', personal: { documentId: OLGA, name: 'Olga Eremina' } })
+  const h = N.taskPushesFor(fromOwner, { kind: 'handover', role: 'administrator', by: 'Vika', from: 'Viktoriia Tsybuliak', text: 'Chybí sklo' })
+  assert.deepEqual(h.map((p) => [p.to, p.side ?? null, p.kind, p.payload.title]), [
+    ['admin', 'assignee', 'task_handover_in', '📥 Předaný úkol od Vika'],
+    ['owner', null, 'task_handover', '🔁 Задачу администратора передали'],
+  ])
+  assert.equal(h[1].payload.body, 'Objednat barvy\nViktoriia Tsybuliak → Olga Eremina\nChybí sklo')
+  // quiet — получательнице сводку шлёт передача смены
+  assert.deepEqual(N.taskPushesFor(fromOwner, { kind: 'handover', role: 'administrator', by: 'Vika', quiet: 'assignee' }).map((p) => p.to), ['owner'])
+  // передал сам постановщик — только получательнице
+  assert.deepEqual(N.taskPushesFor(fromOwner, { kind: 'handover', role: 'owner', by: 'Dima' }).map((p) => p.to), ['admin'])
+  const fromMgr = task({ assignee: 'administrator', createdByRole: 'manager', personal: { documentId: VIKA, name: 'V' } })
+  assert.deepEqual(N.taskPushesFor(fromMgr, { kind: 'handover', role: 'administrator', by: 'Olga Eremina' }).map((p) => p.to), ['admin', 'managers'])
+  // задача коллеге: передала исполнительница — автору; передала сама автор — нет
+  assert.deepEqual(N.taskPushesFor(peer, { kind: 'handover', role: 'manager', by: 'Mariia Medvedeva' }).map((p) => p.to), ['admin', 'author'])
+  assert.deepEqual(N.taskPushesFor(peer, { kind: 'handover', role: 'administrator', by: 'Vika' }).map((p) => p.to), ['admin'])
+  // новая задача от владельца с quiet — ничего
+  assert.deepEqual(N.taskPushesFor(fromOwner, { kind: 'created', role: 'owner', quiet: 'assignee' }), [])
+});
+
 test('výkaz: владельцу при подаче, напоминания 21:00 и 09:00', () => {
   assert.deepEqual(N.reportSubmittedPayload({ name: 'Mariia Medvedeva', personal: MARIIA, date: '2026-10-07', hours: 7.5, items: 3, needsOwner: 'Schválit?' }), {
     title: '📝 Výkaz отправлен',
@@ -284,6 +338,26 @@ test('события: управляющей — по карточке зада�
     'неактивная учётка владельца и администраторы не получают'
   );
   assert.equal(s.pushed[2].payload.body, 'Mariia Medvedeva · 07.10. · 6 ч · пунктов 2');
+});
+
+test('s265 события: автору задачи коллеге — по карточке его учётки; передача — двум сторонам', async () => {
+  const s = makeStrapi();
+  s.rows['api::admin-user.admin-user'].push({ username: 'Olga Eremina', role: 'administrator', isActive: true, personalDocId: 'olga00000000000000000005' });
+  const svc = N.default;
+  const peer = task({ assignee: 'administrator', createdByRole: 'administrator', createdByName: 'Olga Eremina', personal: { documentId: 'vika00000000000000000004', name: 'Viktoriia Tsybuliak' } });
+  await svc.taskEvent(peer, { kind: 'done', role: 'administrator', by: 'Vika' });
+  // автор без связи с карточкой — по логину
+  await svc.taskEvent({ ...peer, createdByName: 'Vika' }, { kind: 'done', role: 'administrator', by: 'Olga Eremina' });
+  assert.deepEqual(await svc.taskEvent(task({ assignee: 'administrator', createdByRole: 'owner', personal: { documentId: 'vika00000000000000000004', name: 'V' } }), { kind: 'handover', role: 'administrator', by: 'Olga Eremina', from: 'Olga Eremina' }), { sent: 2 });
+  assert.deepEqual(
+    s.pushed.map((p) => [p.to, p.payload.title]),
+    [
+      ['olga00000000000000000005', '✅ Vika splnila váš úkol'],
+      ['names:Vika', '✅ Olga Eremina splnila váš úkol'],
+      ['vika00000000000000000004', '📥 Předaný úkol od Olga Eremina'],
+      ['names:Dima', '🔁 Задачу администратора передали'],
+    ]
+  );
 });
 
 test('напоминание о výkazu: 21:00 — за сегодня, 09:00 — за вчера (через пражскую дату)', async () => {

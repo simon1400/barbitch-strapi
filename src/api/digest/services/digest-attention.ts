@@ -10,6 +10,7 @@
 // Запросы управляющей по затратам (s237) — только ЧИСЛО: администраторам затраты
 // не показываются (решение владельца, план затрат §0.1).
 // Склад (s251) — только названия позиций «došlo» и «pod minimem», без остатков и цен.
+// Смена (s266) — только «вчера не записаны каса/години», без сумм.
 
 export const BIRTHDAY_DAYS = 7;
 export const MAX_ROWS = 8;
@@ -75,6 +76,8 @@ export interface AttentionInput {
   birthdays?: any[];
   /** склад (s251): stock.summary() — только названия, без цен и остатков; s252 — + инвентура и заказы */
   stock?: { out: any[]; low: any[]; inventory?: { isMonday?: boolean; remaining?: number }; overdue?: any[] };
+  /** s266 «Směna»: вчерашняя смена не заполнена (smena.missingOn); null — всё на месте, undefined — источник упал */
+  smena?: { date: string; cash: boolean; workTime: boolean } | null;
 }
 
 /**
@@ -159,6 +162,12 @@ export const buildAttention = (input: AttentionInput): { adminLine: string | nul
   if (docRows.length || contractRows.length) {
     const title = contractRows.length ? '🪪 <b>Документи й договори співробітників — терміни:</b>' : '🪪 <b>Документи співробітників — терміни:</b>';
     sections.push([title, ...capped([...docRows, ...contractRows], more)]);
+  }
+
+  // ── Смена администратора (s266): вчера салон работал, а касса или часы не записаны ──
+  if (input.smena && (input.smena.cash || input.smena.workTime)) {
+    const what = [input.smena.cash ? 'касу' : '', input.smena.workTime ? 'години' : ''].filter(Boolean).join(' і ');
+    sections.push([`📒 <b>Зміна ${dm(input.smena.date)}:</b> не заповнено ${what} (адмінка → Směna)`]);
   }
 
   // ── Склад (s251): что закончилось и что ниже минимума — только названия ──

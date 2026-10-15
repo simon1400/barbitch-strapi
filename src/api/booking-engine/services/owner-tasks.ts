@@ -26,10 +26,27 @@
  * (принимать некому / владельца не проверяют). `personal` — карточка управляющей: исполнителя
  * или автора задачи владельцу. Старые строки без полей — поручения владельца управляющей
  * (дефолты в `assigneeOf`/`creatorOf`, не только в схеме).
+ *
+ * s262: задачи АДМИНИСТРАТОРАМ — ставят владелец и управляющая (сами администраторы задач не
+ * ставят). `assignee: 'administrator'`; `personal` — карточка конкретной администраторки или
+ * null = «всем администраторкам» (общая: закрывает любая, кто сделала). Принимает постановщик;
+ * управляющая видит ВСЕ задачи администраторов (поставленные владельцем — только комментирует).
+ * Администраторка видит только задачи администраторам: свои и общие (`canSee`).
+ *
+ * s265 («Předání směny», §0в плана ADMIN_SHIFT_NEXT_SESSION_PROMPT.md, решения владельца §0.6):
+ *   • администраторка ставит задачу КОЛЛЕГЕ (другой работающей администраторке; себе и «всем» —
+ *     нет): `createdByRole: 'administrator'`, закрывается по «Hotovo» без принятия (`closesOnDone`),
+ *     автору — push. Обе стороны такой задачи — одна роль, поэтому стороны считаются по ЛЮДЯМ:
+ *     исполнитель — по карточке (`personal`), автор — по учётке (`createdByAccountId`, иначе логин);
+ *     автор видит поставленную ей задачу (`canSee`);
+ *   • переход `handover` — передать задачу администратора с карточкой другой администраторке:
+ *     исполнительнице и руководству (любой такой задаче, в любую сторону), только в работе; статус
+ *     не меняется, в ленте — «předáno» (от кого → кому), push получателю и постановщику.
  */
 
 import { pragueDateOf } from './slots-core';
 import { findSessionPersonal } from '../../../utils/staff-identity';
+import { findWorkingAdmins } from '../../../utils/staff-roster';
 import {
   MAX_FILE_BYTES,
   contentDisposition,
@@ -59,8 +76,8 @@ const LOG_UID = 'api::calendar-log.calendar-log';
 /** Журнал пишется сразу после записи события — ищем его в этом окне от `at`. */
 const LOG_MATCH_MS = 30_000;
 
-/** Кому дают поручения — те же роли, что пишут výkaz. */
-export const TASK_ROLES = ['manager'];
+/** Роли сотрудников с задачами (кроме владельца): управляющая; s262 — администраторы. */
+export const TASK_ROLES = ['manager', 'administrator'];
 export const MAX_TITLE = 200;
 export const MAX_DESCRIPTION = 4000;
 export const MAX_EVENT_TEXT = 2000;
@@ -77,10 +94,33 @@ export const STATUSES = {
   cancelled: 'Zrušeno',
 } as const;
 
-/** Стороны задачи (s246): исполнитель и постановщик — роль `owner` или `manager`. */
-export const SIDES = ['manager', 'owner'] as const;
-export const assigneeOf = (task: any): string => (task?.assignee === 'owner' ? 'owner' : 'manager');
-export const creatorOf = (task: any): string => (task?.createdByRole === 'manager' ? 'manager' : 'owner');
+/**
+ * Стороны задачи (s246): исполнитель — `owner`, `manager` или (s262) `administrator`;
+ * постановщик — `owner`, `manager` или (s265) `administrator` (задача коллеге).
+ */
+export const SIDES = ['manager', 'owner', 'administrator'] as const;
+export const assigneeOf = (task: any): string => (task?.assignee === 'owner' || task?.assignee === 'administrator' ? task.assignee : 'manager');
+export const creatorOf = (task: any): string =>
+  task?.createdByRole === 'manager' || task?.createdByRole === 'administrator' ? task.createdByRole : 'owner';
+
+/** Кто смотрит (для сторон «по людям», s265): роль, карточка, учётка, логин. */
+type Who = { role: string; personal?: any; accountId?: number | null; login?: string };
+
+/** s265: автор задачи — по учётке, у старых строк без неё — по логину. */
+export const isAuthor = (task: any, who: Who | null | undefined): boolean => {
+  if (!who) return false;
+  const acc = Number(task?.createdByAccountId) || null;
+  if (acc && who.accountId) return acc === who.accountId;
+  const login = String(who.login ?? '').trim().toLowerCase();
+  return !!login && String(task?.createdByName ?? '').trim().toLowerCase() === login;
+};
+
+/** Задача на карточке того, кто смотрит. */
+export const isHolder = (task: any, who: Who | null | undefined): boolean =>
+  !!task?.personal?.documentId && task.personal.documentId === who?.personal?.documentId;
+
+/** s265: задачу можно передать — задача администратора с конкретной карточкой (общие и так у всех). */
+export const canBeHandedOver = (task: any): boolean => assigneeOf(task) === 'administrator' && !!task?.personal?.documentId;
 /** Закрывается сразу по «hotovo»: задача самому себе или задача владельцу (его не проверяют). */
 export const closesOnDone = (task: any): boolean => assigneeOf(task) === 'owner' || assigneeOf(task) === creatorOf(task);
 
@@ -110,16 +150,26 @@ export const TRANSITIONS = {
   },
 } as const;
 
+/** s265: передать другой администраторке — только задачу в работе. */
+const HANDOVER = { from: ['open'], to: null } as const;
+
 /**
  * Действия роли над этой задачей. Исполнитель + постановщик в одном лице (задача себе) — обе
  * стороны; «hotovo» у задач, закрывающихся сразу, ведёт в `accepted` (снимать и принимать
  * нечего, вернуть/отменить — постановщику). Владелец-исполнитель «průběh» не пишет — комментарий.
+ * s265: `who` — кто смотрит; у задачи администраторки коллеге стороны считаются по людям
+ * (без `who` — по роли, как раньше). `handover` — исполнительнице и руководству.
  */
-export const transitionsFor = (task: any, role: string): Record<string, { from: readonly string[]; to: string | null }> => {
-  const isAssignee = role === assigneeOf(task);
-  const isCreator = role === creatorOf(task);
-  if (!isAssignee && !isCreator) return { ...TRANSITIONS.observer };
-  const out: any = { ...(isAssignee ? TRANSITIONS.assignee : {}), ...(isCreator ? TRANSITIONS.creator : {}) };
+export const transitionsFor = (task: any, role: string, who: Who | null = null): Record<string, { from: readonly string[]; to: string | null }> => {
+  let isAssignee = role === assigneeOf(task);
+  let isCreator = role === creatorOf(task);
+  if (who && role === 'administrator' && creatorOf(task) === 'administrator') {
+    isAssignee = isHolder(task, who);
+    isCreator = isAuthor(task, who);
+  }
+  const handover = canBeHandedOver(task) && (role === 'owner' || role === 'manager' || (role === 'administrator' && isAssignee)) ? { handover: HANDOVER } : {};
+  if (!isAssignee && !isCreator) return { ...TRANSITIONS.observer, ...handover };
+  const out: any = { ...(isAssignee ? TRANSITIONS.assignee : {}), ...(isCreator ? TRANSITIONS.creator : {}), ...handover };
   if (closesOnDone(task)) {
     delete out.undone;
     delete out.accept;
@@ -129,6 +179,22 @@ export const transitionsFor = (task: any, role: string): Record<string, { from: 
   }
   if (assigneeOf(task) === 'owner') delete out.progress;
   return out;
+};
+
+/**
+ * s262: видит ли сторона задачу. Владелец — всё; управляющая — свои (её карточка) и все задачи
+ * администраторам; администраторка — задачи администраторам: свои и общие (`personal` пуст).
+ * `who.personal` — карточка сессии.
+ */
+export const canSee = (task: any, who: Who): boolean => {
+  if (who.role === 'owner') return true;
+  const mine = isHolder(task, who);
+  if (who.role === 'manager') return mine || assigneeOf(task) === 'administrator';
+  // s265: и задачи, которые она сама поставила коллеге (следить, что сделано)
+  if (who.role === 'administrator') {
+    return assigneeOf(task) === 'administrator' && (mine || !task?.personal?.documentId || (creatorOf(task) === 'administrator' && isAuthor(task, who)));
+  }
+  return false;
 };
 
 /** Действия, где текст обязателен. */
@@ -202,9 +268,18 @@ export const changedFields = (current: any, next: any): string[] =>
  */
 export const applyTaskAction = (
   task: any,
-  { action, role, text, by, at, reportDate = null }: { action: string; role: string; text?: unknown; by: string; at: string; reportDate?: string | null }
+  {
+    action,
+    role,
+    text,
+    by,
+    at,
+    reportDate = null,
+    who = null,
+    to = null,
+  }: { action: string; role: string; text?: unknown; by: string; at: string; reportDate?: string | null; who?: Who | null; to?: { documentId: string; name: string } | null }
 ) => {
-  const rule = SIDES.includes(role as any) ? transitionsFor(task, role)[action] : null;
+  const rule = SIDES.includes(role as any) ? transitionsFor(task, role, who)[action] : null;
   if (!rule) throw new TaskError(403, 'action_not_allowed', 'Tuto akci nemůžete provést');
   const status = task?.status || 'open';
   if (!rule.from.includes(status)) throw new TaskError(409, 'bad_transition', `Úkol je ve stavu «${STATUSES[status] || status}» — akci nelze provést`);
@@ -215,6 +290,13 @@ export const applyTaskAction = (
   const event: any = { at, kind: action, by, role, text: t };
   if (reportDate) event.reportDate = reportDate;
   const data: any = { events: [...events, event] };
+  // s265: передача — меняется только исполнительница (статус тот же)
+  if (action === 'handover') {
+    if (!to?.documentId) throw new TaskError(400, 'bad_personal', 'Vyberte kolegyni');
+    if (to.documentId === task?.personal?.documentId) throw new TaskError(400, 'same_person', 'Úkol už je u ní');
+    Object.assign(event, { from: task?.personal?.name || '', to: to.name || '', toPersonal: to.documentId });
+    data.personal = to.documentId;
+  }
   if (rule.to) {
     data.status = rule.to;
     if (action === 'done') data.doneAt = at;
@@ -285,8 +367,12 @@ export const fileView = (f: any) => ({
   createdAt: f.createdAt || null,
 });
 
-/** Поручение наружу. */
-export const taskRow = (doc: any, files: any[] = [], today = '') => ({
+/**
+ * Поручение наружу. s265: `who` — для администраторки флаги «задача на мне» / «поставила я»
+ * (у задачи коллеге стороны по людям — клиент рисует кнопки по ним).
+ */
+export const taskRow = (doc: any, files: any[] = [], today = '', who: Who | null = null) => ({
+  ...(who?.role === 'administrator' ? { forMe: isHolder(doc, who), byMe: creatorOf(doc) === 'administrator' && isAuthor(doc, who) } : {}),
   documentId: doc.documentId,
   personal: doc.personal?.documentId || null,
   personalName: doc.personal?.name || null,
@@ -299,6 +385,8 @@ export const taskRow = (doc: any, files: any[] = [], today = '') => ({
   createdByName: doc.createdByName || null,
   assignee: assigneeOf(doc),
   createdByRole: creatorOf(doc),
+  // s262: общая задача всем администраторкам
+  allAdmins: assigneeOf(doc) === 'administrator' && !doc.personal?.documentId,
   doneAt: doc.doneAt || null,
   closedAt: doc.closedAt || null,
   closedBy: doc.closedBy || null,
@@ -357,7 +445,7 @@ export const reportTaskActions = (prev: any[], next: any[]) => {
   return out;
 };
 
-const FIELDS = ['title', 'description', 'dueDate', 'priority', 'status', 'assignee', 'createdByRole', 'createdByName', 'doneAt', 'closedAt', 'closedBy', 'events', 'version', 'createdAt', 'updatedAt'];
+const FIELDS = ['title', 'description', 'dueDate', 'priority', 'status', 'assignee', 'createdByRole', 'createdByName', 'createdByAccountId', 'doneAt', 'closedAt', 'closedBy', 'events', 'version', 'createdAt', 'updatedAt'];
 const FILE_FIELDS = ['taskDocId', 'fileName', 'mime', 'size', 'uploadedBy', 'uploadedRole', 'createdAt'];
 const notFound = () => new TaskError(404, 'task_not_found', 'Úkol nenalezen');
 const fileNotFound = () => new TaskError(404, 'file_not_found', 'Příloha nenalezena');
@@ -388,7 +476,7 @@ export default {
    * s247: push по событию поручения (manager-notify решает, кому и что). Fire-and-forget:
    * сбой пуша не роняет поручение.
    */
-  _notify(task: any, event: { kind: string; role: string; text?: unknown }) {
+  _notify(task: any, event: { kind: string; role: string; text?: unknown; by?: string; from?: string; quiet?: string }) {
     try {
       Promise.resolve(strapi.service('api::booking-engine.manager-notify').taskEvent(task, event)).catch((e) =>
         strapi.log.error(`owner-tasks: push ${event.kind} failed: ${e?.message || e}`)
@@ -398,13 +486,17 @@ export default {
     }
   },
 
-  /** Кто спрашивает: владелец — всё; исполнитель — свою карточку; остальным — 403. */
+  /**
+   * Кто спрашивает: владелец — всё; управляющая/администраторка — по своей карточке; остальным — 403.
+   * s265: + учётка и логин (автор задачи коллеге).
+   */
   async _who(session: any) {
-    if (session?.role === 'owner') return { role: 'owner', personal: null };
+    const ident = { accountId: Number(session?.id) || null, login: String(session?.username || '') };
+    if (session?.role === 'owner') return { role: 'owner', personal: null, ...ident };
     if (!session || !TASK_ROLES.includes(session.role)) throw new TaskError(403, 'not_allowed', 'Úkoly nejsou pro tuto roli');
     const p = await findSessionPersonal(strapi, session, { status: 'draft', fields: ['name'] });
     if (!p) throw new TaskError(404, 'no_card', 'Karta zaměstnance nenalezena — obraťte se na majitele');
-    return { role: 'manager', personal: p };
+    return { role: session.role, personal: p, ...ident };
   },
 
   /** Кому можно дать поручение: карточки управляющих (работающие). */
@@ -417,6 +509,29 @@ export default {
       limit: 50,
     });
     return rows.map((p) => ({ documentId: p.documentId, name: String(p.name ?? '').trim(), isActive: p.isActive !== false }));
+  },
+
+  /**
+   * s262: кому можно дать задачу администратора — работающие администраторки с карточкой.
+   * s263: общий источник с модулем «Směna» — `utils/staff-roster.findWorkingAdmins`.
+   */
+  async _admins() {
+    return (await findWorkingAdmins(strapi)).map((p) => ({ documentId: p.documentId, name: p.name }));
+  },
+
+  /**
+   * Задачи, которые видит сторона (s262): владелец — по фильтру; управляющая — свои + задачи
+   * администраторам (два запроса); администраторка — задачи администраторам, дальше `canSee`.
+   */
+  async _visible(who: any, filters: any, { fields, limit }: { fields: string[]; limit: number }) {
+    const q = (f: any) => strapi.documents(TASK_UID).findMany({ filters: { ...filters, ...f }, fields, populate: { personal: { fields: ['name'] } }, sort: [{ createdAt: 'desc' }], limit });
+    if (who.role === 'owner') return q({});
+    const lists =
+      who.role === 'manager'
+        ? await Promise.all([q({ personal: { documentId: { $eq: who.personal.documentId } } }), q({ assignee: { $eq: 'administrator' } })])
+        : [await q({ assignee: { $eq: 'administrator' } })];
+    const seen = new Set();
+    return lists.flat().filter((r) => !seen.has(r.documentId) && seen.add(r.documentId) && canSee(r, who));
   },
 
   async _filesDir() {
@@ -448,13 +563,13 @@ export default {
     if (!DOC_ID.test(documentId)) throw notFound();
     const doc = await strapi.documents(TASK_UID).findOne({ documentId, fields: FIELDS, populate: { personal: { fields: ['name'] } } });
     if (!doc) throw notFound();
-    if (who.role !== 'owner' && doc.personal?.documentId !== who.personal.documentId) throw notFound();
+    if (!canSee(doc, who)) throw notFound();
     return doc;
   },
 
-  async _row(doc: any, today: string) {
+  async _row(doc: any, today: string, who: any = null) {
     const files = (await this._filesFor([doc.documentId])).get(doc.documentId) || [];
-    return taskRow(doc, files, today);
+    return taskRow(doc, files, today, who);
   },
 
   async _write(existing: any, data: any, now: Date) {
@@ -471,7 +586,7 @@ export default {
     return { today, priorities: labelList(PRIORITIES), statuses: labelList(STATUSES), maxFiles: MAX_FILES_PER_TASK };
   },
 
-  /** GET /tasks?scope=active|closed|all — владелец: все; исполнитель: свои. */
+  /** GET /tasks?scope=active|closed|all — владелец: все; остальные — что видят (`canSee`). */
   async list({ session, scope, personal, now = new Date() }: { session: any; scope?: unknown; personal?: unknown; now?: Date }) {
     const who = await this._who(session);
     const today = this._today(now);
@@ -482,39 +597,62 @@ export default {
     if (who.role === 'owner') {
       const want = String(personal ?? '').trim();
       if (DOC_ID.test(want)) filters.personal = { documentId: { $eq: want } };
-    } else filters.personal = { documentId: { $eq: who.personal.documentId } };
-    const rows = await strapi.documents(TASK_UID).findMany({
-      filters,
-      fields: FIELDS,
-      populate: { personal: { fields: ['name'] } },
-      sort: [{ createdAt: 'desc' }],
-      limit: sc === 'active' ? 500 : 300,
-    });
+    }
+    const rows = await this._visible(who, filters, { fields: FIELDS, limit: sc === 'active' ? 500 : 300 });
     const files = await this._filesFor(rows.map((r) => r.documentId));
-    const tasks = sortTasks(rows, today).map((r) => taskRow(r, files.get(r.documentId) || [], today));
+    const tasks = sortTasks(rows, today).map((r) => taskRow(r, files.get(r.documentId) || [], today, who));
     return {
       ...this._meta(today),
       role: who.role,
       scope: sc,
       ...(who.role === 'owner' ? { people: await this._people() } : {}),
+      // s262: кому из администраторок можно поставить задачу (форма владельца и управляющей);
+      // s265: и администраторке — кому передать / поставить задачу (себя клиент убирает по `me`)
+      admins: await this._admins(),
+      ...(who.role === 'administrator' ? { me: who.personal.documentId } : {}),
       tasks,
     };
   },
 
   /**
    * POST /tasks — новая задача.
-   *   • владелец — поручение управляющей (выбор карточки `personal`; себе — нет, §8 плана);
+   *   • владелец — поручение управляющей (выбор карточки `personal`) или (s259) задача себе
+   *     `assignee: 'owner'` — без карточки: управляющая её не видит, push не уходит;
    *   • управляющая (s246) — `assignee: 'manager'` (себе) или `'owner'` (владельцу); карточка —
-   *     всегда её собственная по сессии, `personal` из тела не читается.
+   *     всегда её собственная по сессии, `personal` из тела не читается;
+   *   • s262: оба — `assignee: 'administrator'` + `personal` (карточка из `_admins`) или
+   *     `allAdmins: true` (всем);
+   *   • s265: администраторка — только коллеге (другой работающей администраторке): не себе, не «всем».
+   * `quiet` — без push (передача смены шлёт одну сводку сама).
    */
-  async create({ session, body, now = new Date() }: { session: any; body: any; now?: Date }) {
+  async create({ session, body, now = new Date(), quiet = false }: { session: any; body: any; now?: Date; quiet?: boolean }) {
     const who = await this._who(session);
     const today = this._today(now);
     const input = normalizeTaskInput(body, { today });
-    let personalDocId: string;
+    let personalDocId: string | null;
     let assignee: string;
-    if (who.role === 'owner') {
-      if (body?.assignee != null && body.assignee !== 'manager') throw new TaskError(400, 'bad_assignee', 'Úkol může majitel zadat jen manažerce');
+    if (who.role === 'administrator') {
+      if (body?.assignee !== 'administrator' || body?.allAdmins === true) throw new TaskError(400, 'bad_assignee', 'Úkol můžete zadat jen kolegyni');
+      const want = String(body?.personal ?? '').trim();
+      if (want === who.personal.documentId) throw new TaskError(400, 'self_task', 'Sama sobě úkol nezadáváte — stačí ho udělat');
+      const person = (await this._admins()).find((p) => p.documentId === want);
+      if (!person) throw new TaskError(400, 'bad_personal', 'Vyberte kolegyni');
+      personalDocId = person.documentId;
+      assignee = 'administrator';
+    } else if (body?.assignee === 'administrator') {
+      assignee = 'administrator';
+      if (body?.allAdmins === true) personalDocId = null;
+      else {
+        const want = String(body?.personal ?? '').trim();
+        const person = (await this._admins()).find((p) => p.documentId === want);
+        if (!person) throw new TaskError(400, 'bad_personal', 'Vyberte administrátorku');
+        personalDocId = person.documentId;
+      }
+    } else if (who.role === 'owner' && body?.assignee === 'owner') {
+      personalDocId = null;
+      assignee = 'owner';
+    } else if (who.role === 'owner') {
+      if (body?.assignee != null && body.assignee !== 'manager') throw new TaskError(400, 'bad_assignee', 'Vyberte, pro koho úkol je');
       const people = (await this._people()).filter((p) => p.isActive);
       const want = String(body?.personal ?? '').trim();
       const person = people.find((p) => p.documentId === want) || (people.length === 1 && !want ? people[0] : null);
@@ -522,7 +660,7 @@ export default {
       personalDocId = person.documentId;
       assignee = 'manager';
     } else {
-      if (!SIDES.includes(body?.assignee)) throw new TaskError(400, 'bad_assignee', 'Vyberte, pro koho úkol je');
+      if (body?.assignee !== 'manager' && body?.assignee !== 'owner') throw new TaskError(400, 'bad_assignee', 'Vyberte, pro koho úkol je');
       personalDocId = who.personal.documentId;
       assignee = body.assignee;
     }
@@ -541,10 +679,23 @@ export default {
       },
     });
     const doc = await strapi.documents(TASK_UID).findOne({ documentId: created.documentId, fields: FIELDS, populate: { personal: { fields: ['name'] } } });
-    const head = who.role === 'owner' ? 'Nový úkol' : assignee === 'owner' ? 'Nový úkol pro majitele' : 'Nový vlastní úkol';
+    const head =
+      who.role === 'administrator'
+        ? 'Nový úkol pro kolegyni'
+        : assignee === 'administrator'
+        ? personalDocId
+          ? 'Nový úkol pro administrátorku'
+          : 'Nový úkol pro všechny administrátorky'
+        : who.role === 'owner'
+          ? assignee === 'owner'
+            ? 'Nový vlastní úkol'
+            : 'Nový úkol'
+          : assignee === 'owner'
+            ? 'Nový úkol pro majitele'
+            : 'Nový vlastní úkol';
     this._log('task_create', session, doc, `${head}: ${cut(doc.title, 120)}${doc.dueDate ? ` · do ${fmtDay(doc.dueDate)}` : ''}`);
-    this._notify(doc, { kind: 'created', role: who.role });
-    return { task: await this._row(doc, today) };
+    if (!quiet) this._notify(doc, { kind: 'created', role: who.role, by: session?.username || '' });
+    return { task: await this._row(doc, today, who) };
   },
 
   /** PATCH /tasks/:id — правка названия, описания, срока, приоритета (постановщик задачи). */
@@ -552,7 +703,9 @@ export default {
     const who = await this._who(session);
     const today = this._today(now);
     const existing = await this._find(id, who);
-    if (creatorOf(existing) !== who.role) throw new TaskError(403, 'not_creator', 'Upravit zadání může jen ten, kdo úkol zadal');
+    if (creatorOf(existing) !== who.role || (who.role === 'administrator' && !isAuthor(existing, who))) {
+      throw new TaskError(403, 'not_creator', 'Upravit zadání může jen ten, kdo úkol zadal');
+    }
     if (['accepted', 'cancelled'].includes(existing.status)) throw new TaskError(409, 'task_closed', 'Uzavřený úkol nelze upravit — nejdřív ho vraťte do práce');
     const input = normalizeTaskInput(body, { today, partial: true, current: existing });
     const changed = changedFields(existing, input);
@@ -563,17 +716,43 @@ export default {
     const text = changed.map((k) => labels[k]).join(', ');
     const saved = await this._write(existing, { ...input, events: [...events, { at, kind: 'edited', by: session?.username || '', role: who.role, text }] }, now);
     this._log('task_edit', session, saved, `Úkol upraven (${text}): ${cut(saved.title, 120)}`);
-    return { task: await this._row(saved, today) };
+    return { task: await this._row(saved, today, who) };
   },
 
-  /** POST /tasks/:id/actions {action, text} — hotovo / ещё не hotovo (s245) / ход работы / принять / вернуть / отменить / комментарий. */
-  async act({ session, id, body, now = new Date(), reportDate = null }: { session: any; id: unknown; body: any; now?: Date; reportDate?: string | null }) {
+  /**
+   * POST /tasks/:id/actions {action, text} — hotovo / ещё не hotovo (s245) / ход работы / принять / вернуть / отменить / комментарий.
+   * s265: `handover` + `to` (карточка администраторки из `_admins`). `quiet: 'assignee'` — без push
+   * получательнице (передача смены шлёт ей одну сводку), постановщику — как обычно.
+   */
+  async act({
+    session,
+    id,
+    body,
+    now = new Date(),
+    reportDate = null,
+    quiet = null,
+  }: {
+    session: any;
+    id: unknown;
+    body: any;
+    now?: Date;
+    reportDate?: string | null;
+    quiet?: 'assignee' | null;
+  }) {
     const who = await this._who(session);
     const today = this._today(now);
     const existing = await this._find(id, who);
     const action = String(body?.action ?? '');
-    const { data, event } = applyTaskAction(existing, { action, role: who.role, text: body?.text, by: session?.username || '', at: now.toISOString(), reportDate });
-    const saved = await this._write(existing, data, now);
+    let to = null;
+    if (action === 'handover') {
+      const want = String(body?.to ?? '').trim();
+      to = (await this._admins()).find((p) => p.documentId === want) || null;
+      if (!to) throw new TaskError(400, 'bad_personal', 'Vyberte kolegyni');
+    }
+    const { data, event } = applyTaskAction(existing, { action, role: who.role, text: body?.text, by: session?.username || '', at: now.toISOString(), reportDate, who, to });
+    const { personal: nextPersonal, ...scalar } = data;
+    let saved = await this._write(existing, scalar, now);
+    if (nextPersonal) saved = await this._setPersonal(saved, nextPersonal);
     const head = {
       done: 'Úkol hotov',
       undone: 'Úkol vrácen — ještě není hotovo',
@@ -582,10 +761,21 @@ export default {
       accept: 'Úkol převzat',
       reopen: 'Úkol vrácen do práce',
       cancel: 'Úkol zrušen',
+      handover: 'Úkol předán',
     }[action];
-    this._log(`task_${action}`, session, saved, `${head}: ${cut(saved.title, 120)}${reportDate ? ` (výkaz ${fmtDay(reportDate)})` : ''}`);
-    this._notify(saved, { kind: action, role: who.role, text: event.text });
-    return { task: await this._row(saved, today) };
+    const tail = action === 'handover' ? ` · ${event.from || '—'} → ${event.to}` : '';
+    this._log(`task_${action}`, session, saved, `${head}: ${cut(saved.title, 120)}${tail}${reportDate ? ` (výkaz ${fmtDay(reportDate)})` : ''}`);
+    this._notify(saved, { kind: action, role: who.role, text: event.text, by: session?.username || '', ...(action === 'handover' ? { from: event.from } : {}), ...(quiet ? { quiet } : {}) });
+    return { task: await this._row(saved, today, who) };
+  },
+
+  /**
+   * s265: сменить исполнительницу. Связь (manyToOne) условным `updateMany` по `version` не пишется —
+   * поэтому после него, Document Service; лента и версия уже записаны (одновременная правка отбита).
+   */
+  async _setPersonal(saved: any, personalDocId: string) {
+    await strapi.documents(TASK_UID).update({ documentId: saved.documentId, data: { personal: personalDocId } });
+    return strapi.documents(TASK_UID).findOne({ documentId: saved.documentId, fields: FIELDS, populate: { personal: { fields: ['name'] } } });
   },
 
   /**
@@ -602,7 +792,7 @@ export default {
     const { events, removed } = removeTaskEvent(existing, { at: body?.at, role: who.role, by });
     const saved = await this._write(existing, { events }, now);
     await this._dropEventLog(existing.documentId, removed);
-    return { task: await this._row(saved, today) };
+    return { task: await this._row(saved, today, who) };
   },
 
   /** Запись журнала о событии ленты: то же действие, задача и автор, записана сразу после события. */
@@ -685,29 +875,35 @@ export default {
 
   /**
    * GET /tasks/attention — «Сегодня».
-   *   • владелец: поручения управляющей — просроченные и ждущие принятия (её задачи самой себе —
-   *     не его дело); s246 `forMe` — задачи от управляющей ему, в работе;
+   *   • владелец: его поручения (управляющей и, s262, администраторам) — просроченные и ждущие
+   *     принятия (её задачи самой себе — не его дело); s246 `forMe` — задачи ему, в работе;
    *   • управляющая: её задачи в работе (от владельца и свои); s246 `toOwner` — сколько её задач
-   *     владельцу в работе и сколько он выполнил за 7 дней.
+   *     владельцу в работе и сколько он выполнил за 7 дней; s262 `admins` — задачи администраторам:
+   *     ждут ЕЁ принятия (поставила она) и просроченные (любые);
+   *   • s262 администраторка: её и общие задачи в работе.
    */
   async attention({ session, now = new Date() }: { session: any; now?: Date }) {
     const who = await this._who(session);
     const today = this._today(now);
-    const filters: any = { status: { $in: who.role === 'owner' ? ['open', 'done'] : ['open'] } };
-    if (who.role !== 'owner') filters.personal = { documentId: { $eq: who.personal.documentId } };
-    const all = await strapi.documents(TASK_UID).findMany({
-      filters,
-      fields: ['title', 'dueDate', 'priority', 'status', 'assignee', 'createdByRole', 'doneAt', 'createdAt'],
-      populate: { personal: { fields: ['name'] } },
-      limit: 500,
-    });
-    // свои задачи стороны: владельцу — его поручения управляющей; управляющей — где она исполнитель
-    const rows = all.filter((r) => (who.role === 'owner' ? creatorOf(r) === 'owner' && assigneeOf(r) === 'manager' : assigneeOf(r) === 'manager'));
+    const all = await this._visible(
+      who,
+      { status: { $in: who.role === 'administrator' ? ['open'] : ['open', 'done'] } },
+      { fields: ['title', 'dueDate', 'priority', 'status', 'assignee', 'createdByRole', 'createdByName', 'createdByAccountId', 'doneAt', 'createdAt'], limit: 500 }
+    );
+    // свои задачи стороны: владельцу — его поручения; остальным — где исполнитель они
+    // (s265: администраторке — не задачи, которые она поставила коллеге)
+    const rows = all.filter((r) =>
+      who.role === 'owner'
+        ? creatorOf(r) === 'owner' && assigneeOf(r) !== 'owner'
+        : assigneeOf(r) === who.role && r.status === 'open' && (who.role !== 'administrator' || isHolder(r, who) || !r.personal?.documentId)
+    );
     const toSide = all.filter((r) => assigneeOf(r) === 'owner' && r.status === 'open');
     const view = (r) => ({
       documentId: r.documentId,
       title: r.title || '',
       personalName: r.personal?.name || null,
+      assignee: assigneeOf(r),
+      allAdmins: assigneeOf(r) === 'administrator' && !r.personal?.documentId,
       dueDate: r.dueDate || null,
       priority: r.priority || 'normal',
       status: r.status,
@@ -715,7 +911,7 @@ export default {
       doneAt: r.doneAt || null,
     });
     const sorted = sortTasks(rows, today);
-    return {
+    const base = {
       role: who.role,
       today,
       open: sorted.filter((r) => r.status === 'open').length,
@@ -724,15 +920,26 @@ export default {
       waiting: who.role === 'owner' ? sorted.filter((r) => r.status === 'done').map(view) : [],
       // исполнителю — ближайшие в работе (для карточки)
       next: who.role === 'owner' ? [] : sorted.filter((r) => r.status === 'open').slice(0, 5).map(view),
-      ...(who.role === 'owner'
-        ? {
-            forMe: {
-              open: toSide.length,
-              overdue: toSide.filter((r) => isOverdue(r, today)).length,
-              list: sortTasks(toSide, today).slice(0, 10).map(view),
-            },
-          }
-        : { toOwner: { open: toSide.length, done: await this._doneForManagerSince(who.personal.documentId, now) } }),
+    };
+    if (who.role === 'owner') {
+      return {
+        ...base,
+        forMe: { open: toSide.length, overdue: toSide.filter((r) => isOverdue(r, today)).length, list: sortTasks(toSide, today).slice(0, 10).map(view) },
+      };
+    }
+    if (who.role === 'administrator') return base;
+    const adm = sortTasks(
+      all.filter((r) => assigneeOf(r) === 'administrator'),
+      today
+    );
+    return {
+      ...base,
+      toOwner: { open: toSide.length, done: await this._doneForManagerSince(who.personal.documentId, now) },
+      admins: {
+        open: adm.filter((r) => r.status === 'open').length,
+        waiting: adm.filter((r) => r.status === 'done' && creatorOf(r) === 'manager').map(view),
+        overdue: adm.filter((r) => isOverdue(r, today)).map(view),
+      },
     };
   },
 

@@ -47,6 +47,7 @@ const tasksUrl = dataUrl(
     ["from './slots-core'", `from '${slotsUrl}'`],
     ["from '../../../utils/staff-identity'", `from '${identityUrl}'`],
     ["from '../../../utils/private-files'", `from '${dataUrl(toJs('src/utils/private-files.ts'))}'`],
+    ["from '../../../utils/staff-roster'", `from '${dataUrl(toJs('src/utils/staff-roster.ts'))}'`],
   ])
 );
 const T = await import(tasksUrl);
