@@ -95,7 +95,7 @@ async function run(role, method, pathName, { querystring = '', response = { data
 // ───────────────────────── 1. белый список коллекций ─────────────────────────
 const MONEY = [
   'penalties', 'add-moneys', 'payrolls', 'services-provided', 'avanses', 'salaries', 'taxes', 'work-times',
-  'costs', 'card-profits', 'extra-profits', 'cashs', 'qr-pays', 'vouchers', 'stocks', 'time-offs',
+  'costs', 'card-profits', 'extra-profits', 'cashs', 'qr-pays', 'vouchers', 'stock-items', 'time-offs',
   'calendar-logs', 'client-login-tokens', 'push-subscriptions', 'loyalty-transactions', 'notes', 'users',
 ];
 const OPEN = ['personals', 'salon-hours', 'time-blocks', 'shifts', 'salon-services'];

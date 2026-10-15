@@ -26,10 +26,15 @@
  * о каком статусе управляющая уже знает). Приход по заказу — тот же путь записи остатка
  * (`_moveWithRetry`), с `orderDocId` в движении.
  *
+ * Фаза 3 (s261): прогноз из истории движений (`forecastOf`: расход в день, «vystačí ~N dní», «brzy dojde»,
+ * подсказка минимума — сама не применяется), отчёт «Spotřeba» за месяц (`usageReport`); старая коллекция
+ * «Склад» удалена — для автодополнения остался словарь названий (stock-legacy-names.ts).
+ *
  * Верх файла — чистые функции (tests/stock.test.mjs), ниже — сервис.
  */
 
-import { pragueDateOf } from './slots-core';
+import { pragueDateOf, pragueMinToUtcIso } from './slots-core';
+import { LEGACY_NAMES } from './stock-legacy-names';
 
 export class StockError extends Error {
   status: number;
@@ -43,8 +48,8 @@ export class StockError extends Error {
 
 export const ITEM_UID = 'api::stock-item.stock-item';
 export const MOVE_UID = 'api::stock-move.stock-move';
-/** Старая коллекция «Склад» (мертва с 05.2026) — только словарь названий для автодополнения. */
-export const LEGACY_UID = 'api::stock.stock';
+/** Заказы (stock-orders.ts) — здесь только чтение приходов для отчёта «Spotřeba». */
+const ORDER_UID = 'api::stock-order.stock-order';
 
 export const STOCK_ROLES = ['owner', 'manager', 'administrator'];
 export const EDIT_ROLES = ['owner', 'manager'];
@@ -87,6 +92,7 @@ const DOC_ID = /^[a-z0-9]{10,40}$/;
 const has = (o: any, k: string) => !!o && Object.prototype.hasOwnProperty.call(o, k);
 const CAT_KEYS = new Set(CATEGORIES.map((c) => c.key));
 const UNIT_KEYS = new Set(UNITS.map((u) => u.key));
+const NOTIFIED = new Set(['low', 'out', 'soon']);
 
 /** Округление до сотых (ml/g бывают дробными; decimal в базе). */
 export const r2 = (n: number): number => Math.round((Number(n) || 0) * 100) / 100;
@@ -143,9 +149,12 @@ export const effectiveTarget = (item: any): number => {
   return t > min ? t : Math.max(r2(min * 2), r2(min + 1));
 };
 
-/** Сколько упаковок заказать: 0 — позиция в порядке; иначе до target, минимум одна. */
-export const suggestedPacks = (item: any): number => {
-  if (item?.active === false || statusOf(item) === 'ok') return 0;
+/**
+ * Сколько упаковок заказать: 0 — позиция в порядке; иначе до target, минимум одна.
+ * Фаза 3: `soon` — ещё не ниже минимума, но по расходу скоро кончится (`forecastOf`) — тоже заказываем.
+ */
+export const suggestedPacks = (item: any, { soon = false }: { soon?: boolean } = {}): number => {
+  if (item?.active === false || (statusOf(item) === 'ok' && !soon)) return 0;
   const havePacks = r2(n0(item?.qty)) / packOf(item);
   return Math.max(1, Math.ceil(effectiveTarget(item) - havePacks - 1e-9));
 };
@@ -338,11 +347,118 @@ export const computeMove = (item: any, body: any) => {
   throw new StockError(400, 'bad_kind', 'Neplatná akce');
 };
 
+// ── Фаза 3 (s261): расход из истории движений, прогноз, подсказка минимума, отчёт ──────────
+// Норм «на услугу» нет (§0.12): расход — только из пересчётов. Между двумя наблюдениями
+// остатка израсходовано «было до второго − насчитали» (остаток до него = прошлое наблюдение +
+// приходы между ними). Время, пока позиции не было (наблюдение 0), не считается.
+
+/** Средний расход — по интервалам, закончившимся за столько последних дней. */
+export const FORECAST_WINDOW_DAYS = 90;
+/** Меньше стольких дней наблюдений — прогноза нет. */
+export const FORECAST_MIN_DAYS = 7;
+/** Сколько ждать заказ (как `expectedDays` заказа по умолчанию). */
+export const LEAD_DAYS = 7;
+/** «Brzy dojde»: остатка хватит не больше чем на срок доставки + 3 дня (§5.4). */
+export const SOON_DAYS = LEAD_DAYS + 3;
+/** Подсказка минимума: расход за срок доставки + неделя запаса (§5.4). */
+export const MIN_COVER_DAYS = LEAD_DAYS + 7;
+/** Движения для прогноза грузятся с запасом: первое наблюдение интервала может быть до окна. */
+export const HISTORY_DAYS = FORECAST_WINDOW_DAYS + 60;
+const DAY_MS = 86400000;
+
+const tsOf = (m: any): number => Date.parse(m?.createdAt ?? '');
+
+/**
+ * Движение = наблюдение настоящего остатка: пересчёт; «Došlo»; «Málo», если оно изменило остаток
+ * (без изменения — лишь отметка «примерно минимум»); старт новой позиции с введённым остатком.
+ * Приход (`in`) — не наблюдение: он только добавляет к известному остатку.
+ */
+export const isObservation = (m: any): boolean =>
+  m?.kind === 'count' ||
+  (m?.kind === 'out' && (m?.mode !== 'low' || r2(n0(m.qtyBefore)) !== r2(n0(m.qtyAfter)))) ||
+  (m?.kind === 'create' && r2(n0(m.qtyAfter)) > 0);
+
+/**
+ * Интервалы расхода одной позиции `{from, to, used}` (мс, базовая единица; `used` < 0 — насчитали
+ * больше, чем было: прошлый расход был переоценён или приход не отметили). `last` — последнее
+ * наблюдение: `since` — с какого момента после него идёт расход (при нуле — с первого прихода).
+ */
+export const usageIntervals = (moves: any[]) => {
+  const list = (moves || []).filter((m) => Number.isFinite(tsOf(m))).sort((a, b) => tsOf(a) - tsOf(b));
+  const intervals: { from: number; to: number; used: number }[] = [];
+  let anchor: { t: number; qty: number } | null = null;
+  let restockAt: number | null = null;
+  for (const m of list) {
+    const t = tsOf(m);
+    if (!isObservation(m)) {
+      if (m.kind === 'in' && anchor && anchor.qty <= 0 && restockAt == null) restockAt = t;
+      continue;
+    }
+    if (anchor) {
+      const from = anchor.qty > 0 ? anchor.t : restockAt;
+      if (from != null && t > from) intervals.push({ from, to: t, used: r2(n0(m.qtyBefore) - n0(m.qtyAfter)) });
+    }
+    anchor = { t, qty: r2(n0(m.qtyAfter)) };
+    restockAt = null;
+  }
+  const last = anchor ? { at: anchor.t, qty: anchor.qty, since: anchor.qty > 0 ? anchor.t : restockAt } : null;
+  return { intervals, last };
+};
+
+/** Чешское «den / dny / dní». */
+export const dniText = (n: number): string => (n === 1 ? 'den' : n >= 2 && n <= 4 ? 'dny' : 'dní');
+
+/** Расход текстом в базовой единице: «~3 ks za den», «~1,5 ks za týden», «~200 ml za měsíc». */
+export const useText = (avg: unknown, unit: unknown): string | null => {
+  const a = n0(avg);
+  if (a <= 0) return null;
+  const u = UNIT_KEYS.has(unit as string) ? (unit as string) : 'ks';
+  const round = (n: number) => (n >= 10 ? Math.round(n) : Math.round(n * 10) / 10);
+  if (a >= 1) return `~${numText(round(a))} ${u} za den`;
+  if (a * 7 >= 1) return `~${numText(round(a * 7))} ${u} za týden`;
+  return `~${numText(round(a * 30))} ${u} za měsíc`;
+};
+
+/**
+ * Прогноз позиции (§5.4). `avgDailyUse` — средний расход в день (базовая единица) за последние
+ * FORECAST_WINDOW_DAYS; `daysLeft` — на сколько целых дней хватит остатка с учётом расхода после
+ * последнего наблюдения; `soon` — ещё «Skladem», но хватит не больше чем на SOON_DAYS;
+ * `suggestedMin` — подсказка минимума в упаковках (расход за MIN_COVER_DAYS), сама не применяется.
+ * Наблюдений меньше FORECAST_MIN_DAYS — всё null («málo dat»), `forecastDays` — сколько есть.
+ */
+export const forecastOf = (item: any, moves: any[], now: Date) => {
+  const out: any = { avgDailyUse: null, daysLeft: null, soon: false, suggestedMin: null, forecastDays: 0, useText: null, leftText: null };
+  const { intervals, last } = usageIntervals(moves);
+  const t = now.getTime();
+  const inWindow = intervals.filter((i) => i.to <= t && i.to >= t - FORECAST_WINDOW_DAYS * DAY_MS);
+  const days = inWindow.reduce((s, i) => s + (i.to - i.from), 0) / DAY_MS;
+  out.forecastDays = Math.floor(days);
+  if (days < FORECAST_MIN_DAYS) return out;
+  const avg = Math.max(0, inWindow.reduce((s, i) => s + i.used, 0)) / days;
+  out.avgDailyUse = Math.round(avg * 1000) / 1000;
+  if (avg <= 0) return out;
+  out.useText = useText(avg, item?.unit);
+  const qty = Math.max(0, r2(n0(item?.qty)));
+  const elapsed = last?.since != null ? Math.max(0, (t - last.since) / DAY_MS) : 0;
+  out.daysLeft = qty <= 0 ? 0 : Math.max(0, Math.floor(qty / avg - elapsed));
+  out.leftText = out.daysLeft === 0 ? (qty > 0 ? 'možná už dochází — spočítejte' : null) : `vystačí ~${out.daysLeft} ${dniText(out.daysLeft)}`;
+  out.soon = item?.active !== false && statusOf(item) === 'ok' && out.daysLeft <= SOON_DAYS;
+  const pack = packOf(item);
+  const need = (avg * MIN_COVER_DAYS) / pack;
+  // штучные и «без упаковки» — целые; упаковки ml/g — до десятых (канистра: 0,3)
+  out.suggestedMin = pack === 1 || unitOf(item) === 'ks' ? Math.max(1, Math.ceil(need - 1e-9)) : Math.max(0.1, Math.ceil(need * 10 - 1e-9) / 10);
+  return out;
+};
+
 /**
  * Позиция для ответа. Администратору — без цены (§0.2).
  * `onOrder` — упаковки по открытым заказам (draft/sent, ещё не пришли): «Co objednat» их вычитает.
+ * Фаза 3: `history` — движения позиций за HISTORY_DAYS (itemDocId → список) для прогноза; без неё прогноза нет.
  */
-export const itemView = (doc: any, { now, showPrices, onOrder }: { now: Date; showPrices: boolean; onOrder?: Map<string, number> }) => {
+export const itemView = (
+  doc: any,
+  { now, showPrices, onOrder, history }: { now: Date; showPrices: boolean; onOrder?: Map<string, number>; history?: Map<string, any[]> }
+) => {
   const item = {
     documentId: doc.documentId,
     name: String(doc.name ?? ''),
@@ -362,15 +478,17 @@ export const itemView = (doc: any, { now, showPrices, onOrder }: { now: Date; sh
     note: String(doc.note ?? ''),
     active: doc.active !== false,
     updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : null,
-    /** о каком статусе управляющая уже знает (push / сводка 10:00, stock-notify) */
-    notifiedStatus: doc.notifiedStatus === 'low' || doc.notifiedStatus === 'out' ? doc.notifiedStatus : null,
+    /** о каком статусе управляющая уже знает (push / сводка 10:00, stock-notify); `soon` — о «brzy dojde» (s261) */
+    notifiedStatus: NOTIFIED.has(doc.notifiedStatus) ? doc.notifiedStatus : null,
   };
   const status = statusOf(item);
-  const suggested = suggestedPacks(item);
+  const forecast = forecastOf(item, history?.get(item.documentId) || [], now);
+  const suggested = suggestedPacks(item, { soon: forecast.soon });
   const onOrderPacks = Math.max(0, Math.floor(n0(onOrder?.get(item.documentId))));
   const out: any = {
     ...item,
     status,
+    ...forecast,
     qtyText: fmtQty(item.qty, item.packSize, item.unit),
     minText: item.packSize > 1 ? `${numText(item.min)} bal.` : `${numText(item.min)} ${item.unit}`,
     effectiveTarget: effectiveTarget(item),
@@ -442,6 +560,9 @@ export const orderGroups = (items: any[], { showPrices }: { showPrices: boolean 
       packs,
       onOrderPacks: it.onOrderPacks || 0,
       url: it.url,
+      /** s261: ещё «Skladem», но по расходу скоро кончится */
+      soon: !!it.soon,
+      leftText: it.leftText ?? null,
     };
     if (showPrices) {
       line.price = it.lastPrice ?? null;
@@ -451,7 +572,7 @@ export const orderGroups = (items: any[], { showPrices }: { showPrices: boolean 
   }
   const out = [...groups.values()].sort((a, b) => (!a.supplier ? 1 : !b.supplier ? -1 : a.supplier.localeCompare(b.supplier, 'cs')));
   for (const g of out) {
-    g.lines.sort((a, b) => (a.status === b.status ? a.name.localeCompare(b.name, 'cs') : a.status === 'out' ? -1 : 1));
+    g.lines.sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || a.name.localeCompare(b.name, 'cs'));
     g.text = orderText(g);
     if (showPrices) {
       const known = g.lines.filter((l) => l.sum != null);
@@ -499,6 +620,135 @@ export const attentionOf = (items: any[], now: Date = new Date()) => {
   };
 };
 
+/**
+ * Месяц отчёта «Spotřeba» (`YYYY-MM`, по умолчанию текущий пражский): границы [from, to) в UTC
+ * от пражской полуночи, сколько дней прошло (текущий месяц — до «сейчас»), соседние месяцы
+ * (будущих нет). Раньше REPORT_FIRST_MONTH — склада ещё не было.
+ */
+export const REPORT_FIRST_MONTH = '2026-10';
+const MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
+const shiftMonth = (m: string, by: number): string => {
+  const [y, mo] = m.split('-').map(Number);
+  const d = new Date(Date.UTC(y, mo - 1 + by, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+};
+export const monthRange = (month: unknown, now: Date) => {
+  const current = pragueDateOf(now).slice(0, 7);
+  const m = month == null || month === '' ? current : String(month);
+  if (!MONTH_RE.test(m) || m > current || m < REPORT_FIRST_MONTH) throw new StockError(400, 'bad_month', 'Neplatný měsíc');
+  const from = pragueMinToUtcIso(`${m}-01`, 0);
+  const to = pragueMinToUtcIso(`${shiftMonth(m, 1)}-01`, 0);
+  const end = Math.min(Date.parse(to), now.getTime());
+  return {
+    month: m,
+    from,
+    to,
+    days: Math.max(0, Math.round(((end - Date.parse(from)) / DAY_MS) * 10) / 10),
+    current: m === current,
+    prev: m > REPORT_FIRST_MONTH ? shiftMonth(m, -1) : null,
+    next: m < current ? shiftMonth(m, 1) : null,
+  };
+};
+
+/**
+ * «Nakoupeno vs spotřebováno» за [from, to) по позициям (§5.5): пришло — движения `in` за период;
+ * израсходовано — интервалы между наблюдениями, пропорционально пересечению с периодом (`coveredDays` —
+ * сколько дней периода покрыто наблюдениями: расход после последнего пересчёта ещё не известен).
+ * Деньги (только руководству) — оценка по последней цене упаковки; позиции без цены — `unpriced`.
+ * `items` — сырые документы (и архивные), `moves` — движения с запасом до начала периода.
+ */
+export const usageReport = ({ items, moves, from, to, showPrices }: { items: any[]; moves: any[]; from: string; to: string; showPrices: boolean }) => {
+  const a = Date.parse(from);
+  const b = Date.parse(to);
+  const byItem = new Map<string, any[]>();
+  for (const m of moves || []) {
+    if (!byItem.has(m.itemDocId)) byItem.set(m.itemDocId, []);
+    byItem.get(m.itemDocId).push(m);
+  }
+  const catRank = new Map(CATEGORIES.map((c, i) => [c.key, i]));
+  const rows = [];
+  for (const doc of items || []) {
+    const list = byItem.get(doc.documentId) || [];
+    const inQty = r2(list.filter((m) => m.kind === 'in' && tsOf(m) >= a && tsOf(m) < b).reduce((s, m) => s + n0(m.delta), 0));
+    let used = 0;
+    let covered = 0;
+    for (const i of usageIntervals(list).intervals) {
+      const lo = Math.max(i.from, a);
+      const hi = Math.min(i.to, b);
+      if (hi <= lo) continue;
+      used += (i.used * (hi - lo)) / (i.to - i.from);
+      covered += hi - lo;
+    }
+    const usedQty = r2(Math.max(0, used));
+    const active = doc.active !== false;
+    if (!active && !inQty && !usedQty) continue;
+    const packSize = packOf(doc);
+    const unit = unitOf(doc);
+    const row: any = {
+      documentId: doc.documentId,
+      name: String(doc.name ?? ''),
+      category: CAT_KEYS.has(doc.category) ? doc.category : 'jine',
+      location: String(doc.location ?? ''),
+      unit,
+      packSize,
+      active,
+      inQty,
+      inText: inQty ? fmtQty(inQty, packSize, unit) : '—',
+      usedQty,
+      usedText: covered ? fmtQty(usedQty, packSize, unit) : '—',
+      coveredDays: Math.round((covered / DAY_MS) * 10) / 10,
+    };
+    if (showPrices) {
+      const price = doc.lastPrice == null || doc.lastPrice === '' ? null : n0(doc.lastPrice);
+      row.price = price == null ? null : r2(price);
+      row.inValue = price == null ? null : r2((inQty / packSize) * price);
+      row.usedValue = price == null ? null : r2((usedQty / packSize) * price);
+    }
+    rows.push(row);
+  }
+  rows.sort((x, y) => catRank.get(x.category) - catRank.get(y.category) || x.name.localeCompare(y.name, 'cs'));
+  const sum = (list: any[], k: string) => r2(list.reduce((s, r) => s + (r[k] ?? 0), 0));
+  const categories = CATEGORIES.filter((c) => rows.some((r) => r.category === c.key)).map((c) => {
+    const own = rows.filter((r) => r.category === c.key);
+    const cat: any = { key: c.key, label: c.label, items: own.length };
+    if (showPrices) {
+      cat.inValue = sum(own, 'inValue');
+      cat.usedValue = sum(own, 'usedValue');
+    }
+    return cat;
+  });
+  const totals: any = { items: rows.length, withUse: rows.filter((r) => r.coveredDays > 0).length };
+  if (showPrices) {
+    totals.inValue = sum(rows, 'inValue');
+    totals.usedValue = sum(rows, 'usedValue');
+    totals.unpriced = rows.filter((r) => r.price == null && (r.inQty || r.usedQty)).length;
+  }
+  return { items: rows, categories, totals };
+};
+
+/** Деньги по приходам заказов за [from, to) (только руководству): сумма введённых сумм прихода, сколько приходов, сколько без суммы. */
+export const receiptsPaidOf = (orders: any[], from: string, to: string) => {
+  const a = Date.parse(from);
+  const b = Date.parse(to);
+  let paid = 0;
+  let count = 0;
+  let noSum = 0;
+  for (const o of orders || []) {
+    for (const r of Array.isArray(o?.receipts) ? o.receipts : []) {
+      const t = Date.parse(r?.at ?? '');
+      if (!(t >= a && t < b)) continue;
+      count++;
+      if (r?.sum == null || r.sum === '') noSum++;
+      else paid += n0(r.sum);
+    }
+  }
+  return { paid: r2(paid), receipts: count, noSum };
+};
+
+/** Снять отметку «управляющая знает»: «málo/došlo» — позиция снова в порядке; «brzy dojde» — пришёл товар. */
+export const clearNotified = (notified: unknown, after: string, kind: string): boolean =>
+  notified === 'soon' ? kind === 'in' : !!notified && after === 'ok';
+
 /** Что поменялось в настройках — для журнала. */
 export const changedItemFields = (current: any, next: any): string[] =>
   Object.keys(next).filter((k) => String(current?.[k] ?? '') !== String(next[k] ?? ''));
@@ -524,6 +774,9 @@ const ITEM_FIELDS = [
   'countEveryDays', 'lastCountedAt', 'lastCountedBy', 'note', 'active', 'version', 'notifiedStatus', 'createdAt', 'updatedAt',
 ];
 const MOVE_FIELDS = ['itemDocId', 'itemName', 'kind', 'mode', 'qtyBefore', 'qtyAfter', 'delta', 'packSize', 'unit', 'by', 'role', 'note', 'orderDocId', 'createdAt'];
+/** Движения для прогноза и отчёта (s261) — только то, что нужно для расчёта. */
+const HISTORY_FIELDS = ['itemDocId', 'kind', 'mode', 'qtyBefore', 'qtyAfter', 'delta', 'createdAt'];
+const MAX_HISTORY = 50000;
 const ACTIVE_FILTER = { $or: [{ active: true }, { active: { $null: true } }] };
 const notFound = () => new StockError(404, 'item_not_found', 'Položka nenalezena');
 const labelList = (o: Record<string, string>) => Object.entries(o).map(([key, label]) => ({ key, label }));
@@ -592,10 +845,31 @@ export default {
     }
   },
 
-  /** Активные позиции в виде ответа (с учётом заказанного). */
+  /**
+   * Движения для прогноза (s261): за HISTORY_DAYS, itemDocId → список. `itemDocId` — одной позиции.
+   * Сбой — пусто: список без прогноза важнее, чем ошибка.
+   */
+  async _history(now: Date, itemDocId: string | null = null): Promise<Map<string, any[]>> {
+    try {
+      const filters: any = { createdAt: { $gte: new Date(now.getTime() - HISTORY_DAYS * DAY_MS).toISOString() } };
+      if (itemDocId) filters.itemDocId = itemDocId;
+      const rows = await strapi.documents(MOVE_UID).findMany({ filters, fields: HISTORY_FIELDS, limit: MAX_HISTORY });
+      const out = new Map<string, any[]>();
+      for (const m of rows) {
+        if (!out.has(m.itemDocId)) out.set(m.itemDocId, []);
+        out.get(m.itemDocId).push(m);
+      }
+      return out;
+    } catch (e) {
+      strapi.log.warn(`stock: history failed: ${e?.message || e}`);
+      return new Map();
+    }
+  },
+
+  /** Активные позиции в виде ответа (с учётом заказанного и прогноза). */
   async _views(now: Date, showPrices: boolean, { archived = false } = {}) {
-    const [rows, onOrder] = await Promise.all([this._all({ archived }), this._onOrder()]);
-    return rows.map((d) => itemView(d, { now, showPrices, onOrder }));
+    const [rows, onOrder, history] = await Promise.all([this._all({ archived }), this._onOrder(), this._history(now)]);
+    return rows.map((d) => itemView(d, { now, showPrices, onOrder, history }));
   },
 
   _meta(who: any, now: Date) {
@@ -625,7 +899,7 @@ export default {
     const who = this._who(session);
     const doc = await this._find(id);
     if (doc.active === false && !who.canEditItems) throw notFound();
-    const [moves, onOrder] = await Promise.all([
+    const [moves, onOrder, history] = await Promise.all([
       strapi.documents(MOVE_UID).findMany({
         filters: { itemDocId: doc.documentId },
         fields: MOVE_FIELDS,
@@ -633,8 +907,9 @@ export default {
         limit: 10,
       }),
       this._onOrder(),
+      this._history(now, doc.documentId),
     ]);
-    return { item: itemView(doc, { now, showPrices: who.showPrices, onOrder }), moves: moves.map(moveView), meta: this._meta(who, now) };
+    return { item: itemView(doc, { now, showPrices: who.showPrices, onOrder, history }), moves: moves.map(moveView), meta: this._meta(who, now) };
   },
 
   /** GET /stock/order — «Co objednat»: группы по поставщику, текст для копирования; `covered` — уже заказано. */
@@ -687,7 +962,29 @@ export default {
     return { moves: rows.slice(0, n).map(moveView), hasMore: rows.length > n };
   },
 
-  /** GET /stock/suggest — автодополнение: названия (свои + старая «Склад»), места, поставщики. */
+  /**
+   * GET /stock/report?month=YYYY-MM — «Spotřeba» (Фаза 3, §5.5): пришло и израсходовано за месяц по
+   * позициям и категориям. Все три роли; деньги (оценка по цене упаковки, оплачено по приходам
+   * заказов) — только руководству.
+   */
+  async report({ session, month, now = new Date() }: { session: any; month?: unknown; now?: Date }) {
+    const who = this._who(session);
+    const range = monthRange(month, now);
+    const since = new Date(Date.parse(range.from) - HISTORY_DAYS * DAY_MS).toISOString();
+    const [items, moves, orders] = await Promise.all([
+      this._all({ archived: true }),
+      strapi.documents(MOVE_UID).findMany({ filters: { createdAt: { $gte: since, $lt: range.to } }, fields: HISTORY_FIELDS, limit: MAX_HISTORY }),
+      // приход меняет заказ — у заказа с приходом за месяц updatedAt не раньше начала месяца
+      who.showPrices
+        ? strapi.documents(ORDER_UID).findMany({ filters: { createdAt: { $lt: range.to }, updatedAt: { $gte: range.from } }, fields: ['receipts'], limit: 500 })
+        : Promise.resolve([]),
+    ]);
+    const report: any = usageReport({ items, moves, from: range.from, to: range.to, showPrices: who.showPrices });
+    if (who.showPrices) report.totals = { ...report.totals, ...receiptsPaidOf(orders, range.from, range.to) };
+    return { ...range, ...report, meta: this._meta(who, now) };
+  },
+
+  /** GET /stock/suggest — автодополнение: названия (свои + словарь старой «Склад»), места, поставщики. */
   async suggest({ session }: { session: any }) {
     this._who(session);
     const items = await this._all({ archived: true });
@@ -699,17 +996,8 @@ export default {
       }
       return [...seen.values()].sort((a, b) => a.localeCompare(b, 'cs'));
     };
-    let legacy: string[] = [];
-    try {
-      if (strapi.contentTypes?.[LEGACY_UID]) {
-        const rows = await strapi.documents(LEGACY_UID).findMany({ status: 'published', fields: ['name'], limit: 2000 });
-        legacy = rows.map((r) => r.name);
-      }
-    } catch (e) {
-      strapi.log.warn(`stock: legacy names failed: ${e?.message || e}`);
-    }
     return {
-      names: uniq([...items.map((i) => i.name), ...legacy]),
+      names: uniq([...items.map((i) => i.name), ...LEGACY_NAMES]),
       locations: uniq([...items.map((i) => i.location), ...DEFAULT_LOCATIONS]),
       suppliers: uniq(items.map((i) => i.supplier)),
     };
@@ -757,13 +1045,17 @@ export default {
     if (input.name) await this._dupCheck(input.name, current.documentId);
     else if (input.active === true && current.active === false) await this._dupCheck(current.name, current.documentId);
     const changed = changedItemFields(current, input);
-    if (!changed.length) return { item: itemView(current, { now, showPrices: who.showPrices }) };
+    const view = async (doc: any) => {
+      const [onOrder, history] = await Promise.all([this._onOrder(), this._history(now, doc.documentId)]);
+      return itemView(doc, { now, showPrices: who.showPrices, onOrder, history });
+    };
+    if (!changed.length) return { item: await view(current) };
     const data = Object.fromEntries(changed.map((k) => [k, input[k]]));
     await strapi.documents(ITEM_UID).update({ documentId: current.documentId, data });
     const saved = await this._find(current.documentId);
     const head = has(data, 'active') ? (data.active ? 'Sklad: položka obnovena' : 'Sklad: položka archivována') : 'Sklad: položka upravena';
     this._log('stock_item_edit', session, saved, `${head} — ${saved.name} (${changed.map((k) => FIELD_LABELS[k] || k).join(', ')})`, { fields: changed });
-    return { item: itemView(saved, { now, showPrices: who.showPrices }) };
+    return { item: await view(saved) };
   },
 
   /**
@@ -791,8 +1083,9 @@ export default {
           version: (v ?? 0) + 1,
           updatedAt: now,
           ...(calc.kind === 'count' ? { lastCountedAt: now, lastCountedBy: by } : {}),
-          // снова в порядке — следующий «málo/došlo» снова попадёт в напоминание управляющей
-          ...(after === 'ok' && item.notifiedStatus ? { notifiedStatus: null } : {}),
+          // снова в порядке — следующий «málo/došlo» снова попадёт в напоминание управляющей;
+          // «brzy dojde» (s261) снимает только приход: пересчёт той же позиции не должен будить сводку каждую неделю
+          ...(clearNotified(item.notifiedStatus, after, calc.kind) ? { notifiedStatus: null } : {}),
         },
       });
       if (!res || !res.count) continue;
@@ -842,6 +1135,7 @@ export default {
     const note = body?.note == null ? '' : String(body.note).replace(/\s+/g, ' ').trim();
     if (note.length > MAX_NOTE) throw new StockError(400, 'bad_note', `Poznámka: nejvýše ${MAX_NOTE} znaků`);
     const { saved, move } = await this._moveWithRetry(id, (item) => computeMove(item, body), { session, role: who.role, note, now });
-    return { item: itemView(saved, { now, showPrices: who.showPrices, onOrder: await this._onOrder() }), move: moveView(move) };
+    const [onOrder, history] = await Promise.all([this._onOrder(), this._history(now, saved.documentId)]);
+    return { item: itemView(saved, { now, showPrices: who.showPrices, onOrder, history }), move: moveView(move) };
   },
 };

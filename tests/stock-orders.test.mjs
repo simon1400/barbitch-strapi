@@ -30,7 +30,8 @@ const swap = (js, from, url) => {
 };
 
 const slotsUrl = dataUrl(toJs('src/api/booking-engine/services/slots-core.ts'));
-const stockUrl = dataUrl(swap(toJs('src/api/booking-engine/services/stock.ts'), './slots-core', slotsUrl));
+const namesUrl = dataUrl(toJs('src/api/booking-engine/services/stock-legacy-names.ts'));
+const stockUrl = dataUrl(swap(swap(toJs('src/api/booking-engine/services/stock.ts'), './slots-core', slotsUrl), './stock-legacy-names', namesUrl));
 const ordersUrl = dataUrl(swap(swap(toJs('src/api/booking-engine/services/stock-orders.ts'), './slots-core', slotsUrl), './stock', stockUrl));
 const notifyUrl = dataUrl(swap(swap(toJs('src/api/booking-engine/services/stock-notify.ts'), './slots-core', slotsUrl), './stock', stockUrl));
 const S = await import(stockUrl);
@@ -446,7 +447,7 @@ test('push: «došlo» — управляющей сразу (не когда о
     // Papír (málo) — в сводку; Rukavice и Vata уже известны; заказанное — не в сводку
     await O.default.create({ session: manager, body: { supplier: 'Makro', status: 'sent', lines: [{ itemDocId: p.documentId, packs: 2 }] }, now });
     let d = await N.default.daily({ now });
-    assert.deepEqual(d, { items: 1, overdue: 0, stale: 0, sent: 1 });
+    assert.deepEqual(d, { items: 1, soon: 0, overdue: 0, stale: 0, sent: 1 });
     assert.equal(s.pushes.at(-1).body, 'Dochází: Papír', 'заказано 2 из 6 — ещё не покрыто');
     assert.equal(s.rows[ITEM].find((i) => i.name === 'Papír').notifiedStatus, 'low');
     s.pushes.length = 0;
@@ -526,4 +527,20 @@ test('тексты push: запрос на затрату — управляющ
   ]);
   assert.deepEqual(cand.map((i) => i.name), ['B', 'D']);
   assert.equal(N.ownerOverduePayload([]), null);
+});
+
+test('s261: сводка 10:00 — «Brzy dojde» один раз, не заказанное; отметка soon', () => {
+  const items = [
+    { documentId: 'a', name: 'Toaletní papír', active: true, status: 'ok', soon: true, daysLeft: 4, notifiedStatus: null, toOrderPacks: 1 },
+    { documentId: 'b', name: 'Ubrousky', active: true, status: 'ok', soon: true, daysLeft: 6, notifiedStatus: 'soon', toOrderPacks: 2 },
+    { documentId: 'c', name: 'Káva', active: true, status: 'ok', soon: true, daysLeft: 3, notifiedStatus: null, toOrderPacks: 0 },
+    { documentId: 'd', name: 'Rukavice S', active: true, status: 'ok', soon: false, daysLeft: 30, notifiedStatus: null, toOrderPacks: 0 },
+  ];
+  assert.deepEqual(N.soonCandidates(items).map((i) => i.name), ['Toaletní papír'], 'уже сообщили / уже заказано / не скоро — нет');
+  assert.equal(N.summaryCandidates(items).length, 0, '«Skladem» в «Došlo/Dochází» не попадает');
+  const p = N.managerDailyPayload({ soon: N.soonCandidates(items) });
+  assert.equal(p.title, '📦 Sklad: objednat 1');
+  assert.equal(p.body, 'Brzy dojde: Toaletní papír (~4 dny)');
+  assert.equal(p.url, '/stock?tab=order');
+  assert.equal(N.managerDailyPayload({ soon: [] }), null);
 });

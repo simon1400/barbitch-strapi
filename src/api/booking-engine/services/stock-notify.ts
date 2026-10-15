@@ -13,7 +13,8 @@
  *
  * «Уже сообщили» — `stock-item.notifiedStatus` (low | out): сводка 10:00 берёт только позиции, о статусе
  * которых управляющая ещё не знает, и не берёт те, что уже заказаны. Вернулась в «Skladem» — отметка
- * снимается (stock.ts, `_moveWithRetry`).
+ * снимается (stock.ts, `_moveWithRetry`). s261: `soon` — «brzy dojde» по прогнозу расхода (ещё «Skladem»);
+ * снимается приходом (`clearNotified`).
  *
  * Всё под env `STOCK_PUSH_ENABLED=true` (+ VAPID в push-notify): и события, и кроны, и запись
  * «inventura neprovedena». Без env — тишина, модуль работает как в Фазе 1.
@@ -22,7 +23,7 @@
  */
 
 import { pragueDateOf } from './slots-core';
-import { mondayOf } from './stock';
+import { dniText, mondayOf } from './stock';
 
 const ADMIN_UID = 'api::admin-user.admin-user';
 const ITEM_UID = 'api::stock-item.stock-item';
@@ -64,24 +65,32 @@ export const summaryCandidates = (items: any[]) =>
   items.filter((i) => i.active && (i.status === 'low' || i.status === 'out') && i.notifiedStatus !== i.status && i.toOrderPacks > 0);
 
 /**
+ * s261 (Фаза 3, §5.4): ещё «Skladem», но по расходу хватит на ≤ SOON_DAYS — управляющей в сводке 10:00
+ * один раз (отметка `notifiedStatus: soon` снимается приходом), если ещё не заказано.
+ */
+export const soonCandidates = (items: any[]) => items.filter((i) => i.active && i.soon && i.notifiedStatus !== 'soon' && i.toOrderPacks > 0);
+
+/**
  * Управляющей в 10:00: новые «dochází / došlo», просроченные заказы, по понедельникам — сколько
  * позиций не считали дольше STALE_DAYS. null — нечего сказать.
  */
-export const managerDailyPayload = ({ items = [], overdue = [], stale = 0 }: { items?: any[]; overdue?: any[]; stale?: number }) => {
-  if (!items.length && !overdue.length && !stale) return null;
+export const managerDailyPayload = ({ items = [], soon = [], overdue = [], stale = 0 }: { items?: any[]; soon?: any[]; overdue?: any[]; stale?: number }) => {
+  if (!items.length && !soon.length && !overdue.length && !stale) return null;
   const rows = [
     ...items.map((i) => `${i.status === 'out' ? 'Došlo' : 'Dochází'}: ${cut(i.name, 50)}`),
+    ...soon.map((i) => `Brzy dojde: ${cut(i.name, 50)}${i.daysLeft != null ? ` (~${i.daysLeft} ${dniText(i.daysLeft)})` : ''}`),
     ...overdue.map((o) => `Nepřišlo: ${cut(o.supplier, 40) || 'objednávka'} (${o.days} dní)`),
     ...(stale ? [`Nepočítáno > ${STALE_DAYS} dní: ${stale} ${polozek(stale)}`] : []),
   ];
+  const toOrder = items.length + soon.length;
   const parts = [
-    items.length ? `objednat ${items.length}` : '',
+    toOrder ? `objednat ${toOrder}` : '',
     overdue.length ? `nepřišlo ${overdue.length}` : '',
   ].filter(Boolean);
   return {
     title: `📦 Sklad${parts.length ? `: ${parts.join(' · ')}` : ''}`,
     body: lines(rows).join('\n'),
-    url: items.length ? '/stock?tab=order' : overdue.length ? '/stock?tab=orders' : '/stock?tab=inventory',
+    url: toOrder ? '/stock?tab=order' : overdue.length ? '/stock?tab=orders' : '/stock?tab=inventory',
     tag: 'stock-daily',
   };
 };
@@ -188,15 +197,17 @@ export default {
     const today = pragueDateOf(now);
     const [items, overdue] = await Promise.all([this._stock()._views(now, false), this._orders().overdue(now)]);
     const fresh = summaryCandidates(items);
+    const soon = soonCandidates(items);
     const stale = mondayOf(today) === today ? staleCount(items) : 0;
-    const out: any = { items: fresh.length, overdue: overdue.length, stale };
-    const mp = managerDailyPayload({ items: fresh, overdue, stale });
+    const out: any = { items: fresh.length, soon: soon.length, overdue: overdue.length, stale };
+    const mp = managerDailyPayload({ items: fresh, soon, overdue, stale });
     if (mp) {
       const res = await this._mn().toManagers(mp, 'stock_daily');
       if (res?.skipped) return { ...out, skipped: res.skipped };
       out.sent = res.sent;
       // отметка — и когда устройств нет: иначе после подписки придёт пачка давно известного
       for (const status of ['low', 'out']) await this._mark(fresh.filter((i) => i.status === status).map((i) => i.documentId), status);
+      await this._mark(soon.map((i) => i.documentId), 'soon');
     }
     const op = ownerOverduePayload(overdue);
     if (op) await this._mn().toOwner(op, 'stock_overdue_owner');

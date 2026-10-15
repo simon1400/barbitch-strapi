@@ -2838,7 +2838,6 @@ export interface ApiServiceService extends Struct.CollectionTypeSchema {
           localized: true;
         };
       }>;
-    stocks: Schema.Attribute.Relation<'oneToMany', 'api::stock.stock'>;
     title: Schema.Attribute.String &
       Schema.Attribute.Required &
       Schema.Attribute.Unique &
@@ -3155,54 +3154,6 @@ export interface ApiStockOrderStockOrder extends Struct.CollectionTypeSchema {
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     version: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
-  };
-}
-
-export interface ApiStockStock extends Struct.CollectionTypeSchema {
-  collectionName: 'stocks';
-  info: {
-    displayName: '\u0421\u043A\u043B\u0430\u0434';
-    pluralName: 'stocks';
-    singularName: 'stock';
-  };
-  options: {
-    draftAndPublish: true;
-  };
-  attributes: {
-    amount: Schema.Attribute.String & Schema.Attribute.Required;
-    brand: Schema.Attribute.String;
-    color: Schema.Attribute.String;
-    count: Schema.Attribute.BigInteger & Schema.Attribute.Required;
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    date: Schema.Attribute.Date & Schema.Attribute.Required;
-    dateInvertization: Schema.Attribute.Date & Schema.Attribute.Required;
-    for: Schema.Attribute.Enumeration<
-      ['Manik\u00FAra', '\u0158asy', 'Glob\u00E1ln\u00ED']
-    > &
-      Schema.Attribute.Required;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<'oneToMany', 'api::stock.stock'> &
-      Schema.Attribute.Private;
-    name: Schema.Attribute.String & Schema.Attribute.Required;
-    personal: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'>;
-    productId: Schema.Attribute.String & Schema.Attribute.Required;
-    publishedAt: Schema.Attribute.DateTime;
-    service: Schema.Attribute.Relation<'manyToOne', 'api::service.service'>;
-    stockStatus: Schema.Attribute.Enumeration<
-      [
-        '\uD83D\uDFE9\u0414\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E',
-        '\uD83D\uDFE8\u0417\u0430\u043A\u0430\u043D\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044F',
-        '\uD83D\uDFE5\u0417\u0430\u043A\u043E\u043D\u0447\u0438\u043B\u043E\u0441\u044C',
-        '\uD83D\uDFE6\u0417\u0430\u043A\u043E\u043D\u0447\u0438\u043B\u043E\u0441\u044C - \u043D\u0435 \u043D\u0430\u0434\u043E',
-      ]
-    > &
-      Schema.Attribute.Required &
-      Schema.Attribute.DefaultTo<'\uD83D\uDFE9\u0414\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E'>;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
   };
 }
 
@@ -4149,7 +4100,6 @@ declare module '@strapi/strapi' {
       'api::stock-item.stock-item': ApiStockItemStockItem;
       'api::stock-move.stock-move': ApiStockMoveStockMove;
       'api::stock-order.stock-order': ApiStockOrderStockOrder;
-      'api::stock.stock': ApiStockStock;
       'api::tax.tax': ApiTaxTax;
       'api::time-block.time-block': ApiTimeBlockTimeBlock;
       'api::time-off.time-off': ApiTimeOffTimeOff;

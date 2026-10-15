@@ -1359,6 +1359,14 @@ export default {
     await handle(ctx, () => stockSvc().suggest({ session }));
   },
 
+  // Фаза 3 (s261): GET /api/engine/admin/stock/report?month=YYYY-MM — «Spotřeba» (деньги — только руководству)
+  async adminStockReport(ctx) {
+    const session = requireAdmin(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => stockSvc().report({ session, month: ctx.query?.month }));
+  },
+
   // GET /api/engine/admin/stock/moves?item=&before=&limit=
   async adminStockMoves(ctx) {
     const session = requireAdmin(ctx);

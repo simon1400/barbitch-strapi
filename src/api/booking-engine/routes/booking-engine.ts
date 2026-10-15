@@ -181,6 +181,7 @@ export default {
     admin('GET', '/engine/admin/stock/attention', 'booking-engine.adminStockAttention'),
     admin('GET', '/engine/admin/stock/order', 'booking-engine.adminStockOrder'),
     admin('GET', '/engine/admin/stock/suggest', 'booking-engine.adminStockSuggest'),
+    admin('GET', '/engine/admin/stock/report', 'booking-engine.adminStockReport'),
     admin('GET', '/engine/admin/stock/moves', 'booking-engine.adminStockMoves'),
     admin('GET', '/engine/admin/stock/items/:id', 'booking-engine.adminStockItem'),
     admin('POST', '/engine/admin/stock/items', 'booking-engine.adminStockItemCreate'),

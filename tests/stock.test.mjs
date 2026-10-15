@@ -25,13 +25,16 @@ const dataUrl = (js) => 'data:text/javascript;base64,' + Buffer.from(js, 'utf8')
 let js = toJs('src/api/booking-engine/services/stock.ts');
 assert.ok(js.includes("from './slots-core'"));
 js = js.split("from './slots-core'").join(`from '${dataUrl(toJs('src/api/booking-engine/services/slots-core.ts'))}'`);
+// s261: словарь названий старой «Склад» (коллекция удалена)
+assert.ok(js.includes("from './stock-legacy-names'"));
+js = js.split("from './stock-legacy-names'").join(`from '${dataUrl(toJs('src/api/booking-engine/services/stock-legacy-names.ts'))}'`);
 const S = await import(dataUrl(js));
 const svc = S.default;
 const D = await import(dataUrl(toJs('src/api/digest/services/digest-attention.ts')));
 
 const ITEM = 'api::stock-item.stock-item';
 const MOVE = 'api::stock-move.stock-move';
-const LEGACY = 'api::stock.stock';
+const ORDER = 'api::stock-order.stock-order';
 
 const owner = { id: 1, role: 'owner', username: 'Dima' };
 const manager = { id: 11, role: 'manager', username: 'Mariia' };
@@ -46,6 +49,7 @@ const matchCond = (val, cond) => {
     if (op === '$eq') return val === arg;
     if (op === '$eqi') return String(val ?? '').toLowerCase() === String(arg).toLowerCase();
     if (op === '$lt') return val != null && val < arg;
+    if (op === '$gte') return val != null && val >= arg;
     if (op === '$null') return arg ? val == null : val != null;
     throw new Error(`op ${op}`);
   });
@@ -54,14 +58,13 @@ const matches = (row, filters = {}) =>
   Object.entries(filters).every(([k, c]) => (k === '$or' ? c.some((f) => matches(row, f)) : matchCond(row[k], c)));
 
 let seq = 1;
-function fresh({ legacy = [] } = {}) {
-  const db = { [ITEM]: [], [MOVE]: [], [LEGACY]: legacy };
+function fresh() {
+  const db = { [ITEM]: [], [MOVE]: [], [ORDER]: [] };
   const logs = [];
   let clock = Date.parse('2026-10-13T08:00:00Z');
   globalThis.strapi = {
     rows: db,
     logs,
-    contentTypes: { [LEGACY]: {} },
     documents: (uid) => ({
       async findMany({ filters = {}, limit, sort } = {}) {
         await tick();
@@ -234,7 +237,7 @@ test('«Co objednat»: группы по поставщику, текст без
 });
 
 test('сервис: роли, цены, создание, движения, журнал', async () => {
-  const s = fresh({ legacy: [{ documentId: 'l1', name: 'DARK gel' }, { documentId: 'l2', name: 'dark  gel' }] });
+  const s = fresh();
   await expectErr(svc.list({ session: master, now }), 403, 'not_allowed');
 
   const { item } = await svc.create({ session: manager, body: { ...glovesS, packs: 3, units: 40 }, now });
@@ -287,9 +290,11 @@ test('сервис: роли, цены, создание, движения, жу
   assert.equal((await svc.list({ session: admin, archived: '1', now })).items.length, 1, 's257: архив — и администратору');
   assert.equal((await svc.summary(now)).total, 0);
 
-  // автодополнение: свои + старая «Склад» (без дублей по регистру и пробелам) + места по умолчанию
+  // автодополнение: свои + словарь старой «Склад» (s261: коллекция удалена) без дублей по регистру + места по умолчанию
   const sug = await svc.suggest({ session: admin });
-  assert.deepEqual(sug.names, ['DARK gel', 'Rukavice S']);
+  assert.ok(sug.names.includes('Rukavice S') && sug.names.includes('DARK gel'));
+  assert.equal(new Set(sug.names.map((n) => n.toLowerCase())).size, sug.names.length, 'без дублей по регистру');
+  assert.ok(sug.names.length > 250, 'словарь старой «Склад» на месте');
   assert.ok(sug.locations.includes('Skříň s laky') && sug.locations.includes('U dezinfekce'));
   assert.deepEqual(sug.suppliers, ['Nehtyshop']);
 
@@ -363,4 +368,155 @@ test('s257: администратор заводит и правит позиц
   assert.equal(list.meta.canEditItems, true);
   assert.equal(list.meta.canEdit, false, 'заказы и цены — по-прежнему руководство');
   assert.ok(!('lastPrice' in list.items[0]));
+});
+
+// ───────────── s261, Фаза 3: прогноз расхода, «brzy dojde», подсказка минимума, отчёт «Spotřeba» ─────────────
+const mv = (at, kind, qtyBefore, qtyAfter, extra = {}) => ({ itemDocId: 'it1', kind, qtyBefore, qtyAfter, delta: qtyAfter - qtyBefore, createdAt: new Date(at).toISOString(), ...extra });
+
+test('s261: интервалы расхода — между наблюдениями, приход не наблюдение, время без товара не считается', () => {
+  const { intervals, last } = S.usageIntervals([
+    mv('2026-10-08T08:00:00Z', 'count', 600, 500),
+    mv('2026-10-01T08:00:00Z', 'create', 0, 600), // порядок движений — любой
+    mv('2026-10-10T08:00:00Z', 'in', 500, 700),
+    mv('2026-10-12T08:00:00Z', 'out', 700, 700, { mode: 'low' }), // «Málo» без изменения — не наблюдение
+    mv('2026-10-15T08:00:00Z', 'count', 700, 600),
+  ]);
+  assert.deepEqual(intervals.map((i) => i.used), [100, 100]);
+  assert.equal(intervals[1].from, Date.parse('2026-10-08T08:00:00Z'));
+  assert.deepEqual(last, { at: Date.parse('2026-10-15T08:00:00Z'), qty: 600, since: Date.parse('2026-10-15T08:00:00Z') });
+  // кончилось 01.10, пришло 10.10, пересчёт 17.10: расход 70 за 7 дней (не за 16)
+  const gap = S.usageIntervals([
+    mv('2026-10-01T08:00:00Z', 'out', 20, 0, { mode: 'empty' }),
+    mv('2026-10-10T08:00:00Z', 'in', 0, 100),
+    mv('2026-10-17T08:00:00Z', 'count', 100, 30),
+  ]);
+  assert.deepEqual(gap.intervals, [{ from: Date.parse('2026-10-10T08:00:00Z'), to: Date.parse('2026-10-17T08:00:00Z'), used: 70 }]);
+  // создана без остатка (0) — не наблюдение; первый пересчёт — начало
+  assert.equal(S.usageIntervals([mv('2026-10-01T08:00:00Z', 'create', 0, 0), mv('2026-10-03T08:00:00Z', 'in', 0, 50), mv('2026-10-09T08:00:00Z', 'count', 50, 40)]).intervals.length, 0);
+});
+
+test('s261: прогноз — расход в день, на сколько хватит, brzy dojde, подсказка минимума', () => {
+  const gloves = { documentId: 'it1', ...glovesS, qty: 600, active: true };
+  const moves = [mv('2026-10-01T08:00:00Z', 'create', 0, 600), mv('2026-10-08T08:00:00Z', 'count', 600, 500), mv('2026-10-10T08:00:00Z', 'in', 500, 700), mv('2026-10-15T08:00:00Z', 'count', 700, 600)];
+  const t = new Date('2026-10-15T12:00:00Z');
+  const f = S.forecastOf(gloves, moves, t);
+  assert.equal(f.forecastDays, 14);
+  assert.equal(f.avgDailyUse, 14.286);
+  assert.equal(f.useText, '~14 ks za den');
+  assert.equal(f.daysLeft, 41, '600 / 14,3 = 42 − 4 часа после пересчёта → 41 целый');
+  assert.equal(f.leftText, 'vystačí ~41 dní');
+  assert.equal(f.soon, false);
+  assert.equal(f.suggestedMin, 2, '14,3 × 14 дней = 200 ks = 2 bal.');
+  // через 30 дней без пересчёта остаток «тает»: хватит на 11 дней
+  assert.equal(S.forecastOf(gloves, moves, new Date('2026-11-14T12:00:00Z')).daysLeft, 11);
+  // мало наблюдений — прогноза нет
+  const short = S.forecastOf(gloves, moves.slice(0, 1).concat(mv('2026-10-06T08:00:00Z', 'count', 600, 550)), t);
+  assert.deepEqual([short.avgDailyUse, short.daysLeft, short.soon, short.suggestedMin, short.forecastDays], [null, null, false, null, 5]);
+  // больше минимума (200), но хватит на 8 дней → brzy dojde, и его заказываем
+  const soonItem = { ...gloves, qty: 250 };
+  const fs2 = S.forecastOf(soonItem, [mv('2026-10-01T08:00:00Z', 'create', 0, 460), mv('2026-10-08T08:00:00Z', 'count', 460, 250)], new Date('2026-10-08T09:00:00Z'));
+  assert.deepEqual([fs2.daysLeft, fs2.soon], [8, true]);
+  assert.equal(S.suggestedPacks(soonItem), 0, 'без прогноза — в порядке');
+  assert.equal(S.suggestedPacks(soonItem, { soon: true }), 4, 'до target 6: 6 − 2,5 → 4');
+  const v = S.itemView(soonItem, { now: new Date('2026-10-08T09:00:00Z'), showPrices: false, history: new Map([['it1', [mv('2026-10-01T08:00:00Z', 'create', 0, 460), mv('2026-10-08T08:00:00Z', 'count', 460, 250)]]]) });
+  assert.deepEqual([v.status, v.soon, v.suggestedPacks, v.toOrderPacks, v.leftText], ['ok', true, 4, 4, 'vystačí ~8 dní']);
+  const g = S.orderGroups([v], { showPrices: false });
+  assert.deepEqual(g[0].lines.map((l) => [l.name, l.packs, l.soon, l.leftText]), [['Rukavice S', 4, true, 'vystačí ~8 dní']]);
+  assert.equal(S.attentionOf([v]).low.length, 0, 'карточки «Сегодня» brzy dojde не считают');
+  // уже ниже минимума — это «Málo», а не brzy dojde
+  assert.equal(S.forecastOf({ ...gloves, qty: 150 }, moves, t).soon, false);
+  // канистра 5 l: подсказка минимума — до десятых упаковки
+  const can = { documentId: 'it1', unit: 'ml', packSize: 5000, min: 0.2, qty: 3000, active: true };
+  const fc = S.forecastOf(can, [mv('2026-10-01T08:00:00Z', 'create', 0, 4000), mv('2026-10-11T08:00:00Z', 'count', 4000, 3000)], new Date('2026-10-11T09:00:00Z'));
+  assert.deepEqual([fc.useText, fc.suggestedMin], ['~100 ml za den', 0.3]);
+  assert.equal(S.useText(0.2, 'ks'), '~1,4 ks za týden');
+  assert.equal(S.useText(0.01, 'g'), '~0,3 g za měsíc');
+  // отметка «управляющая знает»: brzy dojde снимает только приход
+  assert.equal(S.clearNotified('soon', 'ok', 'count'), false);
+  assert.equal(S.clearNotified('soon', 'ok', 'in'), true);
+  assert.equal(S.clearNotified('low', 'ok', 'count'), true);
+  assert.equal(S.clearNotified('low', 'low', 'in'), false);
+  assert.equal(S.clearNotified(null, 'ok', 'in'), false);
+});
+
+test('s261: месяц отчёта — пражские границы, соседние месяцы, неверный — 400', () => {
+  const r = S.monthRange(undefined, new Date('2026-10-15T12:00:00Z'));
+  assert.deepEqual([r.month, r.from, r.to, r.prev, r.next, r.current], ['2026-10', '2026-09-30T22:00:00.000Z', '2026-10-31T23:00:00.000Z', null, null, true]);
+  assert.equal(r.days, 14.6);
+  const nov = S.monthRange('2026-11', new Date('2026-12-02T12:00:00Z'));
+  assert.deepEqual([nov.prev, nov.next, nov.current, nov.days], ['2026-10', '2026-12', false, 30]);
+  for (const bad of ['2026-09', '2026-11', '2026-1', 'x', '2026-13']) assert.throws(() => S.monthRange(bad, new Date('2026-10-15T12:00:00Z')), (e) => e.status === 400 && e.code === 'bad_month', bad);
+});
+
+test('s261: отчёт «Spotřeba» — пришло, израсходовано пропорционально месяцу, деньги только руководству', () => {
+  const items = [
+    { documentId: 'it1', name: 'Rukavice S', category: 'hygiena', location: 'U dezinfekce', unit: 'ks', packSize: 10, lastPrice: 100, active: true },
+    { documentId: 'it2', name: 'Káva', category: 'kuchyn', location: 'Kuchyň', unit: 'ks', packSize: 1, lastPrice: null, active: true },
+    { documentId: 'old', name: 'Starý', category: 'jine', location: 'WC', unit: 'ks', packSize: 1, active: false },
+  ];
+  const moves = [
+    mv('2026-09-26T00:00:00Z', 'create', 0, 100),
+    mv('2026-10-03T00:00:00Z', 'in', 100, 200),
+    mv('2026-10-06T00:00:00Z', 'count', 200, 150), // 26.09 → 06.10: 50 за 10 дней, в октябре — 5 дней → 25
+    mv('2026-10-16T00:00:00Z', 'count', 150, 100), // целиком в октябре — 50
+  ];
+  const range = { from: '2026-10-01T00:00:00Z', to: '2026-11-01T00:00:00Z' };
+  const own = S.usageReport({ items, moves, ...range, showPrices: true });
+  assert.deepEqual(own.items.map((r) => r.name), ['Rukavice S', 'Káva'], 'архив без движений — не в отчёте; порядок — по категориям');
+  const g = own.items[0];
+  assert.deepEqual([g.inQty, g.inText, g.usedQty, g.usedText, g.coveredDays], [100, '10 bal.', 75, '7 bal. + 5 ks', 15]);
+  assert.deepEqual([g.inValue, g.usedValue], [1000, 750]);
+  assert.deepEqual([own.items[1].usedText, own.items[1].inValue], ['—', null]);
+  assert.deepEqual(own.categories.map((c) => [c.label, c.inValue, c.usedValue]), [['Hygiena', 1000, 750], ['Kuchyň', 0, 0]]);
+  assert.deepEqual(own.totals, { items: 2, withUse: 1, inValue: 1000, usedValue: 750, unpriced: 0 });
+  const adm = S.usageReport({ items, moves, ...range, showPrices: false });
+  assert.ok(!JSON.stringify(adm).match(/Value|price|unpriced/), 'администратору — без денег');
+  // архивная позиция с расходом за месяц — в отчёте
+  const arch = S.usageReport({ items: [{ ...items[0], active: false }], moves, ...range, showPrices: false });
+  assert.equal(arch.items.length, 1);
+  const paid = S.receiptsPaidOf(
+    [{ receipts: [{ at: '2026-10-05T10:00:00Z', sum: 500 }, { at: '2026-10-07T10:00:00Z', sum: null }, { at: '2026-09-30T10:00:00Z', sum: 999 }] }, { receipts: null }],
+    range.from,
+    range.to
+  );
+  assert.deepEqual(paid, { paid: 500, receipts: 2, noSum: 1 });
+});
+
+test('s261: сервис — прогноз в списке и на экране позиции, отчёт по ролям, словарь вместо старой «Склад»', async () => {
+  const s = fresh();
+  const { item } = await svc.create({ session: owner, body: { ...glovesS, packs: 6 }, now: new Date('2026-09-20T08:00:00Z') });
+  const id = item.documentId;
+  s.rows[MOVE] = [
+    { ...mv('2026-10-01T08:00:00Z', 'create', 0, 600), itemDocId: id },
+    { ...mv('2026-10-12T08:00:00Z', 'count', 600, 250), itemDocId: id },
+  ];
+  s.rows[ITEM][0].qty = 250;
+  const later = new Date('2026-10-12T09:00:00Z');
+  const list = await svc.list({ session: admin, now: later });
+  // 350 ks за 11 дней ≈ 31,8 в день → 250 хватит на 7 дней (≤ SOON_DAYS), хотя выше минимума 200
+  assert.deepEqual([list.items[0].status, list.items[0].soon, list.items[0].daysLeft, list.items[0].useText], ['ok', true, 7, '~32 ks za den']);
+  const one = await svc.item({ session: admin, id, now: later });
+  assert.equal(one.item.daysLeft, list.items[0].daysLeft);
+  const ord = await svc.order({ session: manager, now: later });
+  assert.equal(ord.groups[0].lines[0].soon, true);
+  // движение возвращает позицию уже с прогнозом
+  const mvRes = await svc.move({ session: admin, id, body: { kind: 'count', units: 240 }, now: new Date('2026-10-12T10:00:00Z') });
+  assert.ok(mvRes.item.avgDailyUse > 0);
+
+  s.rows[ORDER] = [{ documentId: 'o1', createdAt: '2026-10-02T08:00:00Z', updatedAt: '2026-10-05T10:00:00Z', receipts: [{ at: '2026-10-05T10:00:00Z', sum: 900 }] }];
+  const rep = await svc.report({ session: owner, month: '2026-10', now: later });
+  assert.equal(rep.month, '2026-10');
+  assert.equal(rep.items[0].name, 'Rukavice S');
+  assert.equal(rep.totals.paid, 900);
+  assert.equal(rep.meta.showPrices, true);
+  const repAdm = await svc.report({ session: admin, now: later });
+  assert.ok(!('paid' in repAdm.totals) && !('inValue' in repAdm.items[0]), 'администратору без денег');
+  await expectErr(svc.report({ session: master, now: later }), 403, 'not_allowed');
+  await expectErr(svc.report({ session: owner, month: '2027-01', now: later }), 400, 'bad_month');
+  // сбой истории — список работает без прогноза
+  const realDocs = s.documents;
+  s.documents = (uid) => (uid === MOVE ? { findMany: async () => { throw new Error('db down'); }, create: realDocs(uid).create } : realDocs(uid));
+  const noHist = await svc.list({ session: admin, now: later });
+  assert.deepEqual([noHist.items[0].avgDailyUse, noHist.items[0].soon], [null, false]);
+  s.documents = realDocs;
 });
