@@ -520,3 +520,15 @@ test('s261: сервис — прогноз в списке и на экране
   assert.deepEqual([noHist.items[0].avgDailyUse, noHist.items[0].soon], [null, false]);
   s.documents = realDocs;
 });
+
+test('s264: материалы мастеров — Nehty/Řasy/Obočí открыты в форме, оттенок в названии, «Jiné» последней', () => {
+  const keys = S.CATEGORIES.map((c) => c.key);
+  assert.deepEqual(keys, ['hygiena', 'uklid', 'kuchyn', 'kancelar', 'nehty', 'rasy', 'oboci', 'jine']);
+  assert.ok(S.CATEGORIES.every((c) => !('later' in c)), 'ни одна категория не спрятана');
+  const schema = JSON.parse(read('src/api/stock-item/content-types/stock-item/schema.json'));
+  assert.deepEqual([...schema.attributes.category.enum].sort(), [...keys].sort(), 'enum схемы = список категорий');
+  const gel = S.normalizeItemInput({ name: 'DNKA gel 012', category: 'nehty', location: 'Skříň s laky', unit: 'ml', packSize: 15, min: '0,5' });
+  assert.equal(gel.category, 'nehty');
+  assert.equal(gel.name, 'DNKA gel 012');
+  for (const category of ['rasy', 'oboci']) assert.equal(S.normalizeItemInput({ name: 'X', category, location: 'Skříň s laky' }).category, category);
+});

@@ -54,16 +54,20 @@ const ORDER_UID = 'api::stock-order.stock-order';
 export const STOCK_ROLES = ['owner', 'manager', 'administrator'];
 export const EDIT_ROLES = ['owner', 'manager'];
 
-/** Категории; `later` — заложены в схему, но в Фазе 1 не заводятся (§0.4). */
+/**
+ * Категории (порядок = порядок в списках). Nehty/Řasy/Obočí — материалы мастеров, включены s264
+ * (§0.4: оттенок — в названии, считают администраторы и управляющая). Флаг `later: true` прячет
+ * категорию из формы новой позиции (админка его ещё понимает).
+ */
 export const CATEGORIES = [
   { key: 'hygiena', label: 'Hygiena' },
   { key: 'uklid', label: 'Úklid' },
   { key: 'kuchyn', label: 'Kuchyň' },
   { key: 'kancelar', label: 'Kancelář' },
+  { key: 'nehty', label: 'Nehty' },
+  { key: 'rasy', label: 'Řasy' },
+  { key: 'oboci', label: 'Obočí' },
   { key: 'jine', label: 'Jiné' },
-  { key: 'nehty', label: 'Nehty', later: true },
-  { key: 'rasy', label: 'Řasy', later: true },
-  { key: 'oboci', label: 'Obočí', later: true },
 ] as const;
 export const UNITS = [
   { key: 'ks', label: 'ks' },
