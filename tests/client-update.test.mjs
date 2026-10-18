@@ -40,7 +40,17 @@ const dedupeSrc = fs.readFileSync(
 const IMPORT_LINE = "import { normalizePhone } from '../../booking-engine/services/booking-engine';";
 assert.ok(dedupeSrc.includes(IMPORT_LINE), 'client-dedupe больше не берёт normalizePhone из движка');
 
-const stitched = dedupeSrc.replace(IMPORT_LINE, normSrc[0].replace('export const', 'const'));
+// заметка о клиентке (s267): помощник из utils/client-note подставляется так же —
+// целиком, исходным текстом (без `export`), а не копией в тесте
+const NOTE_IMPORT = "import { CLIENT_NOTE_MAX, clientNoteOf, withClientNote } from '../../../utils/client-note';";
+assert.ok(dedupeSrc.includes(NOTE_IMPORT), 'client-dedupe больше не берёт заметку из utils/client-note');
+const noteSrc = fs
+  .readFileSync(path.resolve(here, '../src/utils/client-note.ts'), 'utf8')
+  .replace(/^export /gm, '');
+
+const stitched = dedupeSrc
+  .replace(IMPORT_LINE, normSrc[0].replace('export const', 'const'))
+  .replace(NOTE_IMPORT, noteSrc);
 const js = ts.transpileModule(stitched, {
   compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
 }).outputText;
@@ -306,4 +316,53 @@ test('неизменившийся телефон в patch дублей не и�
   const { res, ctx } = await run({ name: 'Monika C.', phone: CLIENT_ROW.phone }, { conflicts: [other] });
   assert.deepEqual(res.duplicates, []);
   assert.equal(ctx.selects.length, 0);
+});
+
+// ── заметка о клиентке (s267) ──────────────────────────────────────────────
+
+const MERGE_LINE = 'Sloučeno 2026-09-12: Monika · moni@x.cz · +420606878910 (id=55)';
+
+test('s267: заметка пишется в notes, строки слияния дублей остаются в конце', async () => {
+  const row = { ...CLIENT_ROW, notes: `stará poznámka\n${MERGE_LINE}` };
+  const { ctx, res, calendarLogs } = await run({ note: '  Velmi husté řasy  ' }, { row });
+  assert.equal(clientUpdate(ctx).notes, `Velmi husté řasy\n${MERGE_LINE}`);
+  assert.equal(res.note, 'Velmi husté řasy', 'ответ — без технической строки');
+  assert.equal(calendarLogs.length, 1);
+  assert.equal(calendarLogs[0].details['poznámka'], 'stará poznámka → Velmi husté řasy');
+  assert.ok(calendarLogs[0].summary.includes('poznámka'));
+});
+
+test('s267: пустая заметка стирает текст, но не строку слияния', async () => {
+  const row = { ...CLIENT_ROW, notes: `husté řasy\n${MERGE_LINE}` };
+  const { ctx, res } = await run({ note: '' }, { row });
+  assert.equal(clientUpdate(ctx).notes, MERGE_LINE);
+  assert.equal(res.note, null);
+});
+
+test('s267: пустая заметка у карточки без слияний → null, а не пустая строка', async () => {
+  const { ctx } = await run({ note: '   ' }, { row: { ...CLIENT_ROW, notes: 'něco' } });
+  assert.equal(clientUpdate(ctx).notes, null);
+});
+
+test('s267: заметка длиннее 1000 знаков — 400 note_too_long, база не тронута', async () => {
+  const ctx = { updates: [], selects: [], rows: {} };
+  const self = { knex: () => mkKnex(ctx), rowsByDocIds: async () => [CLIENT_ROW], log: async () => {} };
+  await assert.rejects(
+    () => svc.updateClient.call(self, { docId: 'cl-1', patch: { note: 'x'.repeat(1001) }, actorName: 'X' }),
+    (e) => e.status === 400 && e.code === 'note_too_long'
+  );
+  assert.equal(ctx.updates.length, 0);
+});
+
+test('s267: та же заметка повторно — журнал не засоряется', async () => {
+  const row = { ...CLIENT_ROW, notes: `husté řasy\n${MERGE_LINE}` };
+  const { calendarLogs } = await run({ note: 'husté řasy' }, { row });
+  assert.equal(calendarLogs.length, 0);
+});
+
+test('s267: правка контактов без note заметку не трогает', async () => {
+  const row = { ...CLIENT_ROW, notes: 'husté řasy' };
+  const { ctx, res } = await run({ email: 'nova@seznam.cz' }, { row });
+  assert.equal('notes' in clientUpdate(ctx), false);
+  assert.equal(res.note, 'husté řasy');
 });

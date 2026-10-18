@@ -19,6 +19,7 @@
  */
 
 import { normalizePhone } from '../../booking-engine/services/booking-engine';
+import { CLIENT_NOTE_MAX, clientNoteOf, withClientNote } from '../../../utils/client-note';
 
 const CLIENT_UID = 'api::client.client';
 const LOG_UID = 'api::client-merge-log.client-merge-log';
@@ -484,6 +485,15 @@ export default {
       data.email = e ? e.toLowerCase() : null;
     }
     if ('notes' in patch) data.notes = str(patch.notes);
+    // Заметка о клиентке (s267) — людская часть поля `notes`; строки слияния
+    // дублей сохраняются как были (utils/client-note). Сырое `notes` выше —
+    // старый путь страницы «Дубли клиентов», им заметка не перебивается.
+    if ('note' in patch && !('notes' in patch)) {
+      const note = patch.note === null || patch.note === undefined ? '' : String(patch.note).trim();
+      if (note.length > CLIENT_NOTE_MAX)
+        throw new DedupeError(400, 'note_too_long', `Poznámka je delší než ${CLIENT_NOTE_MAX} znaků`);
+      data.notes = withClientNote(row.notes, note);
+    }
     if ('blacklisted' in patch) data.blacklisted = Boolean(patch.blacklisted);
     if ('blacklistReason' in patch) data.blacklist_reason = str(patch.blacklistReason);
     // 🟥 Причина обязательна при добавлении в blacklist (переход false→true); у уже
@@ -534,6 +544,13 @@ export default {
       details.blacklist = data.blacklisted ? 'ano' : 'ne';
       if (data.blacklisted && data.blacklist_reason) details['důvod'] = data.blacklist_reason;
     }
+    // заметка о клиентке (s267): в журнале — старый и новый текст, обрезанные
+    const noteBefore = clientNoteOf(row.notes);
+    const noteAfter = 'notes' in data ? clientNoteOf(data.notes) : noteBefore;
+    if (noteAfter !== noteBefore) {
+      const cut = (v) => (v && v.length > 200 ? `${v.slice(0, 200)}…` : v);
+      details['poznámka'] = `${fmtVal(cut(noteBefore))} → ${fmtVal(cut(noteAfter))}`;
+    }
     // Число переписанных броней — приложение к правке, а не повод для записи:
     // пересохранение карточки без изменений имя в бронях всё равно перезапишет
     // (idempotent), и журнал засоряться этим не должен.
@@ -565,6 +582,8 @@ export default {
       ok: true,
       renamedBookings: renamed,
       phone: 'phone' in data ? data.phone : row.phone || null,
+      // заметка в том виде, в каком её покажет календарь (без строк слияния)
+      note: noteAfter,
       duplicates,
     };
   },

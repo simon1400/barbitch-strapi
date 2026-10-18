@@ -35,6 +35,7 @@ import { occupancyFilters } from './booking-kind';
 import { isFreeKorekceItem, isQualifyingVisit, korekceWindowStart } from './korekce-core';
 import { classifyTitle } from './upsell-core';
 import { findSessionPersonal } from '../../../utils/staff-identity';
+import { withBookingClientNote } from '../../../utils/client-note';
 import {
   internalPayrollComment,
   internalPayrollSum,
@@ -2676,12 +2677,15 @@ export default {
 
   // Урезание брони под роль. Мастер видит расписание всего салона, но:
   //   контакты клиента — не приходят вообще (интерфейс их мастеру и не рисует);
+  //   заметка о клиентке (`clientNote`, s267) — только у своих броней;
   //   деньги и снапшот цен — только по СВОИМ броням.
   _scopeBookingForMaster(b, ownNoonaId) {
     const own = !!ownNoonaId && b.noonaEmployeeId === ownNoonaId;
     // исходный визит коррекции (s210) мастеру — без денег: это чужой визит
     const out = { ...b, client: undefined, ...(b.korekceOf ? { korekceOf: korekceOfForMaster(b.korekceOf) } : {}) };
+    // заметка о клиентке (s267) — мастеру только у СВОЕЙ брони (ему её делать)
     if (own) return out;
+    out.clientNote = null;
     const services = Array.isArray(b.services)
       ? b.services.map((it) => {
           if (!it || typeof it !== 'object') return it;
@@ -2697,7 +2701,7 @@ export default {
       filters: { date },
       sort: 'startsAt:asc',
       populate: {
-        client: { fields: ['name', 'email', 'phone', 'blacklisted', 'blacklistReason'] },
+        client: { fields: ['name', 'email', 'phone', 'blacklisted', 'blacklistReason', 'notes'] },
         // кого обслуживают по интерной брони — бейдж «🤝 Interní · pro: …» в шторке
         internalFor: { fields: ['name'] },
         // исходный визит бесплатной коррекции — карточка «Korekce po návštěvě» (s210)
@@ -2705,7 +2709,8 @@ export default {
       },
       pagination: { pageSize: 200 },
     });
-    const list = Array.isArray(rows) ? rows : [];
+    // заметка о клиентке (s267) → `clientNote`, сырое `client.notes` не отдаём
+    const list = (Array.isArray(rows) ? rows : []).map(withBookingClientNote);
     const withKc = await this._withPricingExtras(list);
     if (!session || session.role !== 'master') return withKc;
     const ownNoonaId = await this._ownNoonaIdForSession(session);
@@ -2727,12 +2732,13 @@ export default {
       filters: { date: { $gte: monday, $lte: sunday }, noonaEmployeeId: { $eq: empId } },
       sort: 'startsAt:asc',
       populate: {
-        client: { fields: ['name', 'email', 'phone', 'blacklisted', 'blacklistReason'] },
+        client: { fields: ['name', 'email', 'phone', 'blacklisted', 'blacklistReason', 'notes'] },
         korekceOf: { fields: KOREKCE_OF_FIELDS },
       },
       pagination: { pageSize: 300 },
     });
-    const list = Array.isArray(rows) ? rows : [];
+    // неделя мастера — только его брони, поэтому `clientNote` остаётся у всех
+    const list = (Array.isArray(rows) ? rows : []).map(withBookingClientNote);
     const withKc = await this._withPricingExtras(list);
     if (session?.role !== 'master') return withKc;
     return withKc.map((b) => ({

@@ -35,7 +35,15 @@ assert.ok(normSrc, 'normalizePhone не найден в booking-engine.ts');
 const dedupeSrc = read('../src/api/client-dedupe/services/client-dedupe.ts');
 const IMPORT_LINE = "import { normalizePhone } from '../../booking-engine/services/booking-engine';";
 assert.ok(dedupeSrc.includes(IMPORT_LINE));
-const dedupe = await load(dedupeSrc.replace(IMPORT_LINE, normSrc[0].replace('export const', 'const')));
+// заметка о клиентке (s267): utils/client-note подставляется исходным текстом
+const NOTE_IMPORT = "import { CLIENT_NOTE_MAX, clientNoteOf, withClientNote } from '../../../utils/client-note';";
+assert.ok(dedupeSrc.includes(NOTE_IMPORT));
+const noteSrc = fs
+  .readFileSync(path.resolve(import.meta.dirname, '../src/utils/client-note.ts'), 'utf8')
+  .replace(/^export /gm, '');
+const dedupe = await load(
+  dedupeSrc.replace(IMPORT_LINE, normSrc[0].replace('export const', 'const')).replace(NOTE_IMPORT, noteSrc)
+);
 const svc = dedupe.default;
 const { normalizeBlacklistReason, BLACKLIST_REASON_KEYS } = dedupe;
 
