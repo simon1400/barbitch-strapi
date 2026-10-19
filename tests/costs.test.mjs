@@ -807,24 +807,6 @@ test('repeatCandidates: прошлый месяц без уже внесённы
   assert.equal(C.repeatCandidates(HISTORY.map((d) => C.toRow({ ...d, date: d.date.replace('2026-09', '2027-01') })), '2027-02').find((i) => i.name === 'Telefon').date, '2027-02-28');
 });
 
-test('missingRecurring: через 3 дня после обычного дня, не позже конца месяца; внесённая — нет', () => {
-  const rows = HISTORY.map((d) => C.toRow(d));
-  assert.deepEqual(C.missingRecurring(rows, '2026-10-10').map((m) => m.name), []);
-  assert.deepEqual(C.missingRecurring(rows, '2026-10-11').map((m) => m.name), ['Ucetni']);
-  const m = C.missingRecurring(rows, '2026-10-23');
-  assert.deepEqual(m.map((x) => x.name), ['Ucetni', 'Expert dev', 'Najem']);
-  assert.deepEqual(m[2], { name: 'Najem', category: 'Коммунальные', usualDay: 20, lastSum: 17000, lastDate: '2026-09-20' });
-  const withOct = [...rows, C.toRow({ documentId: 'x', date: '2026-10-09', name: 'účetní', category: 'Услуги', sum: '10285', noDph: '8500' })];
-  assert.deepEqual(C.missingRecurring(withOct, '2026-10-23').map((x) => x.name), ['Expert dev', 'Najem']);
-  // обычный день 30 в феврале: показывается в последний день месяца
-  const feb = [
-    { date: '2027-01-30', name: 'Pozdní' },
-    { date: '2026-12-30', name: 'Pozdní' },
-  ].map((d, i) => C.toRow({ documentId: `p${i}`, category: 'Другое', sum: '1', noDph: '1', ...d }));
-  assert.deepEqual(C.missingRecurring(feb, '2027-02-27'), []);
-  assert.equal(C.missingRecurring(feb, '2027-02-28').length, 1);
-});
-
 test('normalizeBatch: 1…30, каждая — как новая затрата, ошибка с номером строки', () => {
   assert.throws(() => C.normalizeBatch({ items: [] }, TODAY, CATS), (e) => e.code === 'batch_empty');
   assert.throws(() => C.normalizeBatch({}, TODAY, CATS), (e) => e.code === 'batch_empty');
@@ -870,7 +852,7 @@ test('recurring + batch: всё или ничего, автор и журнал 
   assert.equal(st2.logs.length, 0, 'журнал не пишется');
 });
 
-test('attention: владельцу — число запросов, управляющей — null; постоянные не внесены', async () => {
+test('attention: владельцу — число запросов, управляющей — null; s269 — без постоянных', async () => {
   makeStrapi(HISTORY);
   const NOW23 = new Date('2026-10-23T08:00:00Z');
   const req = await svc.request({ session: MANAGER, id: 'najem2000000000000000001', body: { action: 'delete' }, now: NOW23 });
@@ -878,7 +860,7 @@ test('attention: владельцу — число запросов, управ�
   const o = await svc.attention({ session: OWNER, now: NOW23 });
   assert.equal(o.today, '2026-10-23');
   assert.equal(o.pending, 1);
-  assert.deepEqual(o.missingRecurring.map((m) => m.name), ['Ucetni', 'Expert dev', 'Najem']);
+  assert.equal('missingRecurring' in o, false);
   const m = await svc.attention({ session: MANAGER, now: NOW23 });
   assert.equal(m.pending, null);
   assert.equal(await svc.pendingCount(), 1);

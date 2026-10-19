@@ -80,8 +80,6 @@ export const MAX_BATCH = 30;
 /** Постоянная — была в прошлом месяце и всего в ≥ 2 из стольких прошлых месяцев. */
 export const RECURRING_MONTHS = 3;
 export const RECURRING_MIN = 2;
-/** «Ещё не внесена» — через столько дней после обычного дня. */
-export const RECURRING_GRACE_DAYS = 3;
 
 /** Строка кассы и затрата — одна покупка: суммы равны, дни отличаются не больше чем на столько. */
 export const CASH_MATCH_DAYS = 1;
@@ -417,30 +415,6 @@ export const repeatCandidates = (rows: any[], month: string) => {
         usualDay: st?.usualDay ?? null,
       };
     });
-};
-
-/**
- * Постоянные, которые в месяце `today` ещё не внесены, хотя обычный день прошёл
- * на RECURRING_GRACE_DAYS (не позже последнего дня месяца).
- */
-export const missingRecurring = (rows: any[], today: string) => {
-  const month = today.slice(0, 7);
-  const day = Number(today.slice(8, 10));
-  const stats = recurringStats(rows, month);
-  const have = new Set(rows.filter((r) => String(r.date ?? '').startsWith(month)).map((r) => nameKey(r.name)));
-  const [prev] = prevMonths(month, 1);
-  const last = new Map();
-  for (const r of sortRows(rows.filter((x) => String(x.date ?? '').startsWith(prev)).map((x) => ({ ...x })))) {
-    if (!last.has(nameKey(r.name))) last.set(nameKey(r.name), r);
-  }
-  const out = [];
-  for (const [key, st] of stats) {
-    if (have.has(key)) continue;
-    if (day < Math.min(st.usualDay + RECURRING_GRACE_DAYS, lastDayOf(month))) continue;
-    const r = last.get(key);
-    out.push({ name: r.name, category: r.category, usualDay: st.usualDay, lastSum: r.sum, lastDate: r.date });
-  }
-  return out.sort((a, b) => a.usualDay - b.usualDay || a.name.localeCompare(b.name));
 };
 
 /** Пачка «повтора»: 1…MAX_BATCH записей, каждая — как новая затрата; ошибка — с номером строки. */
@@ -1346,19 +1320,19 @@ export default {
   },
 
   /**
-   * «Сегодня»: запросы ждут одобрения (владельцу) и не внесённые постоянные расходы.
+   * «Сегодня»: запросы ждут одобрения (владельцу). s269: «не внесённые постоянные» убраны
+   * по решению владельца (дублировали склад, висели на «Сегодня» постоянно).
    * s252: `stockReceipts` — новые затраты со склада, которые ждут решения этой сессии
    * (владельцу — все, управляющей — на её ступени).
    */
   async attention({ session, now = new Date() }: { session: any; now?: Date }) {
     const today = this._today(now);
-    const [rows, pending] = await Promise.all([this._historyRows(today.slice(0, 7)), this._pendingRequests()]);
+    const pending = await this._pendingRequests();
     const creates = pending.filter((r) => r.action === 'create');
     return {
       today,
       pending: isOwner(session) ? pending.length : null,
       stockReceipts: isOwner(session) ? creates.length : creates.filter((r) => canDecideCreate(session?.role, r.stage)).length,
-      missingRecurring: missingRecurring(rows, today),
     };
   },
 

@@ -129,10 +129,17 @@ export const fmtQty = (qty: unknown, packSize: unknown = 1, unit: unknown = 'ks'
   return parts.length ? parts.join(' + ') : `0 ${u}`;
 };
 
-/** Минимум и «doplnit do» в упаковках: у штучных целые, у ml/g дробные (s258: канистра — min 0,2). */
+/**
+ * Минимум и «doplnit do» целые только у штучных без упаковки (полштуки не бывает).
+ * В упаковках — дробные до сотых: s258 канистра ml — min 0,2; s269 штучные упаковки — 0,1 bal. по 500 ks = 50 ks.
+ */
+export const wholePacksOnly = (unit: unknown, packSize: unknown): boolean =>
+  (UNIT_KEYS.has(unit as string) ? unit : 'ks') === 'ks' && packOf({ packSize }) === 1;
+
+/** Минимум и «doplnit do» в упаковках (`wholePacksOnly` — целые, иначе до сотых). */
 export const packsOf = (v: unknown, item: any): number => {
   const n = Math.max(0, n0(v));
-  return unitOf(item) === 'ks' ? Math.floor(n) : r2(n);
+  return wholePacksOnly(item?.unit, item?.packSize) ? Math.floor(n) : r2(n);
 };
 
 /** Минимум в базовой единице. */
@@ -258,9 +265,9 @@ export const normalizeItemInput = (body: any, { partial = false, current = null 
     out.unit = u;
   }
   if (take('packSize')) out.packSize = body?.packSize == null || body?.packSize === '' ? 1 : intIn(body.packSize, 1, MAX_PACK_SIZE, 'bad_pack_size', 'Kusů v balení');
-  // минимум и «doplnit do» — в упаковках: штучные целые, ml/g дробные (s258)
-  const pieces = (has(out, 'unit') ? out.unit : unitOf(current)) === 'ks';
-  const packsIn = (v: unknown, code: string, label: string) => (pieces ? intIn(v, 0, MAX_PACKS, code, label) : numIn(v, 0, MAX_PACKS, code, label));
+  // минимум и «doplnit do» — в упаковках: целые только у штучных без упаковки (s258 ml/g, s269 штучные упаковки — дробные)
+  const whole = wholePacksOnly(has(out, 'unit') ? out.unit : unitOf(current), has(out, 'packSize') ? out.packSize : packOf(current));
+  const packsIn = (v: unknown, code: string, label: string) => (whole ? intIn(v, 0, MAX_PACKS, code, label) : numIn(v, 0, MAX_PACKS, code, label));
   if (take('min')) out.min = body?.min == null || body?.min === '' ? 0 : packsIn(body.min, 'bad_min', 'Minimum');
   if (take('target')) out.target = body?.target == null || body?.target === '' ? 0 : packsIn(body.target, 'bad_target', 'Doplnit do');
   const min = has(out, 'min') ? out.min : n0(current?.min);
@@ -449,8 +456,10 @@ export const forecastOf = (item: any, moves: any[], now: Date) => {
   out.soon = item?.active !== false && statusOf(item) === 'ok' && out.daysLeft <= SOON_DAYS;
   const pack = packOf(item);
   const need = (avg * MIN_COVER_DAYS) / pack;
-  // штучные и «без упаковки» — целые; упаковки ml/g — до десятых (канистра: 0,3)
-  out.suggestedMin = pack === 1 || unitOf(item) === 'ks' ? Math.max(1, Math.ceil(need - 1e-9)) : Math.max(0.1, Math.ceil(need * 10 - 1e-9) / 10);
+  // «без упаковки» — целые; упаковки ml/g — до десятых (канистра: 0,3); штучные упаковки — целые,
+  // но меньше одной — до десятых (s269: коробка 500 ks, расход 200 ks → 0,4 bal., а не 1)
+  const tenths = Math.max(0.1, Math.ceil(need * 10 - 1e-9) / 10);
+  out.suggestedMin = pack === 1 ? Math.max(1, Math.ceil(need - 1e-9)) : unitOf(item) !== 'ks' || need < 1 ? tenths : Math.ceil(need - 1e-9);
   return out;
 };
 

@@ -158,11 +158,29 @@ test('статус, «докупать до», сколько заказать',
   assert.equal(S.effectiveTarget(can(0)), 1.2, 'не задан — минимум + 1 (больше двойного)');
   assert.equal(S.suggestedPacks(can(500)), 2, '1,2 − 0,1 → 2 целых канистры');
   assert.equal(S.suggestedPacks(can(500, { target: 1 })), 1);
-  assert.equal(S.minBase({ packSize: 100, unit: 'ks', min: 0.8 }), 0, 'штучные — целые упаковки');
+  assert.equal(S.minBase({ packSize: 1, unit: 'ks', min: 2.8 }), 2, 'штучные без упаковки — целые');
   assert.equal(S.normalizeItemInput({ ...glovesS, unit: 'ml', packSize: 5000, min: '0,2', target: '' }).min, 0.2);
-  assert.throws(() => S.normalizeItemInput({ ...glovesS, min: '0,2' }), (e) => e.code === 'bad_min', 'ks — целое');
-  assert.throws(() => S.normalizeItemInput({ min: '0,5' }, { partial: true, current: { ...glovesS } }), (e) => e.code === 'bad_min', 'правка: единица из текущей');
+  assert.throws(() => S.normalizeItemInput({ ...glovesS, packSize: 1, min: '0,2' }), (e) => e.code === 'bad_min', 'ks без упаковки — целое');
+  assert.throws(() => S.normalizeItemInput({ min: '0,5' }, { partial: true, current: { ...glovesS, packSize: 1 } }), (e) => e.code === 'bad_min', 'правка: единица и упаковка из текущей');
+  assert.throws(() => S.normalizeItemInput({ packSize: '1', min: '0,5' }, { partial: true, current: { ...glovesS } }), (e) => e.code === 'bad_min', 'правка: упаковка 1 из тела');
   assert.equal(S.normalizeItemInput({ min: '0.5' }, { partial: true, current: { ...glovesS, unit: 'g' } }).min, 0.5);
+});
+
+test('s269: штучные в упаковках — дробный минимум и «doplnit do» (0,1 bal. по 500 ks = 50 ks)', () => {
+  const box = (qty, extra = {}) => ({ unit: 'ks', packSize: 500, min: 0.1, target: 0, qty, ...extra });
+  assert.equal(S.minBase(box(0)), 50);
+  assert.deepEqual([S.statusOf(box(50)), S.statusOf(box(51)), S.statusOf(box(0))], ['low', 'ok', 'out']);
+  assert.equal(S.effectiveTarget(box(0)), 1.1, 'не задан — минимум + 1');
+  assert.equal(S.suggestedPacks(box(40)), 2, '1,1 − 0,08 → 2 целые упаковки');
+  assert.equal(S.suggestedPacks(box(40, { target: 1 })), 1);
+  assert.equal(S.normalizeItemInput({ ...glovesS, packSize: 500, min: '0,1', target: '0,5' }).min, 0.1);
+  assert.equal(S.normalizeItemInput({ ...glovesS, packSize: 500, min: '0,1', target: '0,5' }).target, 0.5);
+  assert.equal(S.normalizeItemInput({ min: '0,15' }, { partial: true, current: { ...glovesS } }).min, 0.15, 'правка: упаковка из текущей');
+  assert.throws(() => S.normalizeItemInput({ ...glovesS, min: '0,1', target: '0,1' }), (e) => e.code === 'target_below_min');
+  assert.equal(S.wholePacksOnly('ks', 1), true);
+  assert.deepEqual([S.wholePacksOnly('ks', 500), S.wholePacksOnly('ml', 1), S.wholePacksOnly(undefined, 0)], [false, false, true]);
+  // текст минимума в списке — с запятой
+  assert.equal(S.itemView({ documentId: 'b', name: 'Vatové tyčinky', ...box(300) }, { now: new Date('2026-10-19T08:00:00Z'), showPrices: false }).minText, '0,1 bal.');
 });
 
 test('движения', () => {
@@ -407,6 +425,8 @@ test('s261: прогноз — расход в день, на сколько х�
   assert.equal(f.leftText, 'vystačí ~41 dní');
   assert.equal(f.soon, false);
   assert.equal(f.suggestedMin, 2, '14,3 × 14 дней = 200 ks = 2 bal.');
+  // s269: штучные упаковки — подсказка до десятых: 200 ks из коробки 500 = 0,4 bal.
+  assert.equal(S.forecastOf({ ...gloves, packSize: 500 }, moves, t).suggestedMin, 0.4);
   // через 30 дней без пересчёта остаток «тает»: хватит на 11 дней
   assert.equal(S.forecastOf(gloves, moves, new Date('2026-11-14T12:00:00Z')).daysLeft, 11);
   // мало наблюдений — прогноза нет
