@@ -306,6 +306,23 @@ export default {
       tz: 'Europe/Prague',
     },
   },
+  // Чат на сайте (s272): напоминание администраторкам о вопросе без ответа (часы салона,
+  // Telegram в тему + push под env CHAT_PUSH_ENABLED) и непрочитанный ответ клиентке,
+  // которой уже нет на сайте (e-mail / подсказка «напишите SMS»). Отметки в chat-session.
+  chatTick: {
+    task: async ({ strapi }) => {
+      try {
+        const res = await strapi.service('api::chat.chat').tick();
+        if (res?.remind || res?.away) strapi.log.info(`chat tick: ${JSON.stringify(res)}`);
+      } catch (e) {
+        strapi.log.error(`chat tick cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '* * * * *', // каждую минуту
+      tz: 'Europe/Prague',
+    },
+  },
   dailyDigest: {
     task: async ({ strapi }) => {
       try {

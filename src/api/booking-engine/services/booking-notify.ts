@@ -681,6 +681,35 @@ export default {
     return this.sendEmail({ to: email, subject, html });
   },
 
+  // ── чат на сайте (s272): ответ администраторки, который клиентка не увидела ──
+  // cr = { visitorName, replies: [{ text, hasImage }], sessionId } — кнопка открывает тот же чат на сайте
+  // (`/?chat=<sessionId>` восстанавливает сессию виджета и на другом устройстве)
+
+  buildChatReply(cr) {
+    const subject = 'Odpověď na vaši zprávu | Bar.Bitch';
+    const rows = (cr.replies || [])
+      .map((r) => {
+        const text = esc(String(r.text || '').trim()).replace(/\n/g, '<br>');
+        const img = r.hasImage ? '<span style="color:#a0a0a0;">📷 Obrázek — zobrazíte v chatu</span>' : '';
+        return `
+  <tr>
+    <td style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:22px;color:#ffffff;padding:6px 0;">
+      ${[text, img].filter(Boolean).join('<br>')}
+    </td>
+  </tr>`;
+      })
+      .join('');
+    const html = renderEmail({
+      heading: 'Máte odpověď v chatu 💬',
+      intro: `${esc(cr.visitorName || 'Dobrý den')}, odpověděli jsme na vaši zprávu z chatu na webu ${esc(SALON_NAME)}.`,
+      rows,
+      note: 'E-mail jste nám nechali v chatu, abychom vám mohli odpovědět. Pokračovat můžete přímo v chatu na webu.',
+      ctaLabel: 'OTEVŘÍT CHAT',
+      ctaUrl: `${SITE_URL}/?chat=${encodeURIComponent(cr.sessionId || '')}`,
+    });
+    return { subject, html };
+  },
+
   // ── события движка (вызываются fire-and-forget) ──
 
   async notifyBookingCreated(bookingDocId) {
@@ -945,6 +974,16 @@ export default {
         'preview@example.com',
         `${SITE_URL}/cabinet/verify?token=preview-token`
       );
+    }
+    if (type === 'chat-reply') {
+      return this.buildChatReply({
+        visitorName: 'Preview Klientka',
+        replies: [
+          { text: 'Dobrý den, v sobotu máme volno ve 13:00 i 15:30.\nMám vám jeden z termínů zarezervovat?', hasImage: false },
+          { text: '', hasImage: true },
+        ],
+        sessionId: 'preview',
+      });
     }
     const booking = await this.loadBooking(bookingDocId);
     if (!booking) return { error: 'booking_not_found' };

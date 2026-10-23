@@ -1,4 +1,32 @@
+import {
+  awayTelegramText,
+  chatStatusOf,
+  contactTelegramText,
+  NEXT_OPEN_LOOKAHEAD_DAYS,
+  parseContact,
+  planChatTick,
+  reminderTexts,
+  TICK_WINDOW_DAYS,
+  topicName,
+} from './chat-core';
+import { addDaysYmd } from '../../booking-engine/services/master-schedule';
+import { pragueDateOf } from '../../booking-engine/services/slots-core';
+
 const TELEGRAM_API = 'https://api.telegram.org/bot';
+const SESSION_UID = 'api::chat-session.chat-session';
+const MSG_UID = 'api::chat-message.chat-message';
+/** Отметку «клиентка на сайте» пишем не чаще (опрос открытого чата — каждые 3 с). */
+const SEEN_WRITE_SEC = 15;
+
+export class ChatError extends Error {
+  status: number;
+  code: string;
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
 
 export default {
   /**
@@ -42,9 +70,11 @@ export default {
   },
 
   /**
-   * Get messages for a session, optionally after a specific message ID
+   * Get messages for a session, optionally after a specific message ID.
+   * s272: каждый опрос = «клиентка на сайте» (`lastSeenAt`); опрос открытого чата (`open`) —
+   * ещё и «прочитала до …» (`readUpTo`) — по ним крон решает, слать ли ответ на e-mail.
    */
-  async getMessages(sessionId: string, afterId?: number) {
+  async getMessages(sessionId: string, afterId?: number, { open = false } = {}) {
     const sessions = await strapi.entityService.findMany('api::chat-session.chat-session' as any, {
       filters: { sessionId },
       limit: 1,
@@ -57,11 +87,27 @@ export default {
     const filters: any = { session: { id: session.id } };
     if (afterId) filters.id = { $gt: afterId };
 
-    return await strapi.entityService.findMany('api::chat-message.chat-message' as any, {
+    const messages = (await strapi.entityService.findMany('api::chat-message.chat-message' as any, {
       filters,
       sort: { createdAt: 'asc' },
       limit: 100,
-    });
+    })) as any[];
+    await (this as any)._touch(session, open ? Math.max(Number(afterId || 0), ...messages.map((m) => Number(m.id))) : 0).catch(
+      (e: Error) => strapi.log.warn(`chat: seen mark failed: ${e.message}`)
+    );
+    return messages;
+  },
+
+  async _touch(session: any, readUpTo: number) {
+    const data: any = {};
+    const seen = session.lastSeenAt ? new Date(session.lastSeenAt).getTime() : 0;
+    if (Date.now() - seen >= SEEN_WRITE_SEC * 1000) data.lastSeenAt = new Date();
+    if (readUpTo > Number(session.readUpTo || 0)) {
+      data.readUpTo = readUpTo;
+      data.lastSeenAt = new Date();
+    }
+    if (!Object.keys(data).length) return;
+    await strapi.db.query(SESSION_UID).update({ where: { id: session.id }, data });
   },
 
   /**
@@ -83,7 +129,7 @@ export default {
       topicId = await (this as any).createTelegramTopic(
         token,
         chatId,
-        session.visitorName || 'Návštěvník'
+        topicName(session.visitorName, { email: session.contactEmail, phone: session.contactPhone })
       );
       if (topicId) {
         await strapi.entityService.update('api::chat-session.chat-session' as any, session.id, {
@@ -153,7 +199,7 @@ export default {
       const res = await fetch(`${TELEGRAM_API}${token}/createForumTopic`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, name: `💬 ${name}` }),
+        body: JSON.stringify({ chat_id: chatId, name }),
       });
       const data = (await res.json()) as any;
       if (data.ok) return data.result.message_thread_id;
@@ -231,5 +277,131 @@ export default {
       strapi.log.error('Telegram file proxy failed:', error);
       return null;
     }
+  },
+
+  // ── s272: часы, контакт, крон ─────────────────────────────────────────────
+
+  /** Онлайн ли чат и когда откроемся — по `salon_hours` (как запись). */
+  async status(now: Date = new Date()) {
+    const today = pragueDateOf(now);
+    const rows = await strapi.documents('api::salon-hour.salon-hour').findMany({
+      filters: { date: { $gte: today, $lte: addDaysYmd(today, NEXT_OPEN_LOOKAHEAD_DAYS) } },
+      fields: ['date', 'openMin', 'closeMin'],
+      limit: NEXT_OPEN_LOOKAHEAD_DAYS + 1,
+    });
+    return chatStatusOf(rows, now);
+  },
+
+  async _findSession(sessionId: string) {
+    const rows = (await strapi.entityService.findMany(SESSION_UID as any, { filters: { sessionId }, limit: 1 })) as any[];
+    return rows?.[0] || null;
+  },
+
+  /** Для виджета: имя и оставленный контакт (ссылка из письма открывает чат на другом устройстве). */
+  async sessionInfo(sessionId: string) {
+    const s = await (this as any)._findSession(sessionId);
+    if (!s) return null;
+    return { visitorName: s.visitorName || '', email: s.contactEmail || null, phone: s.contactPhone || null };
+  },
+
+  /** «E-mail nebo telefon» из виджета: сохранить, сказать в тему Telegram, дописать контакт в имя темы. */
+  async saveContact(sessionId: string, raw: unknown, visitorName?: string) {
+    const c = parseContact(raw);
+    if (!c) throw new ChatError(400, 'bad_contact', 'Zadejte platný e-mail nebo telefon');
+    const session = await (this as any).getOrCreateSession(sessionId, visitorName);
+    const field = c.type === 'email' ? 'contactEmail' : 'contactPhone';
+    if (session[field] === c.value) return { type: c.type, value: c.value };
+    await strapi.db.query(SESSION_UID).update({ where: { id: session.id }, data: { [field]: c.value } });
+    session[field] = c.value;
+
+    const hadTopic = Boolean(session.telegramTopicId);
+    try {
+      await (this as any).sendToTelegram(session, contactTelegramText(c)); // без темы — создаст её уже с контактом в имени
+      if (hadTopic) await (this as any).renameTopic(session);
+    } catch (e) {
+      strapi.log.warn(`chat: contact → telegram failed: ${(e as Error).message}`);
+    }
+    return { type: c.type, value: c.value };
+  },
+
+  async renameTopic(session: any) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    if (!token || !chatId || !session.telegramTopicId) return;
+    const res = await fetch(`${TELEGRAM_API}${token}/editForumTopic`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_thread_id: session.telegramTopicId,
+        name: topicName(session.visitorName, { email: session.contactEmail, phone: session.contactPhone }),
+      }),
+    });
+    const data = (await res.json()) as any;
+    if (!data.ok) strapi.log.warn(`chat: editForumTopic failed: ${data.description}`);
+  },
+
+  /**
+   * Минутный крон: напомнить администраторкам о вопросе без ответа (часы салона) и
+   * отправить непрочитанный ответ клиентке, которой уже нет на сайте (e-mail — письмом,
+   * телефон — подсказка «напишите SMS» в тему). Отметки пишутся ДО отправки — сбой
+   * отправки не повторяется каждую минуту. Push — под env CHAT_PUSH_ENABLED.
+   */
+  async tick(now: Date = new Date()) {
+    const since = new Date(now.getTime() - TICK_WINDOW_DAYS * 86_400_000);
+    const rows = await strapi.db.query(MSG_UID).findMany({
+      where: { createdAt: { $gte: since } },
+      select: ['id', 'text', 'sender', 'telegramFileId', 'createdAt'],
+      populate: {
+        session: {
+          select: ['id', 'sessionId', 'visitorName', 'telegramTopicId', 'contactEmail', 'contactPhone', 'lastSeenAt', 'readUpTo', 'awayUpTo', 'remindedFor'],
+        },
+      },
+      orderBy: { id: 'asc' },
+      limit: 5000,
+    });
+    const groups = new Map<number, { session: any; msgs: any[] }>();
+    for (const m of rows as any[]) {
+      if (!m.session?.id) continue;
+      if (!groups.has(m.session.id)) groups.set(m.session.id, { session: m.session, msgs: [] });
+      groups.get(m.session.id).msgs.push(m);
+    }
+    if (!groups.size) return { remind: 0, away: 0 };
+
+    const { online } = await (this as any).status(now);
+    const plan = planChatTick([...groups.values()], now, online);
+
+    for (const r of plan.remind) {
+      await strapi.db.query(SESSION_UID).update({ where: { id: r.session.id }, data: { remindedFor: r.first.id } });
+      const t = reminderTexts(r);
+      await (this as any).sendToTelegram(r.session, t.telegram);
+      if (process.env.CHAT_PUSH_ENABLED === 'true') {
+        await strapi.service('api::booking-engine.manager-notify').toAdmins(t.push, 'chat-wait').catch((e: Error) =>
+          strapi.log.warn(`chat: reminder push failed: ${e.message}`)
+        );
+      }
+    }
+
+    for (const a of plan.away) {
+      const upTo = Math.max(...a.msgs.map((m) => Number(m.id)));
+      await strapi.db.query(SESSION_UID).update({ where: { id: a.session.id }, data: { awayUpTo: upTo } });
+      let text = awayTelegramText(a);
+      if (a.via === 'email') {
+        const notify = strapi.service('api::booking-engine.booking-notify');
+        try {
+          const { subject, html } = notify.buildChatReply({
+            visitorName: a.session.visitorName,
+            sessionId: a.session.sessionId,
+            replies: a.msgs.map((m) => ({ text: m.text, hasImage: Boolean(m.telegramFileId) })),
+          });
+          await notify.sendEmail({ to: a.session.contactEmail, subject, html });
+        } catch (e) {
+          strapi.log.error(`chat: reply e-mail failed: ${(e as Error).message}`);
+          text = `⚠️ Klientka už není na webu a e-mail s odpovědí se nepodařilo odeslat (${a.session.contactEmail}).`;
+        }
+      }
+      await (this as any).sendToTelegram(a.session, text);
+    }
+    return { remind: plan.remind.length, away: plan.away.length };
   },
 };

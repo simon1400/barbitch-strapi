@@ -27,6 +27,30 @@
     "telegramTopicId": {
       "type": "integer"
     },
+    "contactEmail": {
+      "type": "string",
+      "private": true
+    },
+    "contactPhone": {
+      "type": "string",
+      "private": true
+    },
+    "lastSeenAt": {
+      "type": "datetime",
+      "private": true
+    },
+    "readUpTo": {
+      "type": "integer",
+      "private": true
+    },
+    "awayUpTo": {
+      "type": "integer",
+      "private": true
+    },
+    "remindedFor": {
+      "type": "integer",
+      "private": true
+    },
     "messages": {
       "type": "relation",
       "relation": "oneToMany",

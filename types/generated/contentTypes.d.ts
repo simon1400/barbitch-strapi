@@ -1120,9 +1120,13 @@ export interface ApiChatSessionChatSession extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
+    awayUpTo: Schema.Attribute.Integer & Schema.Attribute.Private;
+    contactEmail: Schema.Attribute.String & Schema.Attribute.Private;
+    contactPhone: Schema.Attribute.String & Schema.Attribute.Private;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    lastSeenAt: Schema.Attribute.DateTime & Schema.Attribute.Private;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1134,6 +1138,8 @@ export interface ApiChatSessionChatSession extends Struct.CollectionTypeSchema {
       'api::chat-message.chat-message'
     >;
     publishedAt: Schema.Attribute.DateTime;
+    readUpTo: Schema.Attribute.Integer & Schema.Attribute.Private;
+    remindedFor: Schema.Attribute.Integer & Schema.Attribute.Private;
     sessionId: Schema.Attribute.String &
       Schema.Attribute.Required &
       Schema.Attribute.Unique;

@@ -37,7 +37,8 @@ const sha256 = (s: string): string => crypto.createHash('sha256').update(s).dige
 const normalizeEmail = (raw): string => String(raw || '').trim().toLowerCase();
 
 // Базовая проверка формы email (не RFC-полная — режем явный мусор до письма/токена).
-const looksLikeEmail = (email: string): boolean =>
+// s272: та же проверка у контакта в чате (chat-core.parseContact).
+export const looksLikeEmail =(email: string): boolean =>
   /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && email.length <= 254;
 
 export default {

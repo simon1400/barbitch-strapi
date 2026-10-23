@@ -28,7 +28,7 @@ export default {
   },
 
   async messages(ctx) {
-    const { sessionId, after } = ctx.request.query as { sessionId?: string; after?: string };
+    const { sessionId, after, open } = ctx.request.query as { sessionId?: string; after?: string; open?: string };
 
     if (!sessionId) {
       ctx.throw(400, 'sessionId is required');
@@ -36,8 +36,45 @@ export default {
     }
 
     const chatService = strapi.service('api::chat.chat') as any;
-    const messages = await chatService.getMessages(sessionId, after ? Number(after) : undefined);
+    const messages = await chatService.getMessages(sessionId, after ? Number(after) : undefined, { open: open === '1' });
     ctx.body = messages;
+  },
+
+  // s272: онлайн ли чат (часы салона) и когда откроемся
+  async status(ctx) {
+    ctx.body = await (strapi.service('api::chat.chat') as any).status();
+  },
+
+  // s272: имя и оставленный контакт сессии (ссылка из письма на другом устройстве)
+  async session(ctx) {
+    const sessionId = (ctx.request.query as any).sessionId;
+    if (!sessionId) {
+      ctx.throw(400, 'sessionId is required');
+      return;
+    }
+    const info = await (strapi.service('api::chat.chat') as any).sessionInfo(String(sessionId));
+    if (!info) {
+      ctx.status = 404;
+      ctx.body = { error: { status: 404, code: 'not_found', message: 'Chat nenalezen' } };
+      return;
+    }
+    ctx.body = info;
+  },
+
+  // s272: «e-mail nebo telefon» из виджета
+  async contact(ctx) {
+    const body = (ctx.request.body || {}) as any;
+    if (!body.sessionId) {
+      ctx.throw(400, 'sessionId is required');
+      return;
+    }
+    try {
+      ctx.body = await (strapi.service('api::chat.chat') as any).saveContact(String(body.sessionId), body.contact, body.visitorName);
+    } catch (e: any) {
+      if (!e?.code || !e?.status) throw e;
+      ctx.status = e.status;
+      ctx.body = { error: { status: e.status, code: e.code, message: e.message } };
+    }
   },
 
   /**
