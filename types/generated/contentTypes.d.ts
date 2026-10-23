@@ -3387,6 +3387,45 @@ export interface ApiVaucherPageVaucherPage extends Struct.SingleTypeSchema {
   };
 }
 
+export interface ApiUnsubscribeUnsubscribeLog extends Struct.CollectionTypeSchema {
+  collectionName: 'unsubscribe_logs';
+  info: {
+    description: '\u0416\u0443\u0440\u043D\u0430\u043B \u043E\u0442\u043F\u0438\u0441\u043E\u043A (s271)';
+    displayName: 'Unsubscribe logs';
+    pluralName: 'unsubscribe-logs';
+    singularName: 'unsubscribe-log';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    action: Schema.Attribute.Enumeration<['unsubscribe', 'resubscribe']> &
+      Schema.Attribute.Required;
+    clientDocId: Schema.Attribute.String & Schema.Attribute.Required;
+    clientName: Schema.Attribute.String;
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    email: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::unsubscribe.unsubscribe-log'
+    > &
+      Schema.Attribute.Private;
+    origin: Schema.Attribute.Enumeration<['comeback', 'review', 'campaign']>;
+    publishedAt: Schema.Attribute.DateTime;
+    reason: Schema.Attribute.Enumeration<
+      ['too_often', 'not_interested', 'not_coming', 'other_salon', 'never_signed', 'other']
+    >;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    via: Schema.Attribute.Enumeration<['link', 'one_click']>;
+  };
+}
+
 export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
   collectionName: 'vouchers';
   info: {
@@ -4149,6 +4188,7 @@ declare module '@strapi/strapi' {
       'api::time-off.time-off': ApiTimeOffTimeOff;
       'api::upsell-attempt.upsell-attempt': ApiUpsellAttemptUpsellAttempt;
       'api::vaucher-page.vaucher-page': ApiVaucherPageVaucherPage;
+      'api::unsubscribe.unsubscribe-log': ApiUnsubscribeUnsubscribeLog;
       'api::voucher.voucher': ApiVoucherVoucher;
       'api::work-report.work-report': ApiWorkReportWorkReport;
       'api::work-time.work-time': ApiWorkTimeWorkTime;

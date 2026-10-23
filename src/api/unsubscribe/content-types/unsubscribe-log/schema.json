@@ -1,0 +1,46 @@
+{
+  "kind": "collectionType",
+  "collectionName": "unsubscribe_logs",
+  "info": {
+    "singularName": "unsubscribe-log",
+    "pluralName": "unsubscribe-logs",
+    "displayName": "Unsubscribe logs",
+    "description": "Журнал отписок от писем по ссылке (s271): кто отписался или вернулся, через что (страница / кнопка почтовика), из какого письма и почему. Пишет только сервер; REST — только чтение."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "clientDocId": {
+      "type": "string",
+      "required": true
+    },
+    "clientName": {
+      "type": "string"
+    },
+    "email": {
+      "type": "string"
+    },
+    "action": {
+      "type": "enumeration",
+      "enum": ["unsubscribe", "resubscribe"],
+      "required": true
+    },
+    "via": {
+      "type": "enumeration",
+      "enum": ["link", "one_click"]
+    },
+    "origin": {
+      "type": "enumeration",
+      "enum": ["comeback", "review", "campaign"]
+    },
+    "reason": {
+      "type": "enumeration",
+      "enum": ["too_often", "not_interested", "not_coming", "other_salon", "never_signed", "other"]
+    },
+    "comment": {
+      "type": "text"
+    }
+  }
+}

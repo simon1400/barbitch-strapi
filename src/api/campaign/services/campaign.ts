@@ -21,6 +21,8 @@
 // сейчас согласие отметили 3 клиента из 1908, так что строгий режим означал бы
 // фактическую остановку рассылок; выбор осознанно оставлен владельцу.
 
+import { unsubscribeLinks } from '../../../utils/unsubscribe-token';
+
 const CLIENT_UID = 'api::client.client';
 
 // Белый список шаблонов = имена файлов в client/src/app/api/email-templates/.
@@ -66,6 +68,8 @@ const loadClientFlags = async () => {
       // одна почта может быть у нескольких карточек (дубли клиентов) —
       // берём СТРОГИЙ вариант: любой запрет по любой карточке запрещает
       map.set(key, {
+        // карточка для ссылки отписки (s271): отписка по ней снимает и все дубли с этой почтой
+        docId: prev?.docId || c.documentId,
         name: prev?.name || c.name || '',
         blacklisted: Boolean(prev?.blacklisted) || Boolean(c.blacklisted),
         reminderOptOut: Boolean(prev?.reminderOptOut) || Boolean(c.reminderOptOut),
@@ -123,7 +127,16 @@ export default {
         skippedDetail.push({ email, reason: 'noConsent' });
         continue;
       }
-      accepted.push({ email, variables: r?.variables || {} });
+      // Ссылка отписки и List-Unsubscribe (s271) — только у адресов из базы клиентов.
+      // Ставится ПОСЛЕ переменных из админки: подменить её из браузера нельзя.
+      // Адрес не из базы или нет секрета → client-роут оставит прежнюю отписку письмом.
+      const links = f?.docId ? unsubscribeLinks(f.docId, 'campaign') : null;
+      const { unsubscribeUrl: _fromBrowser, ...vars } = r?.variables || {};
+      accepted.push({
+        email,
+        variables: { ...vars, ...(links ? { unsubscribeUrl: links.pageUrl } : {}) },
+        ...(links ? { headers: links.headers } : {}),
+      });
     }
 
     if (accepted.length === 0) {

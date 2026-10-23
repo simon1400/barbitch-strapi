@@ -244,6 +244,13 @@ const detailRowHtml = (label, valueHtml) => `
     </td>
   </tr>`;
 
+// Строка отписки в сервисных письмах (s271): ссылка на /odhlasit/<token>, если секрет
+// есть; без него — прежний текст «odpovězte slovem NEZASÍLAT» (ручная отписка).
+const optOutLine = (url, lead) =>
+  url
+    ? `${lead}, <a href="${esc(url)}" style="color:#ffffff;text-decoration:underline;">odhlaste se jedním kliknutím</a>.`
+    : `${lead}, odpovězte na tento e-mail slovem <strong style="color:#ffffff;">NEZASÍLAT</strong>.`;
+
 const renderEmail = ({ heading, intro, rows, note, ctaLabel, ctaUrl, secondaryHtml }) => `<!DOCTYPE html>
 <html lang="cs">
   <head>
@@ -418,7 +425,8 @@ const loyaltyCtaHtml = () =>
 // ── транспорты ──
 
 export default {
-  async sendEmail({ to, subject, html, attachments }) {
+  // headers — служебные заголовки письма (s271: List-Unsubscribe для отписки одним кликом)
+  async sendEmail({ to, subject, html, attachments, headers }) {
     const key = process.env.RESEND_API_KEY;
     if (!to) {
       strapi.log.info('booking-notify: no recipient e-mail — skip');
@@ -435,7 +443,7 @@ export default {
     const res = await fetch(RESEND_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ from: FROM, to: [to], subject, html, attachments }),
+      body: JSON.stringify({ from: FROM, to: [to], subject, html, attachments, ...(headers ? { headers } : {}) }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -594,7 +602,7 @@ export default {
   // ── comeback-напоминание «пора записаться снова» (~25 дней после визита) ──
   // Рендер живёт здесь (бренд-канон renderEmail); логику кандидатов/дедупа ведёт
   // сервис api::comeback-reminder.comeback-reminder (cron + ручной триггер).
-  // cv = { clientName, serviceTitle, employeeName, lastVisitDate: 'YYYY-MM-DD', bookUrl }
+  // cv = { clientName, serviceTitle, employeeName, lastVisitDate: 'YYYY-MM-DD', bookUrl, unsubscribeUrl? }
 
   buildComeback(cv) {
     // полдень UTC — чтобы Intl с TZ Прага не уехал на соседний день
@@ -614,7 +622,7 @@ export default {
           : ''
       }.`,
       rows,
-      note: 'Toto je jednorázové připomenutí po vaší návštěvě. Pokud si podobná připomenutí nepřejete, odpovězte na tento e-mail slovem <strong style="color:#ffffff;">NEZASÍLAT</strong>.',
+      note: `Toto je jednorázové připomenutí po vaší návštěvě. ${optOutLine(cv.unsubscribeUrl, 'Pokud si podobná připomenutí nepřejete')}`,
       ctaLabel: 'REZERVOVAT TERMÍN',
       ctaUrl: cv.bookUrl || `${SITE_URL}/book`,
     });
@@ -624,7 +632,7 @@ export default {
   // ── просьба оставить отзыв на Google (через день после визита) ──
   // Рендер живёт здесь (бренд-канон renderEmail); отбор кандидатов/дедуп ведёт
   // сервис api::review-request.review-request (cron + ручной триггер).
-  // rv = { clientName, serviceTitle, employeeName, visitDate: 'YYYY-MM-DD', visitCount, reviewUrl }
+  // rv = { clientName, serviceTitle, employeeName, visitDate: 'YYYY-MM-DD', visitCount, reviewUrl, unsubscribeUrl? }
   //
   // 🟥 Текст намеренно НЕ фильтрует по впечатлению («líbilo se vám?» → только
   // довольных на Google) и ничего не обещает взамен — и то, и другое запрещено
@@ -646,7 +654,7 @@ export default {
       // Кто уже оставил отзыв, мы знать не можем (Google не отдаёт связь
       // «отзыв → клиент», а Places API показывает лишь 5 последних под именами
       // Google-аккаунтов). Поэтому случай закрыт текстом, а не фильтром.
-      note: 'Napište prosím upřímně, jak to u nás bylo — ceníme si každé zpětné vazby. Pokud jste nám recenzi už napsali, moc děkujeme a tento e-mail prosím ignorujte. Nepřejete-li si podobné e-maily, odpovězte na tento e-mail slovem <strong style="color:#ffffff;">NEZASÍLAT</strong>.',
+      note: `Napište prosím upřímně, jak to u nás bylo — ceníme si každé zpětné vazby. Pokud jste nám recenzi už napsali, moc děkujeme a tento e-mail prosím ignorujte. ${optOutLine(rv.unsubscribeUrl, 'Nepřejete-li si podobné e-maily')}`,
       ctaLabel: 'NAPSAT RECENZI',
       ctaUrl: rv.reviewUrl,
     });

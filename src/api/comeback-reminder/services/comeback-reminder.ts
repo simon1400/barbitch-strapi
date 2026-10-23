@@ -43,6 +43,7 @@ const shiftDays = (dateStr, days) => {
 };
 
 import { withoutInternal } from '../../booking-engine/services/booking-kind';
+import { unsubscribeLinks } from '../../../utils/unsubscribe-token';
 
 export default {
   // dry=true — собрать кандидатов и ссылки БЕЗ отправки и БЕЗ записи в лог
@@ -137,8 +138,10 @@ export default {
         continue;
       }
       try {
-        const { subject, html } = notify.buildComeback(view);
-        const res = await notify.sendEmail({ to: c.email, subject, html });
+        // ссылка отписки + List-Unsubscribe (s271); без секрета — null, старый текст NEZASÍLAT
+        const links = unsubscribeLinks(clientDocId, 'comeback');
+        const { subject, html } = notify.buildComeback({ ...view, unsubscribeUrl: links?.pageUrl });
+        const res = await notify.sendEmail({ to: c.email, subject, html, headers: links?.headers });
         // без RESEND-ключа / в DRY-режиме лог НЕ пишем — отправится следующим прогоном
         if (res?.skipped || res?.dry) continue;
         await strapi.documents(LOG_UID).create({
