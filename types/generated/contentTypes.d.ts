@@ -3661,6 +3661,65 @@ export interface ApiVaucherPageVaucherPage extends Struct.SingleTypeSchema {
   };
 }
 
+export interface ApiVoucherPaymentVoucherPayment
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'voucher_payments';
+  info: {
+    description: 'Platba d\u00E1rkov\u00E9ho voucheru p\u0159es Comgate (s275).';
+    displayName: 'Platby voucher\u016F kartou';
+    pluralName: 'voucher-payments';
+    singularName: 'voucher-payment';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    buyerName: Schema.Attribute.String;
+    cancelledAt: Schema.Attribute.DateTime;
+    catalogId: Schema.Attribute.String & Schema.Attribute.Required;
+    checkedAt: Schema.Attribute.DateTime;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    email: Schema.Attribute.Email & Schema.Attribute.Required;
+    failReason: Schema.Attribute.String;
+    forName: Schema.Attribute.String;
+    idVoucher: Schema.Attribute.String & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::voucher-payment.voucher-payment'
+    > &
+      Schema.Attribute.Private;
+    mailError: Schema.Attribute.Text;
+    mailSentAt: Schema.Attribute.DateTime;
+    method: Schema.Attribute.String;
+    paidAt: Schema.Attribute.DateTime;
+    price: Schema.Attribute.Integer & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    refundedAt: Schema.Attribute.DateTime;
+    refundedBy: Schema.Attribute.String;
+    serviceName: Schema.Attribute.String;
+    status: Schema.Attribute.Enumeration<
+      ['pending', 'paid', 'cancelled', 'refunded']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'pending'>;
+    test: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    token: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Private &
+      Schema.Attribute.Unique;
+    transId: Schema.Attribute.String &
+      Schema.Attribute.Private &
+      Schema.Attribute.Unique;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    voucherDocId: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
 export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
   collectionName: 'vouchers';
   info: {
@@ -3695,6 +3754,10 @@ export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
+    paymentStatus: Schema.Attribute.Enumeration<
+      ['manual', 'pending', 'paid', 'cancelled', 'refunded']
+    > &
+      Schema.Attribute.DefaultTo<'manual'>;
     phone: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     serviceName: Schema.Attribute.String;
@@ -4426,6 +4489,7 @@ declare module '@strapi/strapi' {
       'api::unsubscribe.unsubscribe-log': ApiUnsubscribeUnsubscribeLog;
       'api::upsell-attempt.upsell-attempt': ApiUpsellAttemptUpsellAttempt;
       'api::vaucher-page.vaucher-page': ApiVaucherPageVaucherPage;
+      'api::voucher-payment.voucher-payment': ApiVoucherPaymentVoucherPayment;
       'api::voucher.voucher': ApiVoucherVoucher;
       'api::work-report.work-report': ApiWorkReportWorkReport;
       'api::work-time.work-time': ApiWorkTimeWorkTime;

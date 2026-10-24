@@ -350,9 +350,11 @@ export default {
     if (!voucherDocId) return null;
     const v = await strapi.documents(VOUCHER_UID).findOne({
       documentId: voucherDocId,
-      fields: ['idVoucher', 'datePay', 'dateRealized'],
+      fields: ['idVoucher', 'datePay', 'dateRealized', 'paymentStatus'],
     });
     if (!v) throw new EngineError(404, 'voucher_not_found', 'Voucher nenalezen');
+    // s275: peníze za voucher vráceny (Comgate) — voucher už neplatí
+    if (v.paymentStatus === 'refunded') throw new EngineError(409, 'voucher_refunded', 'Za voucher byly vráceny peníze — už neplatí');
     if (!v.datePay) throw new EngineError(409, 'voucher_not_paid', 'Voucher není zaplacený');
     return v.documentId;
   },

@@ -91,6 +91,7 @@ const stockOrdersSvc = () => strapi.service('api::booking-engine.stock-orders');
 const smenaSvc = () => strapi.service('api::booking-engine.smena');
 const homeSvc = () => strapi.service('api::booking-engine.home');
 const firmInquiriesSvc = () => strapi.service('api::booking-engine.firm-inquiries');
+const voucherPaymentsSvc = () => strapi.service('api::booking-engine.voucher-payments');
 
 // personal.documentId сотрудника сессии: по связи учётки, без связи — по имени (s229, §5а.1)
 const resolveSessionPersonalDocId = async (session) =>
@@ -111,6 +112,40 @@ export default {
   async firmInquirySubmit(ctx) {
     const ip = ctx.request.ip || String(ctx.request.header['x-forwarded-for'] || '').split(',')[0].trim();
     await handle(ctx, () => firmInquiriesSvc().submit({ body: ctx.request.body, files: ctx.request.files, ip }));
+  },
+
+  // s275: POST /api/engine/vouchers/checkout — objednávka voucheru → adresa platební brány Comgate
+  async voucherCheckout(ctx) {
+    const ip = ctx.request.ip || String(ctx.request.header['x-forwarded-for'] || '').split(',')[0].trim();
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => voucherPaymentsSvc().checkout({ body: ctx.request.body, ip }));
+  },
+
+  // s275: GET /api/engine/vouchers/checkout/:token — stav platby pro stránku „Děkujeme“
+  async voucherCheckoutStatus(ctx) {
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => voucherPaymentsSvc().checkoutStatus({ token: ctx.params.token }));
+  },
+
+  // s275: POST /api/engine/payments/comgate/notify — push Comgate; odpověď 2xx „OK“, jinak opakuje
+  async comgateNotify(ctx) {
+    await handle(ctx, () => voucherPaymentsSvc().notify({ body: ctx.request.body }));
+    if (ctx.status === 200) ctx.type = 'text/plain';
+  },
+
+  // s275: GET /api/engine/admin/voucher-payments?days= — platby voucherů kartou (vedení)
+  async adminVoucherPayments(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => voucherPaymentsSvc().adminList({ days: ctx.query.days }));
+  },
+
+  // s275: POST /api/engine/admin/voucher-payments/:id/refund — vrátit peníze (jen majitel)
+  async adminVoucherPaymentRefund(ctx) {
+    const session = requireOwner(ctx);
+    if (!session) return;
+    await handle(ctx, () => voucherPaymentsSvc().refund({ session, id: ctx.params.id }));
   },
 
   // s274: GET /api/engine/admin/firm-inquiries — všechny poptávky (vedení)

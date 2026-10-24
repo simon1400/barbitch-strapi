@@ -59,6 +59,17 @@
       "enum": [
         "email"
       ]
+    },
+    "paymentStatus": {
+      "type": "enumeration",
+      "enum": [
+        "manual",
+        "pending",
+        "paid",
+        "cancelled",
+        "refunded"
+      ],
+      "default": "manual"
     }
   }
 }

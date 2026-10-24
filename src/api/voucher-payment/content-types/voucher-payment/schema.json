@@ -1,0 +1,93 @@
+{
+  "kind": "collectionType",
+  "collectionName": "voucher_payments",
+  "info": {
+    "singularName": "voucher-payment",
+    "pluralName": "voucher-payments",
+    "displayName": "Platby voucherů kartou",
+    "description": "Platba dárkového voucheru přes Comgate (s275). REST-routů není: založení — veřejná ručka POST /api/engine/vouchers/checkout, stav — push Comgate + ověření dotazem, seznam a vrácení peněz — /engine/admin/voucher-payments (vedení)."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "token": {
+      "type": "string",
+      "required": true,
+      "unique": true,
+      "private": true
+    },
+    "transId": {
+      "type": "string",
+      "unique": true,
+      "private": true
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["pending", "paid", "cancelled", "refunded"],
+      "default": "pending",
+      "required": true
+    },
+    "voucherDocId": {
+      "type": "string",
+      "required": true
+    },
+    "idVoucher": {
+      "type": "string",
+      "required": true
+    },
+    "catalogId": {
+      "type": "string",
+      "required": true
+    },
+    "serviceName": {
+      "type": "string"
+    },
+    "price": {
+      "type": "integer",
+      "required": true
+    },
+    "email": {
+      "type": "email",
+      "required": true
+    },
+    "buyerName": {
+      "type": "string"
+    },
+    "forName": {
+      "type": "string"
+    },
+    "test": {
+      "type": "boolean",
+      "default": false
+    },
+    "method": {
+      "type": "string"
+    },
+    "failReason": {
+      "type": "string"
+    },
+    "paidAt": {
+      "type": "datetime"
+    },
+    "cancelledAt": {
+      "type": "datetime"
+    },
+    "refundedAt": {
+      "type": "datetime"
+    },
+    "refundedBy": {
+      "type": "string"
+    },
+    "mailSentAt": {
+      "type": "datetime"
+    },
+    "mailError": {
+      "type": "text"
+    },
+    "checkedAt": {
+      "type": "datetime"
+    }
+  }
+}

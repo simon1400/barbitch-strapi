@@ -183,7 +183,7 @@ export default {
   // серверным секретом. Отписка/чёрный список тут НЕ проверяются намеренно:
   // это транзакционное письмо об оплаченном покупателем ваучере, а не маркетинг.
   async sendVoucherConfirmation(payload, session) {
-    const { email, buyerName, recipientName, voucherId, validUntil, serviceName } = payload || {};
+    const { email, buyerName, recipientName, voucherId, validUntil, serviceName, attachPdfSum } = payload || {};
     const addr = String(email || '').trim();
     if (!EMAIL_RE.test(addr)) {
       throw new CampaignError(400, 'invalid_email', 'Neplatná e-mailová adresa');
@@ -210,6 +210,8 @@ export default {
         validUntil: String(validUntil).trim(),
         // s274: voucher na konkrétní službu — jiná pravidla v e-mailu (nepovinné)
         ...(String(serviceName || '').trim() ? { serviceName: String(serviceName).trim().slice(0, 200) } : {}),
+        // s275: platba kartou — e-mail rovnou s PDF voucheru (částka = šablona, u služby se nepoužije)
+        ...(Number(attachPdfSum) > 0 ? { attachPdf: true, sum: Number(attachPdfSum) } : {}),
       }),
     });
     const data = await res.json().catch(() => ({}));

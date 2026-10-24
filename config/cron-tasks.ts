@@ -323,6 +323,21 @@ export default {
       tz: 'Europe/Prague',
     },
   },
+  // s275: dárkové vouchery kartou — neuhrazené objednávky po 24 h zrušit (poslední dotaz
+  // do Comgate, pak zrušení i tam). Bez COMGATE_MERCHANT/COMGATE_SECRET nic nedělá.
+  voucherPaymentsExpire: {
+    task: async ({ strapi }) => {
+      try {
+        await strapi.service('api::booking-engine.voucher-payments').expireStale();
+      } catch (e) {
+        strapi.log.error(`voucher payments expire cron failed: ${(e as Error).message}`);
+      }
+    },
+    options: {
+      rule: '*/15 * * * *', // každých 15 minut
+      tz: 'Europe/Prague',
+    },
+  },
   dailyDigest: {
     task: async ({ strapi }) => {
       try {

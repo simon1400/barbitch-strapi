@@ -23,6 +23,7 @@ import {
   safeFileName,
   storePrivateFile,
 } from '../../../utils/private-files';
+import { makeIpLimiter } from '../../../utils/ip-limiter';
 import {
   LOGO_MAX_BYTES,
   checkInquiry,
@@ -50,21 +51,8 @@ const ADMIN_URL = process.env.ADMIN_APP_URL || 'https://admin.barbitch.cz';
 const notifySvc = () => strapi.service('api::booking-engine.booking-notify');
 
 // Poptávka posílá e-maily → vlastní přísný limit nad společným rate-limit-engine
-// (300/5 min): 5 poptávek za hodinu z jedné IP. V paměti, jeden PM2 proces.
-const SUBMIT_WINDOW_MS = 60 * 60 * 1000;
-const SUBMIT_MAX_PER_IP = 5;
-const submits = new Map<string, number[]>();
-const allowSubmit = (ip: string, now = Date.now()) => {
-  const recent = (submits.get(ip) || []).filter((t) => now - t < SUBMIT_WINDOW_MS);
-  if (recent.length >= SUBMIT_MAX_PER_IP) {
-    submits.set(ip, recent);
-    return false;
-  }
-  recent.push(now);
-  submits.set(ip, recent);
-  if (submits.size > 5000) submits.clear();
-  return true;
-};
+// (300/5 min): 5 poptávek za hodinu z jedné IP.
+const allowSubmit = makeIpLimiter(60 * 60 * 1000, 5);
 
 const FIELD_MESSAGE = {
   company: 'Vyplňte název firmy',
