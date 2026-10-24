@@ -28,6 +28,11 @@
       "type": "component",
       "repeatable": false,
       "component": "seo.meta"
+    },
+    "serviceVouchers": {
+      "type": "component",
+      "repeatable": true,
+      "component": "vouchers.service-voucher"
     }
   }
 }

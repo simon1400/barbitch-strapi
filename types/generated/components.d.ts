@@ -412,6 +412,28 @@ export interface SeoMeta extends Struct.ComponentSchema {
   };
 }
 
+export interface VouchersServiceVoucher extends Struct.ComponentSchema {
+  collectionName: 'components_vouchers_service_vouchers';
+  info: {
+    description: 'Karta voucheru na konkr\u00E9tn\u00ED slu\u017Ebu na /darkovy-voucher. Cena a dostupnost se berou ze slu\u017Eby.';
+    displayName: 'Voucher na slu\u017Ebu';
+    icon: 'gift';
+  };
+  attributes: {
+    active: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    desc: Schema.Attribute.Text;
+    name: Schema.Attribute.String;
+    photo: Schema.Attribute.Media<'images'>;
+    service: Schema.Attribute.Relation<
+      'oneToOne',
+      'api::salon-service.salon-service'
+    > &
+      Schema.Attribute.Required;
+    tag: Schema.Attribute.String & Schema.Attribute.Required;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+  };
+}
+
 declare module '@strapi/strapi' {
   export module Public {
     export interface ComponentSchemas {
@@ -438,6 +460,7 @@ declare module '@strapi/strapi' {
       'items.rates': ItemsRates;
       'items.soc-item': ItemsSocItem;
       'seo.meta': SeoMeta;
+      'vouchers.service-voucher': VouchersServiceVoucher;
     }
   }
 }

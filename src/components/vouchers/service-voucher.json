@@ -1,0 +1,44 @@
+{
+  "collectionName": "components_vouchers_service_vouchers",
+  "info": {
+    "displayName": "Voucher na službu",
+    "icon": "gift",
+    "description": "Karta voucheru na konkrétní službu na /darkovy-voucher. Cena a dostupnost se berou ze služby."
+  },
+  "options": {},
+  "attributes": {
+    "service": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::salon-service.salon-service",
+      "required": true
+    },
+    "tag": {
+      "type": "string",
+      "required": true,
+      "description": "Štítek nad názvem: Nehty / Řasy / Obočí"
+    },
+    "name": {
+      "type": "string",
+      "description": "Název na kartě (prázdné = název služby)"
+    },
+    "title": {
+      "type": "string",
+      "required": true,
+      "description": "Nadpis v souhrnu objednávky, 4. pád: „Voucher na gel lak manikúru“"
+    },
+    "desc": {
+      "type": "text",
+      "description": "Dvě řádky popisu na kartě"
+    },
+    "photo": {
+      "allowedTypes": ["images"],
+      "type": "media",
+      "multiple": false
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

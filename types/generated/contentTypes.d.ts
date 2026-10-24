@@ -3603,6 +3603,10 @@ export interface ApiVaucherPageVaucherPage extends Struct.SingleTypeSchema {
       Schema.Attribute.Private;
     metaData: Schema.Attribute.Component<'seo.meta', false>;
     publishedAt: Schema.Attribute.DateTime;
+    serviceVouchers: Schema.Attribute.Component<
+      'vouchers.service-voucher',
+      true
+    >;
     title: Schema.Attribute.String & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -3630,6 +3634,7 @@ export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
     dateOrder: Schema.Attribute.Date & Schema.Attribute.Required;
     datePay: Schema.Attribute.Date;
     dateRealized: Schema.Attribute.Date;
+    dedication: Schema.Attribute.Text;
     deliveryMethod: Schema.Attribute.Enumeration<['email']> &
       Schema.Attribute.DefaultTo<'email'>;
     email: Schema.Attribute.Email;
@@ -3646,6 +3651,7 @@ export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
     name: Schema.Attribute.String & Schema.Attribute.Required;
     phone: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
+    serviceName: Schema.Attribute.String;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
