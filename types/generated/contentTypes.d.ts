@@ -1812,6 +1812,53 @@ export interface ApiGoogleReviewGoogleReview
   };
 }
 
+export interface ApiFirmInquiryFirmInquiry extends Struct.CollectionTypeSchema {
+  collectionName: 'firm_inquiries';
+  info: {
+    description: 'Popt\u00E1vka firemn\u00EDch voucher\u016F z barbitch.cz/firemni-vouchery (s274). REST-rout\u016F nen\u00ED: z\u00E1pis \u2014 ve\u0159ejn\u00E1 ru\u010Dka POST /api/engine/firm-inquiries, \u010Dten\u00ED a stav \u2014 /engine/admin/firm-inquiries (veden\u00ED). Logo \u2014 v zav\u0159en\u00E9m adres\u00E1\u0159i FIRM_FILES_DIR (storedName).';
+    displayName: 'Firemn\u00ED popt\u00E1vky voucher\u016F';
+    pluralName: 'firm-inquiries';
+    singularName: 'firm-inquiry';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    adminNote: Schema.Attribute.Text;
+    company: Schema.Attribute.String & Schema.Attribute.Required;
+    count: Schema.Attribute.Integer & Schema.Attribute.Required;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    email: Schema.Attribute.Email & Schema.Attribute.Required;
+    ico: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::firm-inquiry.firm-inquiry'
+    > &
+      Schema.Attribute.Private;
+    logoMime: Schema.Attribute.String;
+    logoName: Schema.Attribute.String;
+    logoSize: Schema.Attribute.Integer;
+    logoStoredName: Schema.Attribute.String & Schema.Attribute.Private;
+    note: Schema.Attribute.Text;
+    person: Schema.Attribute.String & Schema.Attribute.Required;
+    phone: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    status: Schema.Attribute.Enumeration<
+      ['new', 'contacted', 'offer', 'won', 'lost']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'new'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    updatedByName: Schema.Attribute.String;
+    value: Schema.Attribute.String;
+  };
+}
+
 export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
   collectionName: 'homepages';
   info: {
@@ -3634,7 +3681,6 @@ export interface ApiVoucherVoucher extends Struct.CollectionTypeSchema {
     dateOrder: Schema.Attribute.Date & Schema.Attribute.Required;
     datePay: Schema.Attribute.Date;
     dateRealized: Schema.Attribute.Date;
-    dedication: Schema.Attribute.Text;
     deliveryMethod: Schema.Attribute.Enumeration<['email']> &
       Schema.Attribute.DefaultTo<'email'>;
     email: Schema.Attribute.Email;
@@ -4341,6 +4387,7 @@ declare module '@strapi/strapi' {
       'api::cost.cost': ApiCostCost;
       'api::email-campaign-log.email-campaign-log': ApiEmailCampaignLogEmailCampaignLog;
       'api::extra-profit.extra-profit': ApiExtraProfitExtraProfit;
+      'api::firm-inquiry.firm-inquiry': ApiFirmInquiryFirmInquiry;
       'api::google-review.google-review': ApiGoogleReviewGoogleReview;
       'api::homepage.homepage': ApiHomepageHomepage;
       'api::loyalty-transaction.loyalty-transaction': ApiLoyaltyTransactionLoyaltyTransaction;

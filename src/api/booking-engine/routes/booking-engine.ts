@@ -19,6 +19,8 @@ const admin = (method: string, path: string, handler: string) => ({
 export default {
   routes: [
     pub('GET', '/engine/services', 'booking-engine.listServices'),
+    // s274: poptávka firemních voucherů z /firemni-vouchery (multipart s logem)
+    pub('POST', '/engine/firm-inquiries', 'booking-engine.firmInquirySubmit'),
     pub('GET', '/engine/services/:id', 'booking-engine.getService'),
     pub('GET', '/engine/services/:id/employees', 'booking-engine.listServiceEmployees'),
     pub('GET', '/engine/availability', 'booking-engine.availability'),
@@ -106,6 +108,10 @@ export default {
     admin('GET', '/engine/admin/costs/recurring', 'booking-engine.adminCostsRecurring'),
     admin('POST', '/engine/admin/costs/batch', 'booking-engine.adminCostsBatch'),
     admin('GET', '/engine/admin/costs/attention', 'booking-engine.adminCostsAttention'),
+    // s274: firemní poptávky voucherů — jen vedení
+    admin('GET', '/engine/admin/firm-inquiries', 'booking-engine.adminFirmInquiries'),
+    admin('PUT', '/engine/admin/firm-inquiries/:id', 'booking-engine.adminFirmInquiryUpdate'),
+    admin('GET', '/engine/admin/firm-inquiries/:id/logo', 'booking-engine.adminFirmInquiryLogo'),
     admin('POST', '/engine/admin/costs/:id/files', 'booking-engine.adminCostFileUpload'),
     admin('GET', '/engine/admin/costs/:id/files/:fid', 'booking-engine.adminCostFileDownload'),
     admin('DELETE', '/engine/admin/costs/:id/files/:fid', 'booking-engine.adminCostFileDelete'),

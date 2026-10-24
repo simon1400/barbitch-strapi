@@ -90,6 +90,7 @@ const stockSvc = () => strapi.service('api::booking-engine.stock');
 const stockOrdersSvc = () => strapi.service('api::booking-engine.stock-orders');
 const smenaSvc = () => strapi.service('api::booking-engine.smena');
 const homeSvc = () => strapi.service('api::booking-engine.home');
+const firmInquiriesSvc = () => strapi.service('api::booking-engine.firm-inquiries');
 
 // personal.documentId сотрудника сессии: по связи учётки, без связи — по имени (s229, §5а.1)
 const resolveSessionPersonalDocId = async (session) =>
@@ -106,6 +107,41 @@ const parseModifiers = (raw) => {
 
 export default {
   // GET /api/engine/services — публичный каталог для сайта (/book), сгруппирован по категориям
+  // s274: POST /api/engine/firm-inquiries — poptávka firemních voucherů (multipart, logo nepovinné)
+  async firmInquirySubmit(ctx) {
+    const ip = ctx.request.ip || String(ctx.request.header['x-forwarded-for'] || '').split(',')[0].trim();
+    await handle(ctx, () => firmInquiriesSvc().submit({ body: ctx.request.body, files: ctx.request.files, ip }));
+  },
+
+  // s274: GET /api/engine/admin/firm-inquiries — všechny poptávky (vedení)
+  async adminFirmInquiries(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => firmInquiriesSvc().list());
+  },
+
+  // s274: PUT /api/engine/admin/firm-inquiries/:id {status?, adminNote?}
+  async adminFirmInquiryUpdate(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, () => firmInquiriesSvc().update({ session, id: ctx.params.id, body: ctx.request.body }));
+  },
+
+  // s274: GET /api/engine/admin/firm-inquiries/:id/logo — logo z poptávky, nekešovat
+  async adminFirmInquiryLogo(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    await handle(ctx, async () => {
+      const f = await firmInquiriesSvc().logo({ id: ctx.params.id });
+      ctx.set('Content-Type', f.mime);
+      ctx.set('Content-Length', String(f.size));
+      ctx.set('Content-Disposition', f.disposition);
+      ctx.set('Cache-Control', 'private, no-store');
+      return f.stream;
+    });
+  },
+
   async listServices(ctx) {
     await handle(ctx, () => svc().publicCatalog());
   },

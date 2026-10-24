@@ -104,7 +104,7 @@ export default {
     const rows = await strapi.documents(SP_UID).findMany({
       filters: { booking: { documentId: { $eq: bookingDocId } } },
       status: 'draft',
-      populate: { voucher: { fields: ['idVoucher', 'sum'] }, personal: { fields: ['name'] } },
+      populate: { voucher: { fields: ['idVoucher', 'sum', 'serviceName'] }, personal: { fields: ['name'] } },
       limit: 1,
     });
     return rows[0] || null;
@@ -148,7 +148,13 @@ export default {
       published: Boolean(published),
       personalName: rec.personal?.name || '',
       voucher: rec.voucher
-        ? { documentId: rec.voucher.documentId, idVoucher: rec.voucher.idVoucher, sum: rec.voucher.sum }
+        ? {
+            documentId: rec.voucher.documentId,
+            idVoucher: rec.voucher.idVoucher,
+            sum: rec.voucher.sum,
+            // s274: voucher na konkrétní službu (web) — pokrývá službu celou, ne jen částku
+            serviceName: rec.voucher.serviceName || null,
+          }
         : null,
     };
   },
@@ -368,7 +374,7 @@ export default {
     const rec = await strapi.documents(SP_UID).findOne({
       documentId: spDocId,
       status: 'draft',
-      populate: { voucher: { fields: ['idVoucher', 'sum'] }, personal: { fields: ['name'] } },
+      populate: { voucher: { fields: ['idVoucher', 'sum', 'serviceName'] }, personal: { fields: ['name'] } },
     });
     return this._shape(rec, false);
   },

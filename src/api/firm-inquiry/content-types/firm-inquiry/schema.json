@@ -1,0 +1,69 @@
+{
+  "kind": "collectionType",
+  "collectionName": "firm_inquiries",
+  "info": {
+    "singularName": "firm-inquiry",
+    "pluralName": "firm-inquiries",
+    "displayName": "Firemní poptávky voucherů",
+    "description": "Poptávka firemních voucherů z barbitch.cz/firemni-vouchery (s274). REST-routů není: zápis — veřejná ručka POST /api/engine/firm-inquiries, čtení a stav — /engine/admin/firm-inquiries (vedení). Logo — v zavřeném adresáři FIRM_FILES_DIR (storedName)."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "company": {
+      "type": "string",
+      "required": true
+    },
+    "ico": {
+      "type": "string"
+    },
+    "count": {
+      "type": "integer",
+      "required": true
+    },
+    "value": {
+      "type": "string"
+    },
+    "person": {
+      "type": "string",
+      "required": true
+    },
+    "phone": {
+      "type": "string"
+    },
+    "email": {
+      "type": "email",
+      "required": true
+    },
+    "note": {
+      "type": "text"
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["new", "contacted", "offer", "won", "lost"],
+      "default": "new",
+      "required": true
+    },
+    "adminNote": {
+      "type": "text"
+    },
+    "logoName": {
+      "type": "string"
+    },
+    "logoMime": {
+      "type": "string"
+    },
+    "logoSize": {
+      "type": "integer"
+    },
+    "logoStoredName": {
+      "type": "string",
+      "private": true
+    },
+    "updatedByName": {
+      "type": "string"
+    }
+  }
+}

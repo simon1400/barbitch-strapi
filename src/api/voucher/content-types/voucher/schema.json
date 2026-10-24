@@ -53,9 +53,6 @@
     "serviceName": {
       "type": "string"
     },
-    "dedication": {
-      "type": "text"
-    },
     "deliveryMethod": {
       "type": "enumeration",
       "default": "email",

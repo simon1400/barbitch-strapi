@@ -426,7 +426,8 @@ const loyaltyCtaHtml = () =>
 
 export default {
   // headers — служебные заголовки письма (s271: List-Unsubscribe для отписки одним кликом)
-  async sendEmail({ to, subject, html, attachments, headers }) {
+  // replyTo — адрес для «Ответить» (s274: заявка фирмы → ответ сразу фирме)
+  async sendEmail({ to, subject, html, attachments, headers, replyTo }) {
     const key = process.env.RESEND_API_KEY;
     if (!to) {
       strapi.log.info('booking-notify: no recipient e-mail — skip');
@@ -443,7 +444,15 @@ export default {
     const res = await fetch(RESEND_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ from: FROM, to: [to], subject, html, attachments, ...(headers ? { headers } : {}) }),
+      body: JSON.stringify({
+        from: FROM,
+        to: [to],
+        subject,
+        html,
+        attachments,
+        ...(headers ? { headers } : {}),
+        ...(replyTo ? { reply_to: replyTo } : {}),
+      }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
