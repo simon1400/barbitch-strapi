@@ -31,7 +31,13 @@ const cutOut = (file, re) => {
 };
 
 const slotsUrl = dataUrl(toJs(read('src/api/booking-engine/services/slots-core.ts')));
-const msUrl = dataUrl(swap(toJs(read('src/api/booking-engine/services/master-schedule.ts')), [["from './slots-core'", `from '${slotsUrl}'`]]));
+const wamUrl = dataUrl(toJs(read('src/utils/works-as-master.ts')));
+const msUrl = dataUrl(
+  swap(toJs(read('src/api/booking-engine/services/master-schedule.ts')), [
+    ["from './slots-core'", `from '${slotsUrl}'`],
+    ["from '../../../utils/works-as-master'", `from '${wamUrl}'`],
+  ])
+);
 const phoneUrl = dataUrl(toJs(cutOut('src/api/booking-engine/services/booking-engine.ts', /export const normalizePhone = [\s\S]*?\n};\n/)));
 const emailUrl = dataUrl(toJs(cutOut('src/api/client-cabinet/services/client-cabinet.ts', /export const looksLikeEmail =[\s\S]*?;\n/)));
 const C = await import(
