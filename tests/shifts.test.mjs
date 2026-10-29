@@ -286,6 +286,33 @@ test('save: проверки формы до обращения к базе', as
   assert.equal(st.calls.length, 0);
 });
 
+// s278: администраторка заполняет график сама — текущая неделя (NOW = пт 25.09 → понедельник 21.09)
+// и будущие; прошлая — 403 week_locked без обращения к базе; руководству прошлая открыта.
+test('save: администраторка — текущая и будущие недели пишутся с её именем в журнале, прошлая → 403', async () => {
+  const ADMIN = { username: 'Viktoriia Tsybuliak', role: 'administrator' };
+  const st = makeStrapi([{ documentId: 'p', from: '2026-09-14' }, { documentId: 'c', from: '2026-09-21' }]);
+  const res = await svc.save({ session: ADMIN, monday: '2026-09-21', body: { days: { ...WEEK, friday: 'Оля' }, base: st.rows.find((r) => r.documentId === 'c').updatedAt }, now: NOW });
+  assert.equal(res.unchanged, false);
+  assert.equal(st.logs.at(-1).action, 'shift_update');
+  assert.equal(st.logs.at(-1).actorName, 'Viktoriia Tsybuliak');
+  const fut = await svc.save({ session: ADMIN, monday: '2026-10-05', body: { days: WEEK, base: null }, now: NOW });
+  assert.equal(fut.week.published, true);
+  const before = st.calls.length;
+  await expectErr(() => svc.save({ session: ADMIN, monday: '2026-09-14', body: { days: { ...WEEK, monday: 'Оля' }, base: null }, now: NOW }), 403, 'week_locked');
+  assert.equal(st.calls.length, before);
+  assert.equal(st.rows.find((r) => r.documentId === 'p' && !r.published).days.monday, 'Вика');
+  // руководству прошлая неделя открыта
+  const mgmt = await svc.save({ session: SESSION, monday: '2026-09-14', body: { days: { ...WEEK, monday: 'Оля' } }, now: NOW });
+  assert.equal(mgmt.unchanged, false);
+  // понедельник текущей недели считается по Праге: воскресенье 27.09 23:30 Праги — ещё неделя 21.09
+  assert.equal(S.mondayOfYmd('2026-09-27'), '2026-09-21');
+  assert.equal(S.mondayOfYmd('2026-09-28'), '2026-09-28');
+  assert.equal(S.mondayOfYmd('2027-01-01'), '2026-12-28');
+  assert.throws(() => S.assertWeekEditable(ADMIN, '2026-09-14', '2026-09-27'), /week_locked|vedení/);
+  assert.doesNotThrow(() => S.assertWeekEditable(ADMIN, '2026-09-21', '2026-09-27'));
+  assert.doesNotThrow(() => S.assertWeekEditable({ role: 'manager' }, '2025-02-03', '2026-09-27'));
+});
+
 test('remove: обе версии удалены, журнал со списком дней; нет недели → 404; устаревшая base → 409', async () => {
   const st = makeStrapi([{ documentId: 'w', from: '2026-09-28' }, { documentId: 'z', from: '2026-10-05' }]);
   await expectErr(() => svc.remove({ session: SESSION, monday: '2026-10-05', base: '2020-01-01T00:00:00Z', now: NOW }), 409, 'shift_changed');

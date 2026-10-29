@@ -13,8 +13,10 @@
  * требует все 7 дней при публикации — сохранение здесь пишет черновик и сразу
  * публикует (как кнопка Publish), так версии не расходятся.
  *
- * Гейт — руководство (owner + manager), в контроллере. Журнал — calendar_logs,
- * entityType `shift`.
+ * Гейт — в контроллере: список и сохранение — все администраторы (s278: вкладка
+ * «Rozpis směn» в «Směna» — администраторки заполняют график сами), удаление —
+ * руководство. Администраторке сервис не даёт менять прошлые недели (с понедельника
+ * текущей — можно). Журнал — calendar_logs, entityType `shift`, actorName = кто правил.
  *
  * Верх файла — чистые функции (tests/shifts.test.mjs), ниже — сервис.
  */
@@ -71,6 +73,26 @@ export const parseMonday = (raw: unknown, today: string): string => {
   if (s < MIN_MONDAY) throw new ShiftError(400, 'date_too_old', 'Такой старой недели в графике нет');
   if (s > addDaysYmd(today, MAX_FUTURE_DAYS)) throw new ShiftError(400, 'date_too_far', 'Неделя слишком далеко в будущем');
   return s;
+};
+
+/** Роли руководства (как `utils/admin-jwt.isManagementRole`; без импорта — файл тестируется изолированно). */
+export const isManagement = (role: unknown): boolean => role === 'owner' || role === 'manager';
+
+/** Понедельник недели, в которую входит дата. */
+export const mondayOfYmd = (ymd: string): string => {
+  const dow = new Date(`${ymd}T00:00:00Z`).getUTCDay();
+  return addDaysYmd(ymd, dow === 0 ? -6 : 1 - dow);
+};
+
+/**
+ * s278: администраторка меняет только текущую и будущие недели — прошедший график
+ * уже история (напоминания, отчёты), её правит руководство.
+ */
+export const assertWeekEditable = (session: any, monday: string, today: string) => {
+  if (isManagement(session?.role)) return;
+  if (monday < mondayOfYmd(today)) {
+    throw new ShiftError(403, 'week_locked', 'Minulý týden může měnit jen vedení salonu');
+  }
 };
 
 export const parseWeeks = (raw: unknown): number => {
@@ -278,7 +300,9 @@ export default {
 
   /** Сохранить график недели: создать или обновить черновик и опубликовать. */
   async save({ session, monday, body, now = new Date() }: { session: any; monday: unknown; body: any; now?: Date }) {
-    const m = parseMonday(monday, PRAGUE_DAY.format(now));
+    const today = PRAGUE_DAY.format(now);
+    const m = parseMonday(monday, today);
+    assertWeekEditable(session, m, today);
     const days = normalizeDays(body?.days);
     const sunday = addDaysYmd(m, 6);
 

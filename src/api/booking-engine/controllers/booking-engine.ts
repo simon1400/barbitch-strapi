@@ -1098,24 +1098,26 @@ export default {
     await handle(ctx, () => timeOffsSvc().remove({ session, documentId: ctx.params.id }));
   },
 
-  // Смены администраторов (s217): график недели «кто дежурит» — руководство
+  // Смены администраторов (s217): график недели «кто дежурит». s278: смотреть и
+  // заполнять могут и сами администраторки (вкладка «Rozpis směn» в «Směna») — им
+  // сервис закрывает прошлые недели; удалить неделю целиком — только руководство.
   // GET /api/engine/admin/shifts?from=<понедельник>&weeks=N
   async adminShiftsList(ctx) {
-    const session = requireManagement(ctx);
+    const session = requireAdmin(ctx);
     if (!session) return;
     await handle(ctx, () => shiftsSvc().list({ from: ctx.query?.from, weeks: ctx.query?.weeks }));
   },
 
   // PUT /api/engine/admin/shifts/:monday {days: {monday…sunday}, base: updatedAt|null}
   async adminShiftSave(ctx) {
-    const session = requireManagement(ctx);
+    const session = requireAdmin(ctx);
     if (!session) return;
     await handle(ctx, () =>
       shiftsSvc().save({ session, monday: ctx.params.monday, body: ctx.request.body })
     );
   },
 
-  // DELETE /api/engine/admin/shifts/:monday[?base=updatedAt] — график недели целиком
+  // DELETE /api/engine/admin/shifts/:monday[?base=updatedAt] — график недели целиком (руководство)
   async adminShiftDelete(ctx) {
     const session = requireManagement(ctx);
     if (!session) return;
