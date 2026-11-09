@@ -11,7 +11,9 @@
       "type": "media",
       "multiple": false,
       "required": true,
-      "allowedTypes": ["images"]
+      "allowedTypes": [
+        "images"
+      ]
     },
     "service": {
       "type": "relation",
@@ -21,6 +23,10 @@
     "caption": {
       "type": "string",
       "maxLength": 60
+    },
+    "description": {
+      "type": "text",
+      "maxLength": 400
     },
     "active": {
       "type": "boolean",

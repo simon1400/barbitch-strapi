@@ -162,6 +162,10 @@ export interface ContentGaleryItem extends Struct.ComponentSchema {
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 60;
       }>;
+    description: Schema.Attribute.Text &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 400;
+      }>;
     image: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
     service: Schema.Attribute.Relation<'oneToOne', 'api::service.service'>;
   };
