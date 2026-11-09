@@ -149,6 +149,24 @@ export interface ContentGaleryInstagram extends Struct.ComponentSchema {
   };
 }
 
+export interface ContentGaleryItem extends Struct.ComponentSchema {
+  collectionName: 'components_content_galery_items';
+  info: {
+    description: 'Jedna fotka galerie \u201ENa\u0161e pr\u00E1ce\u201C na hlavn\u00ED str\u00E1nce: slu\u017Eba (\u010Dip filtru a \u0161t\u00EDtek) a popisek v prohl\u00ED\u017Ee\u010Di.';
+    displayName: 'Galerie \u2014 fotka';
+    icon: 'picture';
+  };
+  attributes: {
+    active: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    caption: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    image: Schema.Attribute.Media<'images'> & Schema.Attribute.Required;
+    service: Schema.Attribute.Relation<'oneToOne', 'api::service.service'>;
+  };
+}
+
 export interface ContentLink extends Struct.ComponentSchema {
   collectionName: 'components_content_links';
   info: {
@@ -350,6 +368,7 @@ declare module '@strapi/strapi' {
       'content.faq-item': ContentFaqItem;
       'content.galery': ContentGalery;
       'content.galery-instagram': ContentGaleryInstagram;
+      'content.galery-item': ContentGaleryItem;
       'content.link': ContentLink;
       'content.oficial-data': ContentOficialData;
       'content.price-list': ContentPriceList;

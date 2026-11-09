@@ -1792,6 +1792,12 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
           localized: true;
         };
       }>;
+    galleryItems: Schema.Attribute.Component<'content.galery-item', true> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     locale: Schema.Attribute.String;
     localizations: Schema.Attribute.Relation<
       'oneToMany',

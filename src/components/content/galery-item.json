@@ -1,0 +1,30 @@
+{
+  "collectionName": "components_content_galery_items",
+  "info": {
+    "displayName": "Galerie — fotka",
+    "icon": "picture",
+    "description": "Jedna fotka galerie „Naše práce“ na hlavní stránce: služba (čip filtru a štítek) a popisek v prohlížeči."
+  },
+  "options": {},
+  "attributes": {
+    "image": {
+      "type": "media",
+      "multiple": false,
+      "required": true,
+      "allowedTypes": ["images"]
+    },
+    "service": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::service.service"
+    },
+    "caption": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

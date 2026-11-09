@@ -59,6 +59,16 @@
         "images",
         "videos"
       ]
+    },
+    "galleryItems": {
+      "type": "component",
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      },
+      "component": "content.galery-item",
+      "repeatable": true
     }
   }
 }
