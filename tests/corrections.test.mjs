@@ -13,9 +13,14 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
-const SRC = fs.readFileSync(path.resolve(import.meta.dirname, '../src/api/booking-engine/services/corrections.ts'), 'utf8');
-const js = ts.transpileModule(SRC, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
-const C = await import('data:text/javascript;base64,' + Buffer.from(js, 'utf8').toString('base64'));
+const toJs = (src) => ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
+const dataUrl = (js) => 'data:text/javascript;base64,' + Buffer.from(js, 'utf8').toString('base64');
+const read = (file) => fs.readFileSync(path.resolve(import.meta.dirname, '..', file), 'utf8');
+// s285: период («за какой месяц») — общий util, настоящий
+const PP = await import(dataUrl(toJs(read('src/utils/pay-period.ts'))));
+const SRC = toJs(read('src/api/booking-engine/services/corrections.ts'));
+assert.ok(SRC.includes("from '../../../utils/pay-period'"), 'импорт pay-period не найден');
+const C = await import(dataUrl(SRC.split("from '../../../utils/pay-period'").join(`from '${dataUrl(toJs(read('src/utils/pay-period.ts')))}'`)));
 const svc = C.default;
 
 // ── заглушка document service ─────────────────────────────────────────────
@@ -32,6 +37,11 @@ function makeStrapi(seed = []) {
     if (!filters) return true;
     if (filters.date && (r.date < filters.date.$gte || r.date > filters.date.$lte)) return false;
     if (filters.personal && r.personal?.documentId !== filters.personal.documentId.$eq) return false;
+    if (filters.period) {
+      if ('$eq' in filters.period && r.period !== filters.period.$eq) return false;
+      if (filters.period.$null === true && r.period != null) return false;
+    }
+    if (filters.$or && !filters.$or.some((f) => match(r, f))) return false;
     return true;
   };
   const project = (r, fields) => {
@@ -103,7 +113,7 @@ test('normalizeCorrectionInput: валидная форма', () => {
   );
   assert.deepEqual(r, { kind: 'penalty', personal: P1, date: '2026-10-03', sum: 1500, text: 'pozdní příchod' });
   // аванс без комментария — можно
-  assert.equal(C.normalizeCorrectionInput({ kind: 'avans', personal: P1, date: '2026-10-03', sum: 5000 }, '2026-10-05').text, '');
+  assert.equal(C.normalizeCorrectionInput({ kind: 'avans', personal: P1, date: '2026-10-03', period: '2026-09', sum: 5000 }, '2026-10-05').text, '');
 });
 
 test('normalizeCorrectionInput: коды ошибок', () => {
@@ -139,9 +149,9 @@ test('normalizeCorrectionInput: коды ошибок', () => {
 });
 
 test('normalizeCorrectionInput: налог — вид обязателен и из enum схемы', () => {
-  const base = { kind: 'tax', personal: P1, date: '2026-10-03', sum: 5495 };
+  const base = { kind: 'tax', personal: P1, date: '2026-10-03', period: '2026-09', sum: 5495 };
   assert.deepEqual(C.normalizeCorrectionInput({ ...base, taxType: 'all' }, '2026-10-05'),
-    { kind: 'tax', personal: P1, date: '2026-10-03', sum: 5495, text: '', taxType: 'all' });
+    { kind: 'tax', personal: P1, date: '2026-10-03', period: '2026-09', sum: 5495, text: '', taxType: 'all' });
   for (const bad of [undefined, '', 'vat', 'constructor', '__proto__']) {
     assert.throws(() => C.normalizeCorrectionInput({ ...base, taxType: bad }, '2026-10-05'),
       (e) => e.code === 'bad_tax_type' && e.status === 400, String(bad));
@@ -192,10 +202,10 @@ test('create: публикует запись в нужную коллекцию
 
 test('create: налог пишет вид в поле type, строка его возвращает', async () => {
   const s = makeStrapi();
-  const { row } = await svc.create({ session: SESSION, body: { kind: 'tax', personal: P1, date: '2026-10-04', sum: 5495, taxType: 'social', text: 'Za září' }, now: new Date('2026-10-05T08:00:00Z') });
+  const { row } = await svc.create({ session: SESSION, body: { kind: 'tax', personal: P1, date: '2026-10-04', period: '2026-09', sum: 5495, taxType: 'social', text: 'Za září' }, now: new Date('2026-10-05T08:00:00Z') });
   const cr = s.calls.find((c) => c.op === 'create');
   assert.equal(cr.uid, 'api::tax.tax');
-  assert.deepEqual(cr.q.data, { date: '2026-10-04', sum: '5495', comment: 'Za září', personal: { documentId: P1 }, type: 'social' });
+  assert.deepEqual(cr.q.data, { date: '2026-10-04', period: '2026-09', sum: '5495', comment: 'Za září', personal: { documentId: P1 }, type: 'social' });
   assert.ok(cr.q.fields.includes('type'), 'type запрашивается обратно');
   assert.equal(row.taxType, 'social');
   await flush();
@@ -208,7 +218,7 @@ test('create: налог пишет вид в поле type, строка его
 test('create: несуществующий сотрудник → 404, ничего не пишется', async () => {
   const s = makeStrapi();
   await expectErr(
-    () => svc.create({ session: SESSION, body: { kind: 'avans', personal: 'zzzzzzzzzzzzzzzzzzzzzzzz', date: '2026-10-04', sum: 100 }, now: new Date('2026-10-05T08:00:00Z') }),
+    () => svc.create({ session: SESSION, body: { kind: 'avans', personal: 'zzzzzzzzzzzzzzzzzzzzzzzz', date: '2026-10-04', period: '2026-09', sum: 100 }, now: new Date('2026-10-05T08:00:00Z') }),
     404,
     'personal_not_found'
   );
@@ -221,7 +231,7 @@ test('create: дата «слишком далеко» считается от �
   makeStrapi();
   // 31.10 23:30 UTC — в Праге уже 01.11; 16.12 = +45 дней от 01.11 → проходит
   const now = new Date('2026-10-31T23:30:00Z');
-  const r = await svc.create({ session: SESSION, body: { kind: 'salary', personal: P1, date: '2026-12-16', sum: 100 }, now });
+  const r = await svc.create({ session: SESSION, body: { kind: 'salary', personal: P1, date: '2026-12-16', period: '2026-11', sum: 100 }, now });
   assert.equal(r.row.date, '2026-12-16');
 });
 
@@ -236,8 +246,14 @@ const seed = () => [
   { uid: 'api::add-money.add-money', documentId: 'add1aaaaaaaaaaaaaaaaaaaa', status: 'published', date: '2026-10-01', sum: '33', title: 'Dozápis', source: 'upsell', personal: { documentId: 'per2bbbbbbbbbbbbbbbbbbbb', name: 'Mariia Medvedeva' }, createdAt: '2026-10-01T09:00:00Z' },
   // штраф из НОЯБРЯ — в октябрь не попадает (верхняя граница месяца)
   { uid: 'api::penalty.penalty', documentId: 'pen2aaaaaaaaaaaaaaaaaaaa', status: 'published', date: '2026-11-01', sum: '100', comment: 'listopad', personal: { documentId: P1, name: 'Yana Ivanova' }, createdAt: '2026-11-01T09:00:00Z' },
-  // аванс из СЕНТЯБРЯ — в октябрь не попадает
+  // аванс из СЕНТЯБРЯ без периода (до s285) — считается по дате, в октябрь не попадает
   { uid: 'api::avans.avans', documentId: 'ava1aaaaaaaaaaaaaaaaaaaa', status: 'published', date: '2026-09-30', sum: '5000', comment: null, personal: { documentId: P1, name: 'Yana Ivanova' }, createdAt: '2026-09-30T09:00:00Z' },
+  // выплата ЗА ОКТЯБРЬ, заплаченная 10.11 (s285) — в октябре есть, в ноябре нет
+  { uid: 'api::salary.salary', documentId: 'sal1aaaaaaaaaaaaaaaaaaaa', status: 'published', date: '2026-11-10', period: '2026-10', sum: '20000', comment: null, personal: { documentId: P1, name: 'Yana Ivanova' }, createdAt: '2026-11-10T09:00:00Z' },
+  // налог без периода с датой октября (панель Strapi до lifecycle) — по дате, в октябре
+  { uid: 'api::tax.tax', documentId: 'tax1aaaaaaaaaaaaaaaaaaaa', status: 'published', date: '2026-10-20', period: null, sum: '5495', type: 'all', comment: null, personal: { documentId: P1, name: 'Yana Ivanova' }, createdAt: '2026-10-20T09:00:00Z' },
+  // аванс с датой октября, но ЗА СЕНТЯБРЬ — в октябре его нет
+  { uid: 'api::avans.avans', documentId: 'ava2aaaaaaaaaaaaaaaaaaaa', status: 'published', date: '2026-10-05', period: '2026-09', sum: '3000', comment: null, personal: { documentId: P1, name: 'Yana Ivanova' }, createdAt: '2026-10-05T09:00:00Z' },
 ];
 
 test('list: месяц, по строке на документ, черновик без публикации помечен, свежие сверху', async () => {
@@ -245,10 +261,105 @@ test('list: месяц, по строке на документ, чернови�
   const r = await svc.list({ month: '2026-10' });
   assert.equal(r.month, '2026-10');
   assert.deepEqual(r.rows.map((x) => [x.kind, x.documentId, x.draft, x.readOnly]), [
+    ['salary', 'sal1aaaaaaaaaaaaaaaaaaaa', false, false],
+    ['tax', 'tax1aaaaaaaaaaaaaaaaaaaa', false, false],
     ['payroll', 'pay1aaaaaaaaaaaaaaaaaaaa', true, true],
     ['penalty', 'pen1aaaaaaaaaaaaaaaaaaaa', false, false],
     ['add-money', 'add1aaaaaaaaaaaaaaaaaaaa', false, true],
   ]);
+  // период в строке: у выплаты — свой, у налога без периода — месяц даты, у штрафа — нет
+  const by = Object.fromEntries(r.rows.map((x) => [x.kind, x]));
+  assert.equal(by.salary.period, '2026-10');
+  assert.equal(by.tax.period, '2026-10');
+  assert.equal(by.penalty.period, null);
+  // ноябрь: выплаты за октябрь нет, хотя дата её 10.11; штраф ноября есть
+  const nov = await svc.list({ month: '2026-11' });
+  assert.deepEqual(nov.rows.map((x) => x.documentId), ['pen2aaaaaaaaaaaaaaaaaaaa']);
+  // сентябрь: аванс без периода (по дате) и аванс за сентябрь с датой октября
+  const sep = await svc.list({ month: '2026-09' });
+  assert.deepEqual(sep.rows.map((x) => x.documentId).sort(), ['ava1aaaaaaaaaaaaaaaaaaaa', 'ava2aaaaaaaaaaaaaaaaaaaa']);
+});
+
+test('list: фильтр месяца — у типов с периодом $or (период | без периода по дате), у остальных по дате', async () => {
+  const s = makeStrapi(seed());
+  await svc.list({ month: '2026-10' });
+  const fm = s.calls.filter((c) => c.op === 'findMany');
+  const f = (uid) => fm.find((c) => c.uid === uid).q.filters;
+  assert.deepEqual(f('api::salary.salary'), {
+    $or: [{ period: { $eq: '2026-10' } }, { period: { $null: true }, date: { $gte: '2026-10-01', $lte: '2026-10-31' } }],
+  });
+  assert.deepEqual(f('api::penalty.penalty'), { date: { $gte: '2026-10-01', $lte: '2026-10-31' } });
+  assert.ok(fm.find((c) => c.uid === 'api::avans.avans').q.fields.includes('period'), 'period запрашивается');
+  assert.ok(!fm.find((c) => c.uid === 'api::penalty.penalty').q.fields.includes('period'));
+});
+
+test('normalizePeriod / normalizeCorrectionInput: период обязателен у аванса/выплаты/налога, коды ошибок', () => {
+  const ok = { kind: 'salary', personal: P1, date: '2026-11-10', period: '2026-10', sum: 20000 };
+  assert.equal(C.normalizeCorrectionInput(ok, '2026-11-10').period, '2026-10');
+  // за текущий месяц (аванс) — можно
+  assert.equal(C.normalizeCorrectionInput({ ...ok, kind: 'avans', period: '2026-11' }, '2026-11-10').period, '2026-11');
+  // ровно 12 месяцев назад — можно
+  assert.equal(C.normalizeCorrectionInput({ ...ok, period: '2025-11' }, '2026-11-10').period, '2025-11');
+  const cases = [
+    [{ period: undefined }, 'period_required'],
+    [{ period: '' }, 'period_required'],
+    [{ period: '2026-10-01' }, 'bad_period'],
+    [{ period: '10/2026' }, 'bad_period'],
+    [{ period: '2026-13' }, 'bad_period'],
+    [{ period: '2026-12' }, 'period_in_future'],
+    [{ period: '2025-10' }, 'period_too_old'],
+  ];
+  for (const [patch, code] of cases) {
+    assert.throws(() => C.normalizeCorrectionInput({ ...ok, ...patch }, '2026-11-10'), (e) => e.code === code && e.status === 400, `${JSON.stringify(patch)} → ${code}`);
+  }
+  // у штрафа период игнорируется и в результат не попадает
+  const pen = C.normalizeCorrectionInput({ kind: 'penalty', personal: P1, date: '2026-11-10', period: '2026-13', sum: 1, text: 'x' }, '2026-11-10');
+  assert.ok(!('period' in pen));
+});
+
+test('create: выплата пишет period, журнал — «za 10/2026»; штраф period не получает', async () => {
+  const s = makeStrapi();
+  const now = new Date('2026-11-10T08:00:00Z');
+  const { row } = await svc.create({ session: SESSION, body: { kind: 'salary', personal: P1, date: '2026-11-10', period: '2026-10', sum: 20000 }, now });
+  const cr = s.calls.find((c) => c.op === 'create');
+  assert.deepEqual(cr.q.data, { date: '2026-11-10', period: '2026-10', sum: '20000', comment: null, personal: { documentId: P1 } });
+  assert.equal(row.period, '2026-10');
+  assert.equal(row.date, '2026-11-10');
+  await flush();
+  assert.match(s.logs[0].summary, /^Výplata: Yana Ivanova 20 000 Kč · 10\.11\.2026 · za 10\/2026$/);
+  assert.equal(s.logs[0].details['za měsíc'], '10/2026');
+  await svc.create({ session: SESSION, body: { kind: 'penalty', personal: P1, date: '2026-11-10', period: '2026-10', sum: 1, text: 'x' }, now });
+  const cr2 = s.calls.filter((c) => c.op === 'create')[1];
+  assert.ok(!('period' in cr2.q.data));
+  await flush();
+  assert.ok(!('za měsíc' in s.logs[1].details));
+});
+
+test('pay-period: умолчание периода = месяц даты (создание; обновление — только если поле очистили)', () => {
+  assert.equal(PP.periodOfDate('2026-11-10'), '2026-11');
+  assert.equal(PP.periodOfDate('2026-11-10T00:00:00.000Z'), '2026-11');
+  assert.equal(PP.periodOfDate('10.11.2026'), null);
+  assert.equal(PP.addMonthsYm('2026-01', -12), '2025-01');
+  assert.equal(PP.addMonthsYm('2026-11', -11), '2025-12');
+  const c1 = { date: '2026-11-10', sum: '1' };
+  PP.applyPeriodDefault(c1, 'create');
+  assert.equal(c1.period, '2026-11');
+  const c2 = { date: '2026-11-10', period: ' 2026-10 ' };
+  PP.applyPeriodDefault(c2, 'create');
+  assert.equal(c2.period, '2026-10', 'свой период не перетирается');
+  const u1 = { date: '2026-11-10' };
+  PP.applyPeriodDefault(u1, 'update');
+  assert.ok(!('period' in u1), 'частичное обновление без ключа period — не трогаем');
+  const u2 = { date: '2026-11-10', period: '' };
+  PP.applyPeriodDefault(u2, 'update');
+  assert.equal(u2.period, '2026-11', 'очистили в панели → месяц даты');
+  const u3 = { period: null };
+  PP.applyPeriodDefault(u3, 'update');
+  assert.equal(u3.period, null, 'без даты вывести нечего');
+  // lifecycle-объект: beforeCreate/beforeUpdate
+  const ev = { params: { data: { date: '2026-10-31' } } };
+  PP.periodLifecycles.beforeCreate(ev);
+  assert.equal(ev.params.data.period, '2026-10');
 });
 
 test('list: фильтр по сотруднику идёт в запрос, а не режется после', async () => {
@@ -295,6 +406,11 @@ test('инварианты: у каждой коллекции поле опис
     const schema = JSON.parse(fs.readFileSync(path.join(root, name, 'content-types', name, 'schema.json'), 'utf8'));
     assert.ok(schema.attributes[meta.text], `${kind}: нет поля ${meta.text}`);
     assert.equal(Boolean(schema.attributes.source), meta.hasSource, `${kind}: source`);
+    assert.equal(Boolean(schema.attributes.period), meta.hasPeriod, `${kind}: period (s285)`);
+    if (meta.hasPeriod) {
+      assert.ok(fs.existsSync(path.join(root, name, 'content-types', name, 'lifecycles.ts')), `${kind}: lifecycle умолчания периода`);
+      assert.match(schema.attributes.period.regex, /\\d\{4\}/, `${kind}: regex периода`);
+    }
     assert.ok(schema.attributes.personal && schema.attributes.date && schema.attributes.sum, kind);
     assert.equal(schema.options.draftAndPublish, true, `${kind}: draftAndPublish`);
   }

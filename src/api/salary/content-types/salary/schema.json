@@ -21,6 +21,11 @@
       "type": "date",
       "required": true
     },
+    "period": {
+      "type": "string",
+      "regex": "^\\d{4}-(0[1-9]|1[0-2])$",
+      "maxLength": 7
+    },
     "sum": {
       "type": "biginteger",
       "required": true

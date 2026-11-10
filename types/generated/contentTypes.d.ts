@@ -600,6 +600,10 @@ export interface ApiAvansAvans extends Struct.CollectionTypeSchema {
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::avans.avans'> &
       Schema.Attribute.Private;
+    period: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 7;
+      }>;
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
@@ -2642,6 +2646,10 @@ export interface ApiSalarySalary extends Struct.CollectionTypeSchema {
       'api::salary.salary'
     > &
       Schema.Attribute.Private;
+    period: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 7;
+      }>;
     personal: Schema.Attribute.Relation<'oneToOne', 'api::personal.personal'> &
       Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
@@ -3238,6 +3246,10 @@ export interface ApiTaxTax extends Struct.CollectionTypeSchema {
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::tax.tax'> &
       Schema.Attribute.Private;
+    period: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 7;
+      }>;
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'>;
     publishedAt: Schema.Attribute.DateTime;
     sum: Schema.Attribute.BigInteger & Schema.Attribute.Required;
