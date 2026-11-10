@@ -3,7 +3,7 @@
   "info": {
     "displayName": "Galerie — fotka",
     "icon": "picture",
-    "description": "Jedna fotka galerie „Naše práce“ na hlavní stránce: služba (čip filtru a štítek) a popisek v prohlížeči."
+    "description": "Jedna fotka galerie „Naše práce“ na hlavní stránce: služba (čip filtru a štítek), sekce rezervace (tlačítko „Rezervovat“ otevře /book s rozbalenou sekcí) a popisek v prohlížeči."
   },
   "options": {},
   "attributes": {
@@ -19,6 +19,15 @@
       "type": "relation",
       "relation": "oneToOne",
       "target": "api::service.service"
+    },
+    "bookingSection": {
+      "type": "enumeration",
+      "enum": [
+        "Nehty",
+        "Oboci",
+        "Rasy_barveni_a_pece",
+        "Prodluzovani_ras"
+      ]
     },
     "caption": {
       "type": "string",

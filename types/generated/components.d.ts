@@ -152,12 +152,15 @@ export interface ContentGaleryInstagram extends Struct.ComponentSchema {
 export interface ContentGaleryItem extends Struct.ComponentSchema {
   collectionName: 'components_content_galery_items';
   info: {
-    description: 'Jedna fotka galerie \u201ENa\u0161e pr\u00E1ce\u201C na hlavn\u00ED str\u00E1nce: slu\u017Eba (\u010Dip filtru a \u0161t\u00EDtek) a popisek v prohl\u00ED\u017Ee\u010Di.';
+    description: 'Jedna fotka galerie \u201ENa\u0161e pr\u00E1ce\u201C na hlavn\u00ED str\u00E1nce: slu\u017Eba (\u010Dip filtru a \u0161t\u00EDtek), sekce rezervace (tla\u010D\u00EDtko \u201ERezervovat\u201C otev\u0159e /book s rozbalenou sekc\u00ED) a popisek v prohl\u00ED\u017Ee\u010Di.';
     displayName: 'Galerie \u2014 fotka';
     icon: 'picture';
   };
   attributes: {
     active: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    bookingSection: Schema.Attribute.Enumeration<
+      ['Nehty', 'Oboci', 'Rasy_barveni_a_pece', 'Prodluzovani_ras']
+    >;
     caption: Schema.Attribute.String &
       Schema.Attribute.SetMinMaxLength<{
         maxLength: 60;
