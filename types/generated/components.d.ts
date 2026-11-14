@@ -21,7 +21,7 @@ export interface BookingServiceModifier extends Struct.ComponentSchema {
 export interface BookingServiceRestriction extends Struct.ComponentSchema {
   collectionName: 'components_booking_service_restrictions';
   info: {
-    description: 'Ограничение мастера по услуге';
+    description: '\u041E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u0435 \u043C\u0430\u0441\u0442\u0435\u0440\u0430 \u043F\u043E \u0443\u0441\u043B\u0443\u0433\u0435: \u043A\u0430\u043A\u0438\u0435 \u0432\u0430\u0440\u0438\u0430\u043D\u0442\u044B/\u0434\u043E\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u044F \u043E\u043D \u0434\u0435\u043B\u0430\u0435\u0442. \u041F\u0443\u0441\u0442\u043E\u0435 \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 (null) = \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u043E \u0432\u0441\u0451, \u043F\u0443\u0441\u0442\u043E\u0439 \u043C\u0430\u0441\u0441\u0438\u0432 = \u043D\u0435 \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u043E \u043D\u0438\u0447\u0435\u0433\u043E (\u0442\u043E\u043B\u044C\u043A\u043E \u0431\u0430\u0437\u0430).';
     displayName: 'serviceRestriction';
     icon: 'lock';
   };
@@ -271,6 +271,34 @@ export interface ContentWeek extends Struct.ComponentSchema {
   };
 }
 
+export interface ContentWhyItem extends Struct.ComponentSchema {
+  collectionName: 'components_content_why_items';
+  info: {
+    description: 'Jedna r\u016F\u017Eov\u00E1 p\u00E1ska v sekci \u201EPro\u010D Barbitch\u201C na hlavn\u00ED str\u00E1nce: nadpis, kr\u00E1tk\u00FD text a voliteln\u00FD odkaz (text odkazu + adresa, nap\u0159. /bitchcard).';
+    displayName: 'Pro\u010D Barbitch \u2014 p\u00E1ska';
+    icon: 'heart';
+  };
+  attributes: {
+    linkLabel: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 30;
+      }>;
+    linkUrl: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
+      }>;
+    text: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
+    title: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 40;
+      }>;
+  };
+}
+
 export interface ItemsContracts extends Struct.ComponentSchema {
   collectionName: 'components_items_contracts';
   info: {
@@ -381,6 +409,7 @@ declare module '@strapi/strapi' {
       'content.price-list': ContentPriceList;
       'content.text': ContentText;
       'content.week': ContentWeek;
+      'content.why-item': ContentWhyItem;
       'items.contracts': ItemsContracts;
       'items.money-flow': ItemsMoneyFlow;
       'items.nav-item': ItemsNavItem;

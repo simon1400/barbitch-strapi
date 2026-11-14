@@ -659,6 +659,15 @@ export interface ApiBannerBanner extends Struct.SingleTypeSchema {
     locale: Schema.Attribute.String;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::banner.banner'>;
     publishedAt: Schema.Attribute.DateTime;
+    subtitle: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 120;
+      }>;
     title: Schema.Attribute.String &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
@@ -866,6 +875,15 @@ export interface ApiBlogBlog extends Struct.CollectionTypeSchema {
         i18n: {
           localized: true;
         };
+      }>;
+    topic: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 30;
       }>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -1423,6 +1441,15 @@ export interface ApiContactContact extends Struct.SingleTypeSchema {
           localized: true;
         };
       }>;
+    howToGetThere: Schema.Attribute.Text &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 300;
+      }>;
     linkToMap: Schema.Attribute.String &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
@@ -1459,6 +1486,15 @@ export interface ApiContactContact extends Struct.SingleTypeSchema {
         i18n: {
           localized: true;
         };
+      }>;
+    openHoursShort: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
       }>;
     phone: Schema.Attribute.String &
       Schema.Attribute.Required &
@@ -1540,8 +1576,8 @@ export interface ApiCostFileCostFile extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     mime: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
-    size: Schema.Attribute.Integer;
     requestDocId: Schema.Attribute.String;
+    size: Schema.Attribute.Integer;
     storedName: Schema.Attribute.String & Schema.Attribute.Private;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -1775,6 +1811,15 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
     };
   };
   attributes: {
+    aboutTitle: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 80;
+      }>;
     aboutUs: Schema.Attribute.RichText &
       Schema.Attribute.CustomField<
         'plugin::ckeditor5.CKEditor',
@@ -1790,6 +1835,12 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    faq: Schema.Attribute.Component<'content.faq-item', true> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
     galery: Schema.Attribute.Media<'images' | 'videos', true> &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
@@ -1801,6 +1852,27 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
         i18n: {
           localized: true;
         };
+      }>;
+    heroImage: Schema.Attribute.Media<'images'> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    heroImageMobile: Schema.Attribute.Media<'images'> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
+    lead: Schema.Attribute.Text &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 200;
       }>;
     locale: Schema.Attribute.String;
     localizations: Schema.Attribute.Relation<
@@ -1814,6 +1886,24 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
         };
       }>;
     publishedAt: Schema.Attribute.DateTime;
+    seoTitle: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 90;
+      }>;
+    servicesTitle: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
     title: Schema.Attribute.String &
       Schema.Attribute.Required &
       Schema.Attribute.SetPluginOptions<{
@@ -1824,6 +1914,12 @@ export interface ApiHomepageHomepage extends Struct.SingleTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    whyItems: Schema.Attribute.Component<'content.why-item', true> &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }>;
   };
 }
 
@@ -2073,7 +2169,7 @@ export interface ApiOwnerTaskFileOwnerTaskFile
 export interface ApiOwnerTaskOwnerTask extends Struct.CollectionTypeSchema {
   collectionName: 'owner_tasks';
   info: {
-    description: '\u041F\u043E\u0440\u0443\u0447\u0435\u043D\u0438\u0435 \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u0443\u043F\u0440\u0430\u0432\u043B\u044F\u044E\u0449\u0435\u0439 (s240, \u00ABV\u00FDkaz pr\u00E1ce\u00BB \u0424\u0430\u0437\u0430 3). REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/tasks';
+    description: '\u041F\u043E\u0440\u0443\u0447\u0435\u043D\u0438\u0435 \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u0443\u043F\u0440\u0430\u0432\u043B\u044F\u044E\u0449\u0435\u0439 (s240, \u00ABV\u00FDkaz pr\u00E1ce\u00BB \u0424\u0430\u0437\u0430 3); s246 \u2014 \u0438 \u0437\u0430\u0434\u0430\u0447\u0438 \u0443\u043F\u0440\u0430\u0432\u043B\u044F\u044E\u0449\u0435\u0439 \u0441\u0435\u0431\u0435/\u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0443 (assignee, createdByRole); s262 \u2014 \u0437\u0430\u0434\u0430\u0447\u0438 \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430\u043C (assignee administrator, personal \u043F\u0443\u0441\u0442 = \u0432\u0441\u0435\u043C); s265 \u2014 \u0437\u0430\u0434\u0430\u0447\u0438 \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u043A\u0438 \u043A\u043E\u043B\u043B\u0435\u0433\u0435 (createdByRole administrator), \u043F\u0435\u0440\u0435\u0434\u0430\u0447\u0430 (handover). REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/tasks';
     displayName: '\u00DAkol od majitele';
     pluralName: 'owner-tasks';
     singularName: 'owner-task';
@@ -2082,7 +2178,9 @@ export interface ApiOwnerTaskOwnerTask extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
-    assignee: Schema.Attribute.Enumeration<['manager', 'owner', 'administrator']> &
+    assignee: Schema.Attribute.Enumeration<
+      ['manager', 'owner', 'administrator']
+    > &
       Schema.Attribute.DefaultTo<'manager'>;
     closedAt: Schema.Attribute.DateTime;
     closedBy: Schema.Attribute.String;
@@ -2209,6 +2307,13 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       'api::add-money.add-money'
     >;
     advances: Schema.Attribute.Relation<'oneToMany', 'api::avans.avans'>;
+    alsoMaster: Schema.Attribute.Boolean &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }> &
+      Schema.Attribute.DefaultTo<false>;
     bookingPriority: Schema.Attribute.Integer &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
@@ -2223,13 +2328,6 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
         };
       }> &
       Schema.Attribute.DefaultTo<0>;
-    alsoMaster: Schema.Attribute.Boolean &
-      Schema.Attribute.SetPluginOptions<{
-        i18n: {
-          localized: false;
-        };
-      }> &
-      Schema.Attribute.DefaultTo<false>;
     contracts: Schema.Attribute.Component<'items.contracts', true> &
       Schema.Attribute.SetPluginOptions<{
         i18n: {
@@ -2344,6 +2442,10 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
           localized: false;
         };
       }>;
+    publicNote: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
     publishedAt: Schema.Attribute.DateTime;
     ratePercent: Schema.Attribute.Integer &
       Schema.Attribute.SetPluginOptions<{
@@ -2362,6 +2464,7 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::salon-service.salon-service'
     >;
+    showOnHomepage: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     taxes: Schema.Attribute.Relation<'oneToMany', 'api::tax.tax'>;
     tier: Schema.Attribute.Enumeration<['senior', 'junior']> &
       Schema.Attribute.SetPluginOptions<{
@@ -2787,9 +2890,9 @@ export interface ApiServiceProvidedServiceProvided
       Schema.Attribute.Private;
     manualDeltaKc: Schema.Attribute.Integer;
     offer: Schema.Attribute.Relation<'manyToOne', 'api::offer.offer'>;
-    priceBasis: Schema.Attribute.Enumeration<['catalog', 'paid']>;
     personal: Schema.Attribute.Relation<'manyToOne', 'api::personal.personal'> &
       Schema.Attribute.Required;
+    priceBasis: Schema.Attribute.Enumeration<['catalog', 'paid']>;
     publishedAt: Schema.Attribute.DateTime;
     sale: Schema.Attribute.String;
     salonSalaries: Schema.Attribute.String & Schema.Attribute.Required;
@@ -2838,6 +2941,15 @@ export interface ApiServiceService extends Struct.CollectionTypeSchema {
         i18n: {
           localized: true;
         };
+      }>;
+    homeText: Schema.Attribute.Text &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: true;
+        };
+      }> &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 140;
       }>;
     locale: Schema.Attribute.String;
     localizations: Schema.Attribute.Relation<
@@ -3097,7 +3209,7 @@ export interface ApiStaffNoteStaffNote extends Struct.CollectionTypeSchema {
 export interface ApiStockItemStockItem extends Struct.CollectionTypeSchema {
   collectionName: 'stock_items';
   info: {
-    description: '\u041F\u043E\u0437\u0438\u0446\u0438\u044F \u0441\u043A\u043B\u0430\u0434\u0430 \u0440\u0430\u0441\u0445\u043E\u0434\u043D\u0438\u043A\u043E\u0432 (s251). REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/stock';
+    description: '\u041F\u043E\u0437\u0438\u0446\u0438\u044F \u0441\u043A\u043B\u0430\u0434\u0430 \u0440\u0430\u0441\u0445\u043E\u0434\u043D\u0438\u043A\u043E\u0432 (s251, \u00ABSklad \u2014 z\u00E1soby\u00BB \u0424\u0430\u0437\u0430 1). \u041E\u0441\u0442\u0430\u0442\u043E\u043A `qty` \u2014 \u0432 \u0431\u0430\u0437\u043E\u0432\u043E\u0439 \u0435\u0434\u0438\u043D\u0438\u0446\u0435 (`unit`), \u043C\u0438\u043D\u0438\u043C\u0443\u043C \u0438 target \u2014 \u0432 \u0443\u043F\u0430\u043A\u043E\u0432\u043A\u0430\u0445 (`packSize`). \u0421\u0442\u0430\u0442\u0443\u0441 \u043D\u0435 \u0445\u0440\u0430\u043D\u0438\u0442\u0441\u044F \u2014 \u0432\u044B\u0432\u043E\u0434\u0438\u0442\u0441\u044F \u0438\u0437 qty/min. REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/stock';
     displayName: 'Sklad \u2014 polo\u017Eka';
     pluralName: 'stock-items';
     singularName: 'stock-item';
@@ -3108,44 +3220,56 @@ export interface ApiStockItemStockItem extends Struct.CollectionTypeSchema {
   attributes: {
     active: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     category: Schema.Attribute.Enumeration<
-      ['hygiena', 'uklid', 'kuchyn', 'kancelar', 'jine', 'nehty', 'rasy', 'oboci']
+      [
+        'hygiena',
+        'uklid',
+        'kuchyn',
+        'kancelar',
+        'jine',
+        'nehty',
+        'rasy',
+        'oboci',
+      ]
     > &
       Schema.Attribute.DefaultTo<'jine'>;
     countEveryDays: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<7>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
     createdByName: Schema.Attribute.String;
     lastCountedAt: Schema.Attribute.DateTime;
     lastCountedBy: Schema.Attribute.String;
     lastPrice: Schema.Attribute.Decimal;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::stock-item.stock-item'
+    > &
+      Schema.Attribute.Private;
     location: Schema.Attribute.String;
     min: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     name: Schema.Attribute.String;
     note: Schema.Attribute.Text;
     notifiedStatus: Schema.Attribute.String;
     packSize: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<1>;
+    publishedAt: Schema.Attribute.DateTime;
     qty: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     supplier: Schema.Attribute.String;
     target: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     unit: Schema.Attribute.Enumeration<['ks', 'ml', 'g']> &
       Schema.Attribute.DefaultTo<'ks'>;
-    url: Schema.Attribute.String;
-    version: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<'oneToMany', 'api::stock-item.stock-item'> &
-      Schema.Attribute.Private;
-    publishedAt: Schema.Attribute.DateTime;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    url: Schema.Attribute.String;
+    version: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
   };
 }
 
 export interface ApiStockMoveStockMove extends Struct.CollectionTypeSchema {
   collectionName: 'stock_moves';
   info: {
-    description: '\u0416\u0443\u0440\u043D\u0430\u043B \u0434\u0432\u0438\u0436\u0435\u043D\u0438\u0439 \u0441\u043A\u043B\u0430\u0434\u0430 (s251). REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/stock';
+    description: '\u0416\u0443\u0440\u043D\u0430\u043B \u0434\u0432\u0438\u0436\u0435\u043D\u0438\u0439 \u0441\u043A\u043B\u0430\u0434\u0430 (s251): \u043F\u0435\u0440\u0435\u0441\u0447\u0451\u0442, \u043F\u0440\u0438\u0445\u043E\u0434, \u00ABdo\u0161lo/m\u00E1lo\u00BB. \u041A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u0430 \u2014 \u0432 \u0431\u0430\u0437\u043E\u0432\u043E\u0439 \u0435\u0434\u0438\u043D\u0438\u0446\u0435 \u043F\u043E\u0437\u0438\u0446\u0438\u0438, `packSize`/`unit` \u2014 \u0441\u043D\u0438\u043C\u043E\u043A \u043D\u0430 \u043C\u043E\u043C\u0435\u043D\u0442 \u0434\u0432\u0438\u0436\u0435\u043D\u0438\u044F. REST-\u0440\u043E\u0443\u0442\u043E\u0432 \u043D\u0435\u0442: \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0443\u0447\u043A\u0438 /engine/admin/stock';
     displayName: 'Sklad \u2014 pohyb';
     pluralName: 'stock-moves';
     singularName: 'stock-move';
@@ -3155,27 +3279,30 @@ export interface ApiStockMoveStockMove extends Struct.CollectionTypeSchema {
   };
   attributes: {
     by: Schema.Attribute.String;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
     delta: Schema.Attribute.Decimal;
     itemDocId: Schema.Attribute.String;
     itemName: Schema.Attribute.String;
     kind: Schema.Attribute.Enumeration<
       ['create', 'count', 'in', 'out', 'adjust']
     >;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::stock-move.stock-move'
+    > &
+      Schema.Attribute.Private;
     mode: Schema.Attribute.String;
     note: Schema.Attribute.Text;
     orderDocId: Schema.Attribute.String;
     packSize: Schema.Attribute.Integer;
+    publishedAt: Schema.Attribute.DateTime;
     qtyAfter: Schema.Attribute.Decimal;
     qtyBefore: Schema.Attribute.Decimal;
     role: Schema.Attribute.String;
     unit: Schema.Attribute.String;
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<'oneToMany', 'api::stock-move.stock-move'> &
-      Schema.Attribute.Private;
-    publishedAt: Schema.Attribute.DateTime;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -3349,6 +3476,53 @@ export interface ApiTimeOffTimeOff extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiUnsubscribeUnsubscribeLog
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'unsubscribe_logs';
+  info: {
+    description: '\u0416\u0443\u0440\u043D\u0430\u043B \u043E\u0442\u043F\u0438\u0441\u043E\u043A \u043E\u0442 \u043F\u0438\u0441\u0435\u043C \u043F\u043E \u0441\u0441\u044B\u043B\u043A\u0435 (s271): \u043A\u0442\u043E \u043E\u0442\u043F\u0438\u0441\u0430\u043B\u0441\u044F \u0438\u043B\u0438 \u0432\u0435\u0440\u043D\u0443\u043B\u0441\u044F, \u0447\u0435\u0440\u0435\u0437 \u0447\u0442\u043E (\u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430 / \u043A\u043D\u043E\u043F\u043A\u0430 \u043F\u043E\u0447\u0442\u043E\u0432\u0438\u043A\u0430), \u0438\u0437 \u043A\u0430\u043A\u043E\u0433\u043E \u043F\u0438\u0441\u044C\u043C\u0430 \u0438 \u043F\u043E\u0447\u0435\u043C\u0443. \u041F\u0438\u0448\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0441\u0435\u0440\u0432\u0435\u0440; REST \u2014 \u0442\u043E\u043B\u044C\u043A\u043E \u0447\u0442\u0435\u043D\u0438\u0435.';
+    displayName: 'Unsubscribe logs';
+    pluralName: 'unsubscribe-logs';
+    singularName: 'unsubscribe-log';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    action: Schema.Attribute.Enumeration<['unsubscribe', 'resubscribe']> &
+      Schema.Attribute.Required;
+    clientDocId: Schema.Attribute.String & Schema.Attribute.Required;
+    clientName: Schema.Attribute.String;
+    comment: Schema.Attribute.Text;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    email: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::unsubscribe.unsubscribe-log'
+    > &
+      Schema.Attribute.Private;
+    origin: Schema.Attribute.Enumeration<['comeback', 'review', 'campaign']>;
+    publishedAt: Schema.Attribute.DateTime;
+    reason: Schema.Attribute.Enumeration<
+      [
+        'too_often',
+        'not_interested',
+        'not_coming',
+        'other_salon',
+        'never_signed',
+        'other',
+      ]
+    >;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    via: Schema.Attribute.Enumeration<['link', 'one_click']>;
+  };
+}
+
 export interface ApiUpsellAttemptUpsellAttempt
   extends Struct.CollectionTypeSchema {
   collectionName: 'upsell_attempts';
@@ -3415,45 +3589,6 @@ export interface ApiVaucherPageVaucherPage extends Struct.SingleTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-  };
-}
-
-export interface ApiUnsubscribeUnsubscribeLog extends Struct.CollectionTypeSchema {
-  collectionName: 'unsubscribe_logs';
-  info: {
-    description: '\u0416\u0443\u0440\u043D\u0430\u043B \u043E\u0442\u043F\u0438\u0441\u043E\u043A (s271)';
-    displayName: 'Unsubscribe logs';
-    pluralName: 'unsubscribe-logs';
-    singularName: 'unsubscribe-log';
-  };
-  options: {
-    draftAndPublish: false;
-  };
-  attributes: {
-    action: Schema.Attribute.Enumeration<['unsubscribe', 'resubscribe']> &
-      Schema.Attribute.Required;
-    clientDocId: Schema.Attribute.String & Schema.Attribute.Required;
-    clientName: Schema.Attribute.String;
-    comment: Schema.Attribute.Text;
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    email: Schema.Attribute.String;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::unsubscribe.unsubscribe-log'
-    > &
-      Schema.Attribute.Private;
-    origin: Schema.Attribute.Enumeration<['comeback', 'review', 'campaign']>;
-    publishedAt: Schema.Attribute.DateTime;
-    reason: Schema.Attribute.Enumeration<
-      ['too_often', 'not_interested', 'not_coming', 'other_salon', 'never_signed', 'other']
-    >;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    via: Schema.Attribute.Enumeration<['link', 'one_click']>;
   };
 }
 
@@ -4217,9 +4352,9 @@ declare module '@strapi/strapi' {
       'api::tax.tax': ApiTaxTax;
       'api::time-block.time-block': ApiTimeBlockTimeBlock;
       'api::time-off.time-off': ApiTimeOffTimeOff;
+      'api::unsubscribe.unsubscribe-log': ApiUnsubscribeUnsubscribeLog;
       'api::upsell-attempt.upsell-attempt': ApiUpsellAttemptUpsellAttempt;
       'api::vaucher-page.vaucher-page': ApiVaucherPageVaucherPage;
-      'api::unsubscribe.unsubscribe-log': ApiUnsubscribeUnsubscribeLog;
       'api::voucher.voucher': ApiVoucherVoucher;
       'api::work-report.work-report': ApiWorkReportWorkReport;
       'api::work-time.work-time': ApiWorkTimeWorkTime;

@@ -74,6 +74,15 @@
         "content.faq"
       ],
       "required": true
+    },
+    "topic": {
+      "type": "string",
+      "maxLength": 30,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     }
   }
 }

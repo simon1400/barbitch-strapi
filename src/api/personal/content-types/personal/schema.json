@@ -285,6 +285,14 @@
           "localized": false
         }
       }
+    },
+    "showOnHomepage": {
+      "type": "boolean",
+      "default": true
+    },
+    "publicNote": {
+      "type": "string",
+      "maxLength": 60
     }
   }
 }

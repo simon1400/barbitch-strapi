@@ -81,6 +81,15 @@
         "content.text",
         "content.price-list"
       ]
+    },
+    "homeText": {
+      "type": "text",
+      "maxLength": 140,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     }
   }
 }

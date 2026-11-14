@@ -89,6 +89,7 @@ const tasksSvc = () => strapi.service('api::booking-engine.owner-tasks');
 const stockSvc = () => strapi.service('api::booking-engine.stock');
 const stockOrdersSvc = () => strapi.service('api::booking-engine.stock-orders');
 const smenaSvc = () => strapi.service('api::booking-engine.smena');
+const homeSvc = () => strapi.service('api::booking-engine.home');
 
 // personal.documentId сотрудника сессии: по связи учётки, без связи — по имени (s229, §5а.1)
 const resolveSessionPersonalDocId = async (session) =>
@@ -121,6 +122,21 @@ export default {
     await handle(ctx, () =>
       svc().publicServiceEmployees(ctx.params.id, ctx.query.variant || null, parseModifiers(ctx.query.modifiers))
     );
+  },
+
+  // GET /api/engine/home/popular-services?limit=4 — «Nejoblíbenější služby» на главной (s286)
+  async homePopularServices(ctx) {
+    await handle(ctx, () => homeSvc().popularServices(ctx.query.limit));
+  },
+
+  // GET /api/engine/home/service-prices — минимальные цены «od» трёх услуг сайта (s286)
+  async homeServicePrices(ctx) {
+    await handle(ctx, () => homeSvc().servicePrices());
+  },
+
+  // GET /api/engine/home/team — мастера для «Náš tým» (s286): имя, фото, подпись
+  async homeTeam(ctx) {
+    await handle(ctx, () => homeSvc().team());
   },
 
   // GET /api/engine/availability?service=&variant=&modifiers=a,b&employee=id|any&from=&to=

@@ -22,6 +22,10 @@ export default {
     pub('GET', '/engine/services/:id', 'booking-engine.getService'),
     pub('GET', '/engine/services/:id/employees', 'booking-engine.listServiceEmployees'),
     pub('GET', '/engine/availability', 'booking-engine.availability'),
+    // главная сайта (s286): популярные услуги, цены «od», команда — только чтение, без личных данных
+    pub('GET', '/engine/home/popular-services', 'booking-engine.homePopularServices'),
+    pub('GET', '/engine/home/service-prices', 'booking-engine.homeServicePrices'),
+    pub('GET', '/engine/home/team', 'booking-engine.homeTeam'),
     pub('POST', '/engine/holds', 'booking-engine.createHold'),
     pub('GET', '/engine/holds/:id', 'booking-engine.getHold'),
     pub('POST', '/engine/bookings', 'booking-engine.createBooking'),

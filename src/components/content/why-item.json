@@ -1,0 +1,28 @@
+{
+  "collectionName": "components_content_why_items",
+  "info": {
+    "displayName": "Proč Barbitch — páska",
+    "icon": "heart",
+    "description": "Jedna růžová páska v sekci „Proč Barbitch“ na hlavní stránce: nadpis, krátký text a volitelný odkaz (text odkazu + adresa, např. /bitchcard)."
+  },
+  "options": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxLength": 40
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "linkLabel": {
+      "type": "string",
+      "maxLength": 30
+    },
+    "linkUrl": {
+      "type": "string",
+      "maxLength": 200
+    }
+  }
+}

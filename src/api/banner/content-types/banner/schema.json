@@ -70,6 +70,15 @@
           "localized": true
         }
       }
+    },
+    "subtitle": {
+      "type": "string",
+      "maxLength": 120,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
     }
   }
 }
