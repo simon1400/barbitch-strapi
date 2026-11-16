@@ -62,6 +62,27 @@ export interface ContentAskAnswer extends Struct.ComponentSchema {
   };
 }
 
+export interface ContentBlogAuthor extends Struct.ComponentSchema {
+  collectionName: 'components_content_blog_authors';
+  info: {
+    description: 'Kdo \u010Dl\u00E1nek napsal: jm\u00E9no a role (nap\u0159. Zlata, nail artist), voliteln\u011B fotka. Na webu: \u201EZlata, nail artist\u201C v \u0159\u00E1dku s datem a autor (Person) ve schema.org. Pr\u00E1zdn\u00E9 = Barbitch Beauty Studio.';
+    displayName: 'Autor \u010Dl\u00E1nku';
+    icon: 'user';
+  };
+  attributes: {
+    name: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+    photo: Schema.Attribute.Media<'images'>;
+    role: Schema.Attribute.String &
+      Schema.Attribute.SetMinMaxLength<{
+        maxLength: 60;
+      }>;
+  };
+}
+
 export interface ContentContentBaner extends Struct.ComponentSchema {
   collectionName: 'components_content_content_baners';
   info: {
@@ -398,6 +419,7 @@ declare module '@strapi/strapi' {
       'booking.service-restriction': BookingServiceRestriction;
       'booking.service-variant': BookingServiceVariant;
       'content.ask-answer': ContentAskAnswer;
+      'content.blog-author': ContentBlogAuthor;
       'content.content-baner': ContentContentBaner;
       'content.faq': ContentFaq;
       'content.faq-item': ContentFaqItem;

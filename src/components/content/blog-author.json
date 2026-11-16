@@ -1,0 +1,28 @@
+{
+  "collectionName": "components_content_blog_authors",
+  "info": {
+    "displayName": "Autor článku",
+    "icon": "user",
+    "description": "Kdo článek napsal: jméno a role (např. Zlata, nail artist), volitelně fotka. Na webu: „Zlata, nail artist“ v řádku s datem a autor (Person) ve schema.org. Prázdné = Barbitch Beauty Studio."
+  },
+  "options": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true,
+      "maxLength": 60
+    },
+    "role": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "photo": {
+      "type": "media",
+      "multiple": false,
+      "required": false,
+      "allowedTypes": [
+        "images"
+      ]
+    }
+  }
+}

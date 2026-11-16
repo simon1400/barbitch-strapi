@@ -75,9 +75,47 @@
       ],
       "required": true
     },
+    "date": {
+      "type": "date",
+      "required": true,
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
     "topic": {
-      "type": "string",
-      "maxLength": 30,
+      "type": "enumeration",
+      "enum": [
+        "manikura",
+        "rasy",
+        "oboci",
+        "sezona"
+      ],
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "season": {
+      "type": "enumeration",
+      "enum": [
+        "jaro",
+        "podzim",
+        "zima"
+      ],
+      "pluginOptions": {
+        "i18n": {
+          "localized": true
+        }
+      }
+    },
+    "author": {
+      "type": "component",
+      "component": "content.blog-author",
+      "repeatable": false,
+      "required": false,
       "pluginOptions": {
         "i18n": {
           "localized": true
