@@ -894,6 +894,16 @@ export default {
     await handle(ctx, () => reportsSvc().list({ month: ctx.query?.month, personal: ctx.query?.personal }));
   },
 
+  // GET /api/engine/admin/work-reports/hours?from=&to= — часы поданных отчётов и отпуска
+  // управляющих для зарплаты (s294). Руководство: «Зарплаты» и итог месяца видят owner
+  // и manager; текста отчётов в ответе нет.
+  async adminWorkReportsHours(ctx) {
+    const session = requireManagement(ctx);
+    if (!session) return;
+    ctx.set('Cache-Control', 'no-store');
+    await handle(ctx, () => reportsSvc().payHours({ from: ctx.query?.from, to: ctx.query?.to }));
+  },
+
   // GET /api/engine/admin/work-reports/attention — «Сегодня» владельца
   async adminWorkReportsAttention(ctx) {
     const session = requireOwner(ctx);

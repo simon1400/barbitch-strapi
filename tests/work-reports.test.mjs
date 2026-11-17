@@ -839,3 +839,63 @@ test('s252 Systém zaznamenal: «inventura neprovedena» (запись сист�
   assert.deepEqual(g.actions.map((a) => a.label).sort(), ['inventura neprovedena', 'spočítáno']);
   assert.deepEqual(W.SYSTEM_FACT_ACTIONS, ['stock_inventory_missed']);
 });
+
+// ── s294: часы к оплате управляющей ───────────────────────────────────────────
+
+test('s294 payHours: только поданные дневные отчёты (часы как написаны), отпуска с «paid», без текста отчётов', async () => {
+  const s = fresh();
+  const rep = (personalDocId, date, extra) =>
+    s.rows[REPORT].push({ id: idSeq++, documentId: `rep${String(docSeq++).padStart(21, '0')}`, personalDocId, date, kind: 'day', done: 'SECRET-DONE', ...extra });
+  rep(MARIIA, '2026-11-02', { status: 'submitted', hours: '8.00' });
+  rep(MARIIA, '2026-11-03', { status: 'submitted', hours: '3.50' });
+  rep(MARIIA, '2026-11-04', { status: 'day_off', dayOffReason: 'other', hours: null });
+  rep(MARIIA, '2026-11-05', { status: 'submitted', hours: '10.00' });
+  rep(MARIIA, '2026-10-30', { status: 'submitted', hours: '8.00' }); // вне диапазона
+  rep(MARIIA, '2026-11-06', { status: 'submitted', hours: '6.00', kind: 'week' }); // недельный — не день
+  rep(KARINA, '2026-11-02', { status: 'submitted', hours: '8.00' }); // не управляющая
+  s.rows[TIME_OFF].push(
+    { id: 1, documentId: 'to1', personalDocId: MARIIA, type: 'vacation', startDate: '2026-11-09', endDate: '2026-11-10', paid: true },
+    { id: 2, documentId: 'to2', personalDocId: MARIIA, type: 'sick', startDate: '2026-10-28', endDate: '2026-11-01', paid: false },
+    { id: 3, documentId: 'to3', personalDocId: MARIIA, type: 'vacation', startDate: '2026-12-01', endDate: '2026-12-02', paid: true }, // вне
+  );
+  const res = await svc.payHours({ from: '2026-11-01', to: '2026-11-30' });
+  assert.deepEqual([res.from, res.to], ['2026-11-01', '2026-11-30']);
+  assert.deepEqual(res.people.map((p) => p.name), ['Anna Stará', 'Mariia Medvedeva']);
+  const m = res.people.find((p) => p.documentId === MARIIA);
+  assert.deepEqual(m.days, [
+    { date: '2026-11-02', hours: 8 },
+    { date: '2026-11-03', hours: 3.5 },
+    { date: '2026-11-05', hours: 10 },
+  ]);
+  assert.equal(m.timeOffs.length, 2);
+  assert.deepEqual(m.timeOffs.find((t) => t.type === 'vacation'), { type: 'vacation', startDate: '2026-11-09', endDate: '2026-11-10', paid: true });
+  assert.equal(m.timeOffs.find((t) => t.type === 'sick').paid, false);
+  assert.equal(JSON.stringify(res).includes('SECRET'), false, 'текст отчёта в ответ не попадает');
+});
+
+test('s294 payHours: проверка диапазона', async () => {
+  fresh();
+  const code = async (from, to) => {
+    try {
+      await svc.payHours({ from, to });
+      return 'ok';
+    } catch (e) {
+      return e.code;
+    }
+  };
+  assert.equal(await code('2026-11', '2026-11-30'), 'bad_date');
+  assert.equal(await code('2026-11-30', '2026-11-01'), 'bad_range');
+  assert.equal(await code('2025-01-01', '2026-11-30'), 'range_too_long');
+  assert.equal(await code('2026-11-01', '2026-11-30'), 'ok');
+  assert.deepEqual(W.submittedHoursByDay([{ date: '2026-11-02', status: 'submitted', hours: '0' }, { date: '2026-11-02', status: 'submitted', hours: 'x' }]), []);
+  assert.deepEqual(W.submittedHoursByDay([{ date: '2026-11-02', status: 'submitted', hours: 4 }, { date: '2026-11-02', status: 'submitted', hours: 6 }]), [{ date: '2026-11-02', hours: 6 }]);
+});
+
+test('s294 ручка часов — руководство (owner + manager), GET', () => {
+  const routes = read('src/api/booking-engine/routes/booking-engine.ts');
+  const ctrl = read('src/api/booking-engine/controllers/booking-engine.ts');
+  assert.ok(routes.includes(`admin('GET', '/engine/admin/work-reports/hours', 'booking-engine.adminWorkReportsHours')`));
+  const body = ctrl.split('async adminWorkReportsHours(ctx) {')[1]?.split('\n  },')[0] || '';
+  assert.ok(body.includes('const session = requireManagement(ctx);'));
+  assert.ok(body.includes('reportsSvc().payHours('));
+});

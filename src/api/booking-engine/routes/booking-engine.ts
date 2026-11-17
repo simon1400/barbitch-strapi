@@ -119,6 +119,7 @@ export default {
     admin('PUT', '/engine/admin/work-reports/mine/:date', 'booking-engine.adminWorkReportSave'),
     admin('POST', '/engine/admin/work-reports/mine/:date/comments', 'booking-engine.adminWorkReportComment'),
     admin('GET', '/engine/admin/work-reports/attention', 'booking-engine.adminWorkReportsAttention'),
+    admin('GET', '/engine/admin/work-reports/hours', 'booking-engine.adminWorkReportsHours'),
     admin('GET', '/engine/admin/work-reports', 'booking-engine.adminWorkReportsList'),
     admin('POST', '/engine/admin/work-reports/:id/review', 'booking-engine.adminWorkReportReview'),
     admin('POST', '/engine/admin/shift-close/journal', 'booking-engine.adminShiftCloseJournal'),

@@ -262,6 +262,41 @@ export const monthRange = (raw: unknown): { from: string; to: string } => {
   return { from: `${s}-01`, to: `${s}-${String(last).padStart(2, '0')}` };
 };
 
+/** Самый длинный диапазон для `/work-reports/hours` (месяц, неделя или свой период обзора). */
+export const PAY_HOURS_MAX_DAYS = 370;
+
+/**
+ * Диапазон для «часов к оплате» (s294): from/to — YYYY-MM-DD, from ≤ to, не длиннее
+ * PAY_HOURS_MAX_DAYS дней.
+ */
+export const payHoursRange = (rawFrom: unknown, rawTo: unknown): { from: string; to: string } => {
+  const from = String(rawFrom ?? '').trim();
+  const to = String(rawTo ?? '').trim();
+  if (!isValidYmd(from) || !isValidYmd(to)) throw new ReportError(400, 'bad_date', 'Datum ve formátu RRRR-MM-DD');
+  if (from > to) throw new ReportError(400, 'bad_range', 'Začátek je po konci');
+  if (datesBetween(from, to).length > PAY_HOURS_MAX_DAYS) throw new ReportError(400, 'range_too_long', `Nejvýš ${PAY_HOURS_MAX_DAYS} dní`);
+  return { from, to };
+};
+
+/**
+ * Часы к оплате из отчётов (s294): только поданные дневные отчёты (`status: submitted`),
+ * «volno» и черновиков в базе нет. Часы — как написала автор (решение владельца 17.11).
+ * Два отчёта на один день (не должно быть) — берётся больший.
+ */
+export const submittedHoursByDay = (reports: any[]): { date: string; hours: number }[] => {
+  const byDay = new Map<string, number>();
+  for (const r of reports || []) {
+    if (r?.kind && r.kind !== 'day') continue;
+    if (r?.status !== 'submitted') continue;
+    const date = String(r.date ?? '').slice(0, 10);
+    if (!isValidYmd(date)) continue;
+    const h = Number(r.hours);
+    if (!Number.isFinite(h) || h <= 0) continue;
+    byDay.set(date, Math.max(byDay.get(date) ?? 0, h));
+  }
+  return [...byDay.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, hours]) => ({ date, hours }));
+};
+
 /** «01.10.2026». */
 export const fmtDay = (ymd: unknown): string => {
   const s = String(ymd ?? '');
@@ -992,6 +1027,41 @@ export default {
       datum: fmtDay(existing.date),
     });
     return { saved: toRow(saved) };
+  },
+
+  /**
+   * GET /work-reports/hours?from=&to= — сырьё для зарплаты управляющей (s294): по каждой
+   * карточке `position: manager` — часы поданных отчётов по дням и отпуска/больничные,
+   * задевающие диапазон (с галочкой «оплачивается»). Деньги считает админка
+   * (`managerPay.ts`): там оклад, фонд рабочих дней и правила месяца. Текста отчётов нет.
+   */
+  async payHours({ from: rawFrom, to: rawTo }: { from?: unknown; to?: unknown }) {
+    const { from, to } = payHoursRange(rawFrom, rawTo);
+    const people = await this._people();
+    const out = [];
+    for (const p of people) {
+      const [reports, timeOffs] = await Promise.all([
+        this._reports(p.documentId, from, to),
+        strapi.documents(TIME_OFF_UID).findMany({
+          filters: { personal: { documentId: { $eq: p.documentId } }, startDate: { $lte: to }, endDate: { $gte: from } },
+          fields: ['type', 'startDate', 'endDate', 'paid'],
+          sort: [{ startDate: 'asc' }],
+          limit: 200,
+        }),
+      ]);
+      out.push({
+        documentId: p.documentId,
+        name: p.name,
+        days: submittedHoursByDay(reports),
+        timeOffs: timeOffs.map((t) => ({
+          type: t.type,
+          startDate: String(t.startDate ?? '').slice(0, 10),
+          endDate: String(t.endDate ?? '').slice(0, 10),
+          paid: t.paid !== false,
+        })),
+      });
+    }
+    return { from, to, people: out };
   },
 
   /**
