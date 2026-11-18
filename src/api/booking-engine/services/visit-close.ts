@@ -18,6 +18,7 @@
 
 import { minToHHMM, utcToPragueMinClamped } from './slots-core';
 import { EngineError } from './booking-engine';
+import { validUntilOf, voucherValidUntilYmd } from './voucher-payments-core';
 import {
   asPriceBasis,
   bookingPricing,
@@ -345,8 +346,12 @@ export default {
     return { flags, manualDeltaKc, priceBasis: manualDeltaKc < 0 ? asPriceBasis(priceBasis) : null };
   },
 
-  /** Ваучер должен быть оплачен и ещё не реализован (тот же фильтр, что в relation-picker). */
-  async _resolveVoucher(voucherDocId) {
+  /**
+   * Ваучер должен быть оплачен, не возвращён, не использован другим визитом и действовать
+   * на день визита. `dateRealized` ставится только при закрытии смены, поэтому занятость
+   * проверяется ещё и по записям закрытия. Просроченный может провести только руководство.
+   */
+  async _resolveVoucher(voucherDocId, { visitDate = '', session = null, spDocId = null } = {}) {
     if (!voucherDocId) return null;
     const v = await strapi.documents(VOUCHER_UID).findOne({
       documentId: voucherDocId,
@@ -356,6 +361,29 @@ export default {
     // s275: peníze za voucher vráceny (Comgate) — voucher už neplatí
     if (v.paymentStatus === 'refunded') throw new EngineError(409, 'voucher_refunded', 'Za voucher byly vráceny peníze — už neplatí');
     if (!v.datePay) throw new EngineError(409, 'voucher_not_paid', 'Voucher není zaplacený');
+
+    const links = await strapi.documents(SP_UID).findMany({
+      filters: { voucher: { documentId: { $eq: voucherDocId } } },
+      status: 'draft',
+      fields: ['date'],
+      limit: 5,
+    });
+    // Правка уже закрытого визита: ваучер и так на этой записи, сохранение не должно падать
+    if (spDocId && links.some((l) => l.documentId === spDocId)) return v.documentId;
+    if (v.dateRealized || links.length) {
+      const used = String(links[0]?.date || v.dateRealized || '').slice(0, 10);
+      const when = used ? ` (${used.split('-').reverse().join('.')})` : '';
+      throw new EngineError(409, 'voucher_used', `Voucher už byl použitý na jiné návštěvě${when}`);
+    }
+
+    const management = session?.role === 'owner' || session?.role === 'manager';
+    if (!management && visitDate && visitDate > voucherValidUntilYmd(String(v.datePay))) {
+      throw new EngineError(
+        409,
+        'voucher_expired',
+        `Platnost voucheru skončila ${validUntilOf(String(v.datePay))}. Uplatnit ho může jen vedení salonu.`
+      );
+    }
     return v.documentId;
   },
 
@@ -424,7 +452,7 @@ export default {
     if (existing) throw new EngineError(409, 'already_checked_out', 'Návštěva už je uzavřená');
 
     this._validateMoney(body);
-    const voucherDocId = await this._resolveVoucher(body.voucherDocId);
+    const voucherDocId = await this._resolveVoucher(body.voucherDocId, { visitDate: String(booking.date), session });
 
     // галка приходит из формы уже предзаполненной из брони (hint.internal), но
     // последнее слово за админом: если в теле её нет вовсе — берём признак брони
@@ -598,7 +626,9 @@ export default {
     if ('cash' in body) data.cash = body.cash !== false;
     if ('comment' in body) data.comment = orNull(body.comment);
     if ('voucherDocId' in body) {
-      data.voucher = body.voucherDocId ? rel(await this._resolveVoucher(body.voucherDocId)) : null;
+      data.voucher = body.voucherDocId
+        ? rel(await this._resolveVoucher(body.voucherDocId, { visitDate: String(booking.date), session, spDocId }))
+        : null;
     }
     // Автостроки переноса в комментарии не теряем, даже если форма прислала
     // комментарий без них; при смене base старая строка заменяется новой.

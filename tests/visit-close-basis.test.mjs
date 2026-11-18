@@ -33,6 +33,7 @@ const engineUrl = dataUrl(
 let js = transpile('api/booking-engine/services/visit-close.ts');
 js = swap(js, './slots-core', dataUrl(transpile('api/booking-engine/services/slots-core.ts')));
 js = swap(js, './booking-engine', engineUrl);
+js = swap(js, './voucher-payments-core', dataUrl(transpile('api/booking-engine/services/voucher-payments-core.ts')));
 js = swap(js, '../../../utils/verify-flags', vfUrl);
 js = swap(js, './korekce-transfer', ktUrl);
 const vc = (await import(dataUrl(js))).default;

@@ -139,6 +139,8 @@ test('предикаты запросов на месте', () => {
   assert.ok(code.includes("draftsByDay('services_provided'), draftsByDay('work_times')"));
   // ваучеры: только опубликованные и нереализованные
   assert.ok(code.includes(".whereNotNull('published_at')\n        .whereNull('date_realized')"));
+  // возвращённые не показываем, старые ваучеры без статуса (NULL) не теряем
+  assert.ok(code.includes(".where((q) => q.whereNull('payment_status').orWhereNot('payment_status', 'refunded'))"));
   // ничего не пишет
   assert.ok(!/\.(update|insert|del|delete)\(/.test(code), 'сервис только читает');
 });

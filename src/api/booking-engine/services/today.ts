@@ -232,6 +232,8 @@ export default {
       knex('vouchers')
         .whereNotNull('published_at')
         .whereNull('date_realized')
+        // возвращённый ваучер (Comgate) больше не действует; NULL = старые ваучеры без статуса
+        .where((q) => q.whereNull('payment_status').orWhereNot('payment_status', 'refunded'))
         .select(
           'document_id as documentId',
           'id_voucher as idVoucher',

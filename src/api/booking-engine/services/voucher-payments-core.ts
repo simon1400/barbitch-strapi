@@ -210,15 +210,32 @@ export const refundBody = (payment: StoredPayment) => ({
   refId: payment.idVoucher,
 });
 
-/** Platnost voucheru „dd.MM.yyyy“ — 6 měsíců od dne platby (stejně jako PDF na webu). */
+/** Poslední den platnosti „YYYY-MM-DD“ — 6 měsíců od dne platby (stejně jako PDF na webu). */
 export const VOUCHER_VALID_MONTHS = 6;
-export const validUntilOf = (ymd: string) => {
-  const [y, m, d] = ymd.split('-').map(Number);
+export const voucherValidUntilYmd = (ymd: string) => {
+  const [y, m, d] = ymd.slice(0, 10).split('-').map(Number);
   const target = new Date(Date.UTC(y, m - 1 + VOUCHER_VALID_MONTHS, 1));
   const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
   const day = Math.min(d, lastDay);
-  return `${String(day).padStart(2, '0')}.${String(target.getUTCMonth() + 1).padStart(2, '0')}.${target.getUTCFullYear()}`;
+  return `${target.getUTCFullYear()}-${String(target.getUTCMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 };
+/** Totéž pro e-mail a hlášky: „dd.MM.yyyy“. */
+export const validUntilOf = (ymd: string) => voucherValidUntilYmd(ymd).split('-').reverse().join('.');
+
+const escTg = (v: unknown) =>
+  String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** Zpráva do Telegramu salonu po zaplacení. Jména píše zákazník, proto se escapují (parse_mode HTML). */
+export const voucherPaidTelegram = (
+  p: { idVoucher: string; price: number; serviceName?: string | null; buyerName?: string | null; forName?: string | null; test?: boolean },
+  validUntil: string
+) =>
+  [
+    `🎁 <b>Nový voucher zaplacen</b>${p.test ? ' · 🧪 TEST' : ''}`,
+    `💳 <b>${p.price.toLocaleString('cs-CZ')} Kč</b> · ${p.serviceName ? escTg(p.serviceName) : 'voucher na částku'}`,
+    `👤 ${escTg(p.buyerName || '—')} → ${escTg(p.forName || '—')}`,
+    `🎟 № ${escTg(p.idVoucher)} · platí do ${escTg(validUntil)}`,
+  ].join('\n');
 
 /** Co vidí stránka výsledku (bez osobních údajů kromě zamaskovaného e-mailu). */
 export const publicStatus = (p: { paymentStatus: PaymentStatus; price: number; catalogId: string }, maskedEmail: string) => ({

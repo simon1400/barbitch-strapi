@@ -39,6 +39,7 @@ import {
   refundBody,
   statusVerdict,
   validUntilOf,
+  voucherPaidTelegram,
 } from './voucher-payments-core';
 
 export class VoucherPaymentError extends Error {
@@ -259,6 +260,7 @@ export default {
         const won = await this._claim(p.id, 'paid', { paidAt: new Date(), method: verdict.method, failReason: null });
         if (!won) return p;
         strapi.log.info(`voucher-payments: ZAPLACENO ${p.transId} · voucher ${p.idVoucher} · ${p.price} Kč`);
+        void this._notifyPaid(p, today);
         await this._sendVoucherMail(p, today);
       } else if (to === 'cancelled') {
         const won = await this._claim(p.id, 'cancelled', {
@@ -290,6 +292,15 @@ export default {
     } catch (e) {
       strapi.log.error(`voucher-payments: e-mail k voucheru ${p.idVoucher} neodešel — ${e.message}`);
       await strapi.db.query(UID).update({ where: { id: p.id }, data: { mailError: String(e.message).slice(0, 500) } });
+    }
+  },
+
+  /** Telegram salonu (kanál rezervací). Běží mimo platbu: jeho chyba nesmí zastavit voucher ani e-mail. */
+  async _notifyPaid(p, payYmd: string) {
+    try {
+      await strapi.service('api::booking-engine.booking-notify').sendTelegram(voucherPaidTelegram(p, validUntilOf(payYmd)));
+    } catch (e) {
+      strapi.log.error(`voucher-payments: Telegram k voucheru ${p.idVoucher} neodešel — ${e.message}`);
     }
   },
 

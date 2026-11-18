@@ -167,3 +167,18 @@ test('schema: platba nemá atribut `status` (ve Strapi 5 vyhrazený, panel ho uk
   assert.equal(schema.attributes.status, undefined);
   assert.deepEqual(schema.attributes.paymentStatus.enum, ['pending', 'paid', 'cancelled', 'refunded']);
 });
+
+test('Telegram o zaplacení: částka, služba, jména, číslo a platnost; jména se escapují', () => {
+  const msg = core.voucherPaidTelegram(
+    { idVoucher: '12345678', price: 990, serviceName: 'Lash lifting', buyerName: 'Eva <b>&', forName: 'Jana', test: false },
+    '18.05.2027'
+  );
+  assert.match(msg, /Nový voucher zaplacen/);
+  assert.match(msg, /990 Kč<\/b> · Lash lifting/);
+  assert.ok(msg.includes('Eva &lt;b&gt;&amp; → Jana'));
+  assert.ok(msg.includes('№ 12345678 · platí do 18.05.2027'));
+  assert.ok(!msg.includes('TEST'));
+  const amount = core.voucherPaidTelegram({ idVoucher: '1', price: 1000, test: true }, '01.01.2027');
+  assert.match(amount, /voucher na částku/);
+  assert.match(amount, /🧪 TEST/);
+});
