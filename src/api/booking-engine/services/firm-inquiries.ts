@@ -106,7 +106,7 @@ export default {
     const created = await strapi.documents(UID).create({
       data: {
         ...data,
-        status: 'new',
+        inquiryStatus: 'new',
         ...(logo ? { logoName: logo.name, logoMime: logo.type.mime, logoSize: logo.size, logoStoredName: storedName } : {}),
       },
     });

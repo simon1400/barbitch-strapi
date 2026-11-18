@@ -40,7 +40,7 @@
     "note": {
       "type": "text"
     },
-    "status": {
+    "inquiryStatus": {
       "type": "enumeration",
       "enum": ["new", "contacted", "offer", "won", "lost"],
       "default": "new",

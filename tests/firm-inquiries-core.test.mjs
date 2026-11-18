@@ -50,9 +50,9 @@ test('dlouhé texty se oříznou na limity', () => {
 });
 
 test('úprava z adminu: jen známý stav a poznámka; nic platného → null', () => {
-  assert.deepEqual(checkUpdate({ status: 'offer' }), { status: 'offer' });
+  assert.deepEqual(checkUpdate({ status: 'offer' }), { inquiryStatus: 'offer' });
   assert.deepEqual(checkUpdate({ adminNote: '  voláno ' }), { adminNote: 'voláno' });
-  assert.deepEqual(checkUpdate({ status: 'won', adminNote: '' }), { status: 'won', adminNote: '' });
+  assert.deepEqual(checkUpdate({ status: 'won', adminNote: '' }), { inquiryStatus: 'won', adminNote: '' });
   assert.equal(checkUpdate({ status: 'hacked' }), null);
   assert.equal(checkUpdate({ company: 'X' }), null);
   assert.equal(checkUpdate(undefined), null);
@@ -61,7 +61,7 @@ test('úprava z adminu: jen známý stav a poznámka; nic platného → null', (
 
 test('řádek pro admin: bez storedName, neznámý stav → new, logo jen když je', () => {
   const row = inquiryRow({
-    documentId: 'abc', company: 'ACME', count: '20', status: 'weird',
+    documentId: 'abc', company: 'ACME', count: '20', inquiryStatus: 'weird',
     logoName: 'logo.png', logoMime: 'image/png', logoSize: 1234, logoStoredName: 'f'.repeat(32),
   });
   assert.equal(row.id, 'abc');
@@ -70,6 +70,9 @@ test('řádek pro admin: bez storedName, neznámý stav → new, logo jen když 
   assert.deepEqual(row.logo, { name: 'logo.png', mime: 'image/png', size: 1234 });
   assert.equal(JSON.stringify(row).includes('f'.repeat(32)), false);
   assert.equal(inquiryRow({ documentId: 'x' }).logo, null);
+  const won = inquiryRow({ documentId: 'y', inquiryStatus: 'won' });
+  assert.equal(won.status, 'won');
+  assert.equal('inquiryStatus' in won, false);
 });
 
 test('e-maily: HTML z formuláře se escapuje, předmět s firmou a počtem', () => {

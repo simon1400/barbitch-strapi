@@ -1832,6 +1832,11 @@ export interface ApiFirmInquiryFirmInquiry extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     email: Schema.Attribute.Email & Schema.Attribute.Required;
     ico: Schema.Attribute.String;
+    inquiryStatus: Schema.Attribute.Enumeration<
+      ['new', 'contacted', 'offer', 'won', 'lost']
+    > &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'new'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1846,11 +1851,6 @@ export interface ApiFirmInquiryFirmInquiry extends Struct.CollectionTypeSchema {
     person: Schema.Attribute.String & Schema.Attribute.Required;
     phone: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
-    status: Schema.Attribute.Enumeration<
-      ['new', 'contacted', 'offer', 'won', 'lost']
-    > &
-      Schema.Attribute.Required &
-      Schema.Attribute.DefaultTo<'new'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;

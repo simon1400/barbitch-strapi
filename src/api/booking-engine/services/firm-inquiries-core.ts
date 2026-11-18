@@ -78,15 +78,19 @@ export const checkInquiry = (body: Record<string, unknown> | null | undefined): 
   return { ok: true, data };
 };
 
-/** Úprava z adminu: jen stav a interní poznámka. `null` = nic platného ke změně. */
+/**
+ * Úprava z adminu: jen stav a interní poznámka. `null` = nic platného ke změně.
+ * Admin posílá `status`, v kolekci je atribut `inquiryStatus` (`status` je ve Strapi 5
+ * vyhrazené jméno a panel by pole ukazoval prázdné).
+ */
 export const checkUpdate = (
   body: Record<string, unknown> | null | undefined
-): { status?: InquiryStatus; adminNote?: string } | null => {
+): { inquiryStatus?: InquiryStatus; adminNote?: string } | null => {
   const b = body || {};
-  const out: { status?: InquiryStatus; adminNote?: string } = {};
+  const out: { inquiryStatus?: InquiryStatus; adminNote?: string } = {};
   if (b.status !== undefined) {
     if (!STATUSES.includes(b.status as InquiryStatus)) return null;
-    out.status = b.status as InquiryStatus;
+    out.inquiryStatus = b.status as InquiryStatus;
   }
   if (b.adminNote !== undefined) out.adminNote = clip(b.adminNote, LIMITS.adminNote);
   return Object.keys(out).length ? out : null;
@@ -105,7 +109,7 @@ export const inquiryRow = (r: any) => ({
   phone: r.phone || '',
   email: r.email || '',
   note: r.note || '',
-  status: (STATUSES.includes(r.status) ? r.status : 'new') as InquiryStatus,
+  status: (STATUSES.includes(r.inquiryStatus) ? r.inquiryStatus : 'new') as InquiryStatus,
   adminNote: r.adminNote || '',
   updatedByName: r.updatedByName || '',
   logo: r.logoName ? { name: r.logoName, mime: r.logoMime || '', size: Number(r.logoSize) || 0 } : null,
