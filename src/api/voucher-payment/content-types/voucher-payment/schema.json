@@ -23,7 +23,7 @@
       "unique": true,
       "private": true
     },
-    "status": {
+    "paymentStatus": {
       "type": "enumeration",
       "enum": ["pending", "paid", "cancelled", "refunded"],
       "default": "pending",

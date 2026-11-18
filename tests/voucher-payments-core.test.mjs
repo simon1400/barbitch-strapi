@@ -26,7 +26,7 @@ const {
 const catalog = buildCatalog([{ id: 'sluzba-abc', name: 'Gel lak manikúra', price: 990 }]);
 const form = { voucherId: 'castka-1000', forName: ' Anna ', fromName: 'Petra  Nová', email: 'petra@example.cz', consent: true };
 const cfg = { merchant: '123456', secret: 's3cr3t', test: true, apiUrl: 'https://payments.comgate.cz' };
-const payment = { transId: 'AB12-CD34-EF56', idVoucher: '12345678', price: 1000, status: 'pending', test: true };
+const payment = { transId: 'AB12-CD34-EF56', idVoucher: '12345678', price: 1000, paymentStatus: 'pending', test: true };
 const okStatus = { code: 0, transId: 'AB12-CD34-EF56', refId: '12345678', curr: 'CZK', price: '100000', test: 'true', status: 'PAID', method: 'CARD_CZ_COMGATE' };
 
 test('konstanty sedí s webem (client/src/lib/vouchers.ts)', () => {
@@ -138,16 +138,16 @@ test('push: náš merchant a secret, jinak odmítnout', () => {
 
 test('vypršení: pending po 24 h 15 min', () => {
   const now = new Date('2026-10-25T12:00:00Z');
-  assert.equal(isExpired({ status: 'pending', createdAt: '2026-10-24T11:50:00Z' }, now), false);
-  assert.equal(isExpired({ status: 'pending', createdAt: '2026-10-24T11:40:00Z' }, now), true);
-  assert.equal(isExpired({ status: 'paid', createdAt: '2026-10-01T00:00:00Z' }, now), false);
+  assert.equal(isExpired({ paymentStatus: 'pending', createdAt: '2026-10-24T11:50:00Z' }, now), false);
+  assert.equal(isExpired({ paymentStatus: 'pending', createdAt: '2026-10-24T11:40:00Z' }, now), true);
+  assert.equal(isExpired({ paymentStatus: 'paid', createdAt: '2026-10-01T00:00:00Z' }, now), false);
 });
 
 test('vrácení: jen zaplacené a nevyužité, celá částka v haléřích', () => {
-  assert.equal(refundBlock({ status: 'paid' }, { dateRealized: null }), null);
-  assert.equal(refundBlock({ status: 'paid' }, { dateRealized: '2026-11-02' }), 'voucher_used');
-  assert.equal(refundBlock({ status: 'pending' }, null), 'not_paid');
-  assert.equal(refundBlock({ status: 'refunded' }, null), 'already_refunded');
+  assert.equal(refundBlock({ paymentStatus: 'paid' }, { dateRealized: null }), null);
+  assert.equal(refundBlock({ paymentStatus: 'paid' }, { dateRealized: '2026-11-02' }), 'voucher_used');
+  assert.equal(refundBlock({ paymentStatus: 'pending' }, null), 'not_paid');
+  assert.equal(refundBlock({ paymentStatus: 'refunded' }, null), 'already_refunded');
   assert.deepEqual(refundBody(payment), { transId: 'AB12-CD34-EF56', amount: 100000, test: true, refId: '12345678' });
 });
 
@@ -158,6 +158,12 @@ test('platnost 6 měsíců, konec měsíce jako date-fns addMonths', () => {
 });
 
 test('stav pro stránku výsledku: e-mail jen po zaplacení', () => {
-  assert.deepEqual(publicStatus({ status: 'pending', price: 990, catalogId: 'sluzba-abc' }, 'pe•••@example.cz'), { status: 'pending', price: 990, voucherId: 'sluzba-abc', email: null });
-  assert.equal(publicStatus({ status: 'paid', price: 990, catalogId: 'x' }, 'pe•••@example.cz').email, 'pe•••@example.cz');
+  assert.deepEqual(publicStatus({ paymentStatus: 'pending', price: 990, catalogId: 'sluzba-abc' }, 'pe•••@example.cz'), { status: 'pending', price: 990, voucherId: 'sluzba-abc', email: null });
+  assert.equal(publicStatus({ paymentStatus: 'paid', price: 990, catalogId: 'x' }, 'pe•••@example.cz').email, 'pe•••@example.cz');
+});
+
+test('schema: platba nemá atribut `status` (ve Strapi 5 vyhrazený, panel ho ukazuje prázdný)', () => {
+  const schema = JSON.parse(fs.readFileSync(new URL('../src/api/voucher-payment/content-types/voucher-payment/schema.json', import.meta.url), 'utf8'));
+  assert.equal(schema.attributes.status, undefined);
+  assert.deepEqual(schema.attributes.paymentStatus.enum, ['pending', 'paid', 'cancelled', 'refunded']);
 });

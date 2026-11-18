@@ -138,7 +138,7 @@ export default {
   async _claim(id: number, to: string, data: any) {
     const res = await strapi.db
       .query(UID)
-      .updateMany({ where: { id, status: { $in: fromStatusesFor(to) } }, data: { ...data, status: to } });
+      .updateMany({ where: { id, paymentStatus: { $in: fromStatusesFor(to) } }, data: { ...data, paymentStatus: to } });
     return Boolean(res?.count);
   },
 
@@ -179,7 +179,7 @@ export default {
     const payment = await strapi.documents(UID).create({
       data: {
         token,
-        status: 'pending',
+        paymentStatus: 'pending',
         voucherDocId: voucher.documentId,
         idVoucher,
         catalogId: item.id,
@@ -218,7 +218,7 @@ export default {
       strapi.log.error(`voucher-payments: Comgate nezaložil platbu ${idVoucher} — ${failure}`);
       await strapi.db.query(UID).update({
         where: { id: payment.id },
-        data: { status: 'cancelled', cancelledAt: new Date(), failReason: `create: ${failure}`.slice(0, 250) },
+        data: { paymentStatus: 'cancelled', cancelledAt: new Date(), failReason: `create: ${failure}`.slice(0, 250) },
       });
       await this._updateVoucher(voucher.documentId, { paymentStatus: 'cancelled' }, false).catch(() => {});
       throw new VoucherPaymentError(502, 'gateway_unavailable', 'Platební bránu se nepodařilo otevřít, zkuste to prosím za chvíli');
@@ -249,7 +249,7 @@ export default {
         return { ...p, failReason: `mismatch: ${verdict.reason}` };
       }
       await strapi.db.query(UID).update({ where: { id: p.id }, data: { checkedAt: new Date() } });
-      const to = nextStatus(p.status, verdict);
+      const to = nextStatus(p.paymentStatus, verdict);
       if (!to) return p;
 
       if (to === 'paid') {
@@ -317,7 +317,7 @@ export default {
     let p = await strapi.db.query(UID).findOne({ where: { token } });
     if (!p) throw new VoucherPaymentError(404, 'not_found', 'Objednávka nenalezena');
     const stale = !p.checkedAt || Date.now() - new Date(p.checkedAt).getTime() > RECHECK_MS;
-    if (p.status === 'pending' && p.transId && stale && comgateConfig(process.env)) {
+    if (p.paymentStatus === 'pending' && p.transId && stale && comgateConfig(process.env)) {
       try {
         p = (await this.settle(p.id)) || p;
       } catch (e) {
@@ -334,13 +334,13 @@ export default {
     const cutoff = new Date(now.getTime() - 24 * 3600_000);
     const rows = await strapi.db
       .query(UID)
-      .findMany({ where: { status: 'pending', createdAt: { $lt: cutoff } }, orderBy: { id: 'asc' }, limit: 50 });
+      .findMany({ where: { paymentStatus: 'pending', createdAt: { $lt: cutoff } }, orderBy: { id: 'asc' }, limit: 50 });
     let cancelled = 0;
     for (const row of rows) {
       if (!isExpired(row, now)) continue;
       try {
         const after = row.transId ? await this.settle(row.id) : row;
-        if (after?.status !== 'pending') continue;
+        if (after?.paymentStatus !== 'pending') continue;
         // Nesedí s Comgate — nerušit sami, ať to vedení zkontroluje v portálu.
         if (String(after.failReason || '').startsWith('mismatch')) continue;
         if (row.transId) {
@@ -389,7 +389,7 @@ export default {
         email: r.email,
         buyerName: r.buyerName,
         forName: r.forName,
-        status: r.status,
+        status: r.paymentStatus,
         method: r.method || null,
         test: Boolean(r.test),
         createdAt: r.createdAt,

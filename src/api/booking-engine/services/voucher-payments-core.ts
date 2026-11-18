@@ -125,7 +125,8 @@ export interface StoredPayment {
   transId: string;
   idVoucher: string;
   price: number;
-  status: PaymentStatus;
+  /** Ne `status`: ve Strapi 5 je to vyhrazené jméno stavu dokumentu a panel pole neukáže. */
+  paymentStatus: PaymentStatus;
   test: boolean;
 }
 
@@ -189,14 +190,14 @@ export const checkPush = (body: any, cfg: ComgateConfig): { ok: true; transId: s
 };
 
 /** Vypršelá neuhrazená objednávka (cron): pending a starší než 24 h + 15 min rezerva. */
-export const isExpired = (payment: { status: PaymentStatus; createdAt: string | Date }, now: Date) =>
-  payment.status === 'pending' &&
+export const isExpired = (payment: { paymentStatus: PaymentStatus; createdAt: string | Date }, now: Date) =>
+  payment.paymentStatus === 'pending' &&
   now.getTime() - new Date(payment.createdAt).getTime() > PAYMENT_EXPIRATION_HOURS * 3600_000 + 15 * 60_000;
 
 /** Vrácení peněz z adminu: jen zaplacená platba a voucher ještě nevyužitý. */
-export const refundBlock = (payment: { status: PaymentStatus }, voucher: { dateRealized?: string | null } | null) => {
-  if (payment.status === 'refunded') return 'already_refunded';
-  if (payment.status !== 'paid') return 'not_paid';
+export const refundBlock = (payment: { paymentStatus: PaymentStatus }, voucher: { dateRealized?: string | null } | null) => {
+  if (payment.paymentStatus === 'refunded') return 'already_refunded';
+  if (payment.paymentStatus !== 'paid') return 'not_paid';
   if (voucher?.dateRealized) return 'voucher_used';
   return null;
 };
@@ -220,9 +221,9 @@ export const validUntilOf = (ymd: string) => {
 };
 
 /** Co vidí stránka výsledku (bez osobních údajů kromě zamaskovaného e-mailu). */
-export const publicStatus = (p: { status: PaymentStatus; price: number; catalogId: string }, maskedEmail: string) => ({
-  status: p.status,
+export const publicStatus = (p: { paymentStatus: PaymentStatus; price: number; catalogId: string }, maskedEmail: string) => ({
+  status: p.paymentStatus,
   price: p.price,
   voucherId: p.catalogId,
-  email: p.status === 'paid' ? maskedEmail : null,
+  email: p.paymentStatus === 'paid' ? maskedEmail : null,
 });

@@ -3700,7 +3700,7 @@ export interface ApiVoucherPaymentVoucherPayment
     refundedAt: Schema.Attribute.DateTime;
     refundedBy: Schema.Attribute.String;
     serviceName: Schema.Attribute.String;
-    status: Schema.Attribute.Enumeration<
+    paymentStatus: Schema.Attribute.Enumeration<
       ['pending', 'paid', 'cancelled', 'refunded']
     > &
       Schema.Attribute.Required &
