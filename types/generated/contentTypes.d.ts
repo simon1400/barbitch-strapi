@@ -2452,6 +2452,12 @@ export interface ApiPersonalPersonal extends Struct.CollectionTypeSchema {
           localized: false;
         };
       }>;
+    managerUntil: Schema.Attribute.String &
+      Schema.Attribute.SetPluginOptions<{
+        i18n: {
+          localized: false;
+        };
+      }>;
     money: Schema.Attribute.Relation<'oneToMany', 'api::cash.cash'>;
     name: Schema.Attribute.String &
       Schema.Attribute.Required &

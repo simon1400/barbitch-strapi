@@ -259,6 +259,15 @@
       },
       "regex": "^\\d{4}-(0[1-9]|1[0-2])$"
     },
+    "managerUntil": {
+      "type": "string",
+      "pluginOptions": {
+        "i18n": {
+          "localized": false
+        }
+      },
+      "regex": "^\\d{4}-(0[1-9]|1[0-2])$"
+    },
     "alsoMaster": {
       "type": "boolean",
       "pluginOptions": {

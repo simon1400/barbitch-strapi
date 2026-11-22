@@ -708,13 +708,13 @@ test('запись и оплата: приоритет только мастер
   }
   await expectErr(() => svc.patch({ session: MANAGER, id: P.dima, body: { section: 'pay', base: 'x', data: { ratePercent: 1 } }, now: NOW }), 404, 'staff_not_found');
   // s229 §5а.2: зарплатная группа — в карточке, обе версии, журнал
-  assert.deepEqual(pay.pay.group, { dualRole: false, dualRoleUntil: null, managerSince: null });
+  assert.deepEqual(pay.pay.group, { dualRole: false, dualRoleUntil: null, managerSince: null, managerUntil: null });
   const g = await svc.patch({ session: OWNER, id: P.veronika, body: { section: 'pay', base: pay.updatedAt, data: { dualRole: true, dualRoleUntil: '2026-06' } }, now: NOW });
-  assert.deepEqual(g.pay.group, { dualRole: true, dualRoleUntil: '2026-06', managerSince: null });
+  assert.deepEqual(g.pay.group, { dualRole: true, dualRoleUntil: '2026-06', managerSince: null, managerUntil: null });
   for (const v of [st.draft(P.veronika), st.pub(P.veronika)]) assert.deepEqual([v.dualRole, v.dualRoleUntil], ['yes', '2026-06']);
   assert.equal(st.logs.at(-1).summary, 'Mzdové podmínky upraveny: Veronika · souběh mistr + administrátor: ne → ano · souběh do: — → 2026-06');
   const off = await svc.patch({ session: OWNER, id: P.veronika, body: { section: 'pay', base: g.updatedAt, data: { dualRole: false } }, now: NOW });
-  assert.deepEqual(off.pay.group, { dualRole: false, dualRoleUntil: null, managerSince: null });
+  assert.deepEqual(off.pay.group, { dualRole: false, dualRoleUntil: null, managerSince: null, managerUntil: null });
   assert.deepEqual([st.pub(P.veronika).dualRole, st.pub(P.veronika).dualRoleUntil], [null, null], 'снятие — обе версии, «до» вместе с признаком');
   await expectErr(() => svc.patch({ session: OWNER, id: P.veronika, body: { section: 'pay', base: off.updatedAt, data: { managerSince: '2026-10' } }, now: NOW }), 409, 'not_manager');
   const m = await svc.patch({ session: OWNER, id: P.mariia, body: { section: 'pay', base: st.draft(P.mariia).updatedAt, data: { managerSince: '2026-10' } }, now: NOW });
@@ -929,11 +929,11 @@ test('s229 §5а.2: зарплатная группа в секции «Опла
   // карточка читает поля группы (заглушка базы отдаёт всё — поэтому проверка по исходнику)
   const svcSrc = fs.readFileSync(path.join(root, 'src/api/booking-engine/services/staff.ts'), 'utf8');
   const cardFields = /const CARD_FIELDS = \[([\s\S]*?)\];/.exec(svcSrc)?.[1] || '';
-  for (const f of ['dualRole', 'dualRoleUntil', 'managerSince']) assert.ok(cardFields.includes(`'${f}'`), `CARD_FIELDS без ${f}`);
+  for (const f of ['dualRole', 'dualRoleUntil', 'managerSince', 'managerUntil']) assert.ok(cardFields.includes(`'${f}'`), `CARD_FIELDS без ${f}`);
   assert.equal(S.isNameLocked, undefined);
   const mgr = { position: 'manager', dualRole: 'yes', dualRoleUntil: '2026-06', managerSince: null };
-  assert.deepEqual(S.payrollGroupOf(mgr), { dualRole: true, dualRoleUntil: '2026-06', managerSince: null });
-  assert.deepEqual(S.payrollGroupOf({ dualRole: 'no', dualRoleUntil: '2026-13', managerSince: 'x' }), { dualRole: false, dualRoleUntil: null, managerSince: null });
+  assert.deepEqual(S.payrollGroupOf(mgr), { dualRole: true, dualRoleUntil: '2026-06', managerSince: null, managerUntil: null });
+  assert.deepEqual(S.payrollGroupOf({ dualRole: 'no', dualRoleUntil: '2026-13', managerSince: 'x' }), { dualRole: false, dualRoleUntil: null, managerSince: null, managerUntil: null });
   // управляющая с месяца
   let r = S.normalizePay({ managerSince: '2026-10' }, mgr);
   assert.deepEqual(r.patch, { managerSince: '2026-10' });
@@ -959,6 +959,20 @@ test('s229 §5а.2: зарплатная группа в секции «Опла
   bad({ name: 'x' }, mgr, 'bad_field');
   // снять «управляющая с» можно при любой должности
   assert.deepEqual(S.normalizePay({ managerSince: '' }, { position: 'master', managerSince: '2026-10' }).patch, { managerSince: null });
+  // «управляющая по» (роль упразднена): последний месяц включительно, при любой должности
+  const exMgr = { position: 'master', managerSince: '2026-10' };
+  r = S.normalizePay({ managerUntil: '2026-10' }, exMgr);
+  assert.deepEqual(r.patch, { managerUntil: '2026-10' });
+  assert.deepEqual(S.changeParts(r.changes), ['vedoucí do: — → 2026-10']);
+  assert.deepEqual(S.payrollGroupOf({ ...exMgr, managerUntil: '2026-10' }), { dualRole: false, dualRoleUntil: null, managerSince: '2026-10', managerUntil: '2026-10' });
+  assert.equal(S.payrollGroupOf({ managerUntil: '2026-10' }).managerUntil, null, '«по» без «с» не читается');
+  bad({ managerUntil: '2026-09' }, exMgr, 'bad_month');
+  bad({ managerUntil: '2026-10' }, { position: 'master' }, 'bad_month');
+  bad({ managerUntil: '2026-13' }, exMgr, 'bad_month');
+  bad({ managerSince: '2026-12' }, { position: 'manager', managerSince: '2026-10', managerUntil: '2026-11' }, 'bad_month');
+  // снять «с» — «по» снимается вместе с ним
+  assert.deepEqual(S.normalizePay({ managerSince: '' }, { ...exMgr, managerUntil: '2026-10' }).patch, { managerSince: null, managerUntil: null });
+  assert.deepEqual(S.normalizePay({ managerUntil: '' }, { ...exMgr, managerUntil: '2026-10' }).patch, { managerUntil: null });
 });
 
 test('normalizeCreate: обязательны имя и должность; доля — только мастеру; ставка — с текущего месяца', () => {

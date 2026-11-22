@@ -404,23 +404,29 @@ export const normalizeYm = (raw: unknown, code: string, label: string): string |
 /**
  * Зарплатная группа карточки (s229, §5а.2) — раньше списки DUAL_ROLE_WORKERS / MANAGERS
  * в коде админки (teamSplit.ts), по имени. Значения в базе: `dualRole` 'yes' | null,
- * `dualRoleUntil` / `managerSince` 'YYYY-MM' | null.
+ * `dualRoleUntil` / `managerSince` / `managerUntil` 'YYYY-MM' | null.
+ * `managerUntil` — последний месяц управляющей включительно (пусто — по сей день): после
+ * него человек считается обычным мастером/администратором, прошлые месяцы не меняются.
  */
-export const payrollGroupOf = (doc: any) => ({
-  dualRole: doc?.dualRole === 'yes',
-  dualRoleUntil: YM_RE.test(String(doc?.dualRoleUntil ?? '')) ? doc.dualRoleUntil : null,
-  managerSince: YM_RE.test(String(doc?.managerSince ?? '')) ? doc.managerSince : null,
-});
+export const payrollGroupOf = (doc: any) => {
+  const managerSince = YM_RE.test(String(doc?.managerSince ?? '')) ? doc.managerSince : null;
+  return {
+    dualRole: doc?.dualRole === 'yes',
+    dualRoleUntil: YM_RE.test(String(doc?.dualRoleUntil ?? '')) ? doc.dualRoleUntil : null,
+    managerSince,
+    managerUntil: managerSince && YM_RE.test(String(doc?.managerUntil ?? '')) ? doc.managerUntil : null,
+  };
+};
 
 /**
  * Секция «Оплата»: доля мастера и порог + зарплатная группа (s229). Ставки — только
  * «новая с даты» (planNewRate).
  * 🟥 Группа меняет расчёт зарплат всех месяцев, где она действует (совместитель — до
- * `dualRoleUntil` включительно, управляющая — с `managerSince`): админка предупреждает
+ * `dualRoleUntil` включительно, управляющая — с `managerSince` по `managerUntil`): админка предупреждает
  * и сбрасывает кэш месяцев.
  */
 export const normalizePay = (data: any, current: any) => {
-  const keys = onlyKeys(data, ['ratePercent', 'excessThreshold', 'dualRole', 'dualRoleUntil', 'managerSince']);
+  const keys = onlyKeys(data, ['ratePercent', 'excessThreshold', 'dualRole', 'dualRoleUntil', 'managerSince', 'managerUntil']);
   const patch: Record<string, any> = {};
   if (keys.includes('ratePercent')) patch.ratePercent = intIn(data.ratePercent, 0, 100, 'bad_percent', 'Доля мастера, %');
   if (keys.includes('excessThreshold')) {
@@ -446,9 +452,23 @@ export const normalizePay = (data: any, current: any) => {
       throw new StaffError(409, 'not_manager', 'Оклад управляющей — только у должности «управляющая»');
     }
   }
+  // «Управляющая по» — без «с» не бывает; задать можно и после смены должности (роль упразднена)
+  if (keys.includes('managerUntil')) patch.managerUntil = normalizeYm(data.managerUntil, 'bad_month', 'Управляющая по');
+  const sinceAfter = hasOwn(patch, 'managerSince') ? patch.managerSince : group.managerSince;
+  if (!sinceAfter) {
+    if (hasOwn(patch, 'managerUntil') && patch.managerUntil) {
+      throw new StaffError(400, 'bad_month', '«Управляющая по» — только вместе с «Управляющая с»');
+    }
+    if (group.managerUntil) patch.managerUntil = null;
+  } else {
+    const untilAfter = hasOwn(patch, 'managerUntil') ? patch.managerUntil : group.managerUntil;
+    if (untilAfter && untilAfter < sinceAfter) {
+      throw new StaffError(400, 'bad_month', '«Управляющая по» не может быть раньше «Управляющая с»');
+    }
+  }
   const before = (k: string) => {
     if (k === 'dualRole') return group.dualRole ? 'yes' : null;
-    if (k === 'dualRoleUntil' || k === 'managerSince') return group[k];
+    if (k === 'dualRoleUntil' || k === 'managerSince' || k === 'managerUntil') return group[k];
     return current?.[k] ?? null;
   };
   const changes = Object.keys(patch)
@@ -884,6 +904,7 @@ const FIELD_CS = {
   dualRole: 'souběh mistr + administrátor',
   dualRoleUntil: 'souběh do',
   managerSince: 'vedoucí od',
+  managerUntil: 'vedoucí do',
   alsoMaster: 'pracuje i jako mistrová',
 };
 const showValue = (key: string, v: any) => {
@@ -1171,6 +1192,7 @@ const CARD_FIELDS = [
   'dualRole',
   'dualRoleUntil',
   'managerSince',
+  'managerUntil',
   'onboarding',
   'updatedAt',
 ];
