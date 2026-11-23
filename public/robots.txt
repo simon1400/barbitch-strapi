@@ -1,2 +1,7 @@
+# strapi.barbitch.cz je CMS, ne web. Z indexu ho drží hlavička
+# X-Robots-Tag: noindex, nofollow (src/middlewares/robots-noindex.ts).
+# „/“ a „/admin“ záměrně NEzakazujeme — robot musí stránku stáhnout, aby hlavičku
+# viděl (se zákazem Bing držel přihlášení v indexu jen podle adresy).
+# /api/ zakázané dál: robot by ubíral sdílený limit dotazů rezervace.
 User-Agent: *
-Disallow: /
+Disallow: /api/

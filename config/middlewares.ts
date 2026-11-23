@@ -1,4 +1,7 @@
 export default () => [
+  // noindex pro celý strapi.barbitch.cz (src/middlewares/robots-noindex.ts) — první,
+  // aby hlavičku dostala každá odpověď včetně chyb.
+  'global::robots-noindex',
   'strapi::logger',
   'strapi::errors',
   {
